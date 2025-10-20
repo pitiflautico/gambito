@@ -25,12 +25,16 @@ Crear una aplicación completa con tres componentes principales:
 
 ### Estado Actual
 - ✅ Proyecto Laravel 11 instalado y configurado
-- ✅ Base de datos MySQL configurada
-- ✅ Panel de administración Filament implementado
+- ✅ Base de datos MySQL configurada (groupsgames)
+- ✅ **Sistema de autenticación completo con Laravel Breeze**
 - ✅ Sistema de usuarios con roles (admin/user)
-- ✅ CRUD de usuarios en Filament
+- ✅ **Panel de administración Filament completamente funcional**
+- ✅ **CRUD completo de usuarios en Filament (español)**
+- ✅ **Middleware de protección para rutas admin**
+- ✅ **Redirección inteligente por rol al login**
 - ✅ Layout base frontend con Tailwind CSS
 - ✅ Página de inicio pública
+- ✅ Configuración Herd con HTTPS (gambito.test)
 
 ---
 
@@ -51,22 +55,56 @@ Gambito/
 #### 1. Backend Laravel
 - **Framework**: Laravel 11
 - **Base de datos**: MySQL (database: groupsgames)
-- **Autenticación**: Laravel Auth con roles
+- **Autenticación**: Laravel Breeze (Blade stack)
+- **Sistema de roles**: Admin / User con middleware de protección
+- **URL Local**: https://gambito.test (Herd con HTTPS)
 
 #### 2. Panel de Administración (Filament)
 - **Ruta**: `/admin`
+- **Protección**: Middleware IsAdmin (solo accesible para admins)
+- **Idioma**: Completamente en español
 - **Recursos implementados**:
-  - UserResource (CRUD completo)
+  - **UserResource** - CRUD completo de usuarios
+    - Crear usuarios con hash de password
+    - Editar nombre, email, rol, contraseña
+    - Eliminar con confirmación
+    - Filtros por rol y verificación
+    - Búsqueda por nombre/email
+    - Email copiable
+    - Iconos de estado de verificación
 - **Características**:
-  - Gestión de usuarios
-  - Filtros por rol
-  - Badges para roles (admin/user)
+  - Sidebar con navegación
+  - Notificaciones de éxito personalizadas
+  - Redirección automática después de crear/editar
+  - Estados vacíos personalizados
+  - Badges de color para roles
 
-#### 3. Frontend Web
+#### 3. Sistema de Autenticación (Breeze)
+- **Rutas**:
+  - `/login` - Inicio de sesión
+  - `/register` - Registro de usuarios
+  - `/dashboard` - Dashboard usuarios normales
+  - `/profile` - Edición de perfil
+  - Recuperación de contraseña
+  - Verificación de email
+- **Características**:
+  - Redirección inteligente al login:
+    - Admins → `/admin`
+    - Usuarios → `/dashboard`
+  - Protección de rutas con middleware auth
+  - Sesiones seguras con CSRF
+
+#### 4. Frontend Web
 - **Framework CSS**: Tailwind CSS 4
-- **Layout**: `resources/views/layouts/app.blade.php`
+- **Layouts**:
+  - `layouts/guest-public.blade.php` - Página home pública
+  - `layouts/guest.blade.php` - Login/Register (Breeze)
+  - `layouts/app.blade.php` - Dashboard autenticado (Breeze)
+  - `layouts/navigation.blade.php` - Navegación Breeze
 - **Páginas**:
-  - Home (`/`) - Página de inicio pública
+  - Home (`/`) - Página de inicio pública con navegación dinámica
+  - Dashboard (`/dashboard`) - Para usuarios autenticados
+  - Perfil (`/profile`) - Gestión de perfil de usuario
 
 ---
 
@@ -75,20 +113,25 @@ Gambito/
 ### Backend
 - **PHP**: 8.3
 - **Framework**: Laravel 11
+- **Autenticación**: Laravel Breeze (Blade stack)
 - **Admin Panel**: Filament 3
 - **ORM**: Eloquent
-- **Base de datos**: MySQL/MariaDB
+- **Base de datos**: MySQL/MariaDB (groupsgames)
 
 ### Frontend
 - **CSS**: Tailwind CSS 4
 - **Templating**: Blade
 - **UI Components**: Livewire 3
 - **Build Tool**: Vite
+- **Fonts**: Figtree (vía Bunny Fonts)
 
 ### DevOps
 - **Servidor Local**: Laravel Herd
+- **Dominio Local**: gambito.test (HTTPS habilitado)
 - **Package Manager PHP**: Composer
 - **Package Manager JS**: NPM
+- **Git**: GitHub - pitiflautico/gambito
+- **Node**: v18.20.8 (funcional aunque requiere 20+)
 
 ---
 
@@ -127,6 +170,104 @@ class User extends Authenticatable
 
 ---
 
+## Rutas y Flujos de Usuario
+
+### Mapa de Rutas
+
+#### Rutas Públicas (sin autenticación)
+```
+GET  /                    → Home pública (resources/views/home.blade.php)
+GET  /login               → Formulario de login
+POST /login               → Procesar login
+GET  /register            → Formulario de registro
+POST /register            → Procesar registro
+GET  /forgot-password     → Recuperar contraseña
+POST /forgot-password     → Enviar email recuperación
+GET  /reset-password      → Formulario nueva contraseña
+POST /reset-password      → Establecer nueva contraseña
+```
+
+#### Rutas Autenticadas (requiere login)
+```
+GET  /dashboard           → Dashboard usuarios normales
+GET  /profile             → Ver/editar perfil
+PATCH /profile            → Actualizar perfil
+DELETE /profile           → Eliminar cuenta
+POST /logout              → Cerrar sesión
+```
+
+#### Rutas Admin (requiere rol admin)
+```
+GET  /admin               → Dashboard Filament
+GET  /admin/login         → Login específico de Filament
+GET  /admin/users         → Listado de usuarios
+GET  /admin/users/create  → Crear usuario
+POST /admin/users         → Guardar usuario
+GET  /admin/users/{id}/edit → Editar usuario
+PATCH /admin/users/{id}   → Actualizar usuario
+DELETE /admin/users/{id}  → Eliminar usuario
+```
+
+### Flujos de Usuario
+
+#### 1. Usuario Nuevo (Registro)
+```
+1. Visita https://gambito.test
+2. Click en "Registrarse"
+3. Completa formulario (nombre, email, password)
+4. Se crea con rol 'user' automáticamente
+5. Redirige a /dashboard
+```
+
+#### 2. Admin Login
+```
+1. Visita https://gambito.test/login
+2. Ingresa: admin@gambito.com / password
+3. Sistema detecta rol 'admin'
+4. Redirige automáticamente a /admin (Panel Filament)
+5. Ve sidebar con Dashboard y Usuarios
+```
+
+#### 3. Usuario Normal Login
+```
+1. Visita https://gambito.test/login
+2. Ingresa credenciales de usuario normal
+3. Sistema detecta rol 'user'
+4. Redirige a /dashboard (Breeze)
+5. NO puede acceder a /admin (error 403)
+```
+
+#### 4. Gestión de Usuarios (Admin)
+```
+1. Login como admin
+2. En sidebar, click en "Usuarios"
+3. Ve listado completo con filtros
+4. Puede:
+   - Crear nuevo usuario (botón "Nuevo Usuario")
+   - Editar usuario existente (botón editar en fila)
+   - Eliminar usuario (requiere confirmación)
+   - Buscar por nombre o email
+   - Filtrar por rol o estado de verificación
+   - Copiar email con un click
+```
+
+### Protección de Rutas
+
+**Middleware aplicado:**
+- `auth` - Rutas que requieren autenticación
+- `guest` - Solo para no autenticados (login, register)
+- `admin` - Solo para usuarios con rol admin (rutas /admin)
+- `verified` - Email verificado (opcional, configurado en rutas)
+
+**Archivo:** `app/Http/Middleware/IsAdmin.php`
+```php
+// Verifica autenticación
+// Verifica rol admin
+// Redirige o lanza error 403
+```
+
+---
+
 ## Convenciones
 
 ### Código
@@ -155,22 +296,28 @@ class User extends Authenticatable
 ## Roadmap
 
 ### Fase 1: Base del Proyecto ✅ (Completada)
-- [x] Instalación Laravel
-- [x] Configuración base de datos
-- [x] Instalación Filament
-- [x] Sistema de usuarios con roles
-- [x] CRUD usuarios en Filament
-- [x] Tailwind CSS configurado
-- [x] Layout base frontend
-- [x] Seeders iniciales
-- [x] Repositorio Git configurado
+- [x] Instalación Laravel 11 con PHP 8.3
+- [x] Configuración base de datos MySQL (groupsgames)
+- [x] Instalación y configuración Filament 3
+- [x] Sistema de usuarios con roles (admin/user)
+- [x] CRUD completo de usuarios en Filament (español)
+- [x] Tailwind CSS 4 configurado
+- [x] Layouts frontend (público, auth, dashboard)
+- [x] Seeders con usuarios de prueba
+- [x] Repositorio Git configurado y subido a GitHub
+- [x] **Sistema de autenticación con Laravel Breeze**
+- [x] **Login, registro, recuperación de contraseña**
+- [x] **Middleware de protección para rutas admin**
+- [x] **Redirección inteligente por rol**
+- [x] **Configuración Herd con HTTPS (gambito.test)**
+- [x] **Panel admin completamente funcional en español**
 
 ### Fase 2: Funcionalidades Core (Próximo)
-- [ ] Sistema de autenticación completo (login/register)
 - [ ] Gestión de grupos
 - [ ] Gestión de juegos
 - [ ] Relaciones entre usuarios, grupos y juegos
 - [ ] Dashboard con estadísticas básicas
+- [ ] Resources de Filament para grupos y juegos
 
 ### Fase 3: Características Avanzadas
 - [ ] Sistema de notificaciones
@@ -197,12 +344,39 @@ class User extends Authenticatable
 
 ### Archivos Clave
 ```
-app/Models/User.php                               # Modelo principal
-app/Filament/Resources/Users/UserResource.php    # Resource Filament
-resources/views/layouts/app.blade.php            # Layout principal
-routes/web.php                                    # Rutas web
-database/seeders/DatabaseSeeder.php              # Datos iniciales
-.env                                              # Configuración
+# Modelos
+app/Models/User.php                                      # Modelo User con roles
+
+# Filament (Panel Admin)
+app/Filament/Resources/UserResource.php                  # Resource principal
+app/Filament/Resources/Users/Pages/ListUsers.php        # Listado
+app/Filament/Resources/Users/Pages/CreateUser.php       # Crear
+app/Filament/Resources/Users/Pages/EditUser.php         # Editar
+app/Filament/Resources/Users/Schemas/UserForm.php       # Formulario
+app/Filament/Resources/Users/Tables/UsersTable.php      # Tabla
+app/Providers/Filament/AdminPanelProvider.php           # Config Filament
+
+# Autenticación (Breeze)
+app/Http/Controllers/Auth/*                              # Controladores auth
+app/Http/Controllers/ProfileController.php               # Perfil usuario
+app/Http/Middleware/IsAdmin.php                          # Middleware admin
+routes/auth.php                                          # Rutas de autenticación
+
+# Vistas
+resources/views/layouts/guest-public.blade.php           # Layout home pública
+resources/views/layouts/guest.blade.php                  # Layout login/register
+resources/views/layouts/app.blade.php                    # Layout dashboard
+resources/views/home.blade.php                           # Página home
+resources/views/dashboard.blade.php                      # Dashboard usuarios
+resources/views/auth/*                                   # Vistas autenticación
+resources/views/profile/*                                # Vistas perfil
+
+# Configuración
+routes/web.php                                           # Rutas web
+bootstrap/app.php                                        # Bootstrap Laravel
+database/seeders/DatabaseSeeder.php                      # Datos iniciales
+database/migrations/*                                    # Migraciones
+.env                                                     # Configuración
 ```
 
 ### Credenciales
@@ -213,22 +387,36 @@ database/seeders/DatabaseSeeder.php              # Datos iniciales
 ### Comandos Útiles
 ```bash
 # Desarrollo
-php artisan serve          # Servidor local
-npm run dev               # Compilar assets
+php artisan serve          # Servidor local (alternativa a Herd)
+npm run dev               # Compilar assets en desarrollo
+npm run build             # Compilar para producción
+
+# Herd (ya configurado)
+herd link gambito         # Crear link (ya hecho)
+herd secure gambito       # Habilitar HTTPS (ya hecho)
+# URL: https://gambito.test
 
 # Base de datos
 php artisan migrate       # Ejecutar migraciones
 php artisan db:seed       # Ejecutar seeders
 php artisan migrate:fresh --seed  # Reset completo
+php artisan migrate:rollback      # Revertir última migración
 
 # Filament
 php artisan make:filament-resource NombreModelo  # Crear resource
 php artisan filament:user  # Crear usuario admin desde CLI
 
-# Cache
+# Middleware
+php artisan make:middleware NombreMiddleware  # Crear middleware
+
+# Cache (ejecutar después de cambios importantes)
 php artisan config:clear   # Limpiar config
 php artisan cache:clear    # Limpiar cache
 php artisan view:clear     # Limpiar vistas compiladas
+php artisan route:clear    # Limpiar rutas
+
+# Testing
+php artisan test          # Ejecutar tests
 ```
 
 ---
@@ -246,4 +434,4 @@ Esta documentación se irá actualizando conforme el proyecto avance. Los próxi
 ---
 
 **Última actualización**: 2025-10-20
-**Versión del proyecto**: 0.1.0 (Base inicial)
+**Versión del proyecto**: 0.2.0 (Autenticación y Panel Admin completos)
