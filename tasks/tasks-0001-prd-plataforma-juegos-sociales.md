@@ -114,7 +114,7 @@
 
 ## Tasks
 
-- [ ] 1.0 Core Infrastructure: Database Schema and Base Models
+- [x] 1.0 Core Infrastructure: Database Schema and Base Models
   - [x] 1.1 Create migration for `games` table with columns: id, name, slug, description, config (JSON), is_premium, is_active, timestamps
   - [x] 1.2 Create migration for `rooms` table with columns: id, code (6 chars unique), game_id, master_id (user), status (enum), settings (JSON), timestamps
   - [x] 1.3 Create migration for `matches` table with columns: id, room_id, started_at, finished_at, winner_id, game_state (JSON), timestamps
@@ -127,7 +127,17 @@
   - [x] 1.10 Create `MatchEvent` model with relationships and data casting
   - [x] 1.11 Run migrations and verify database schema
 
-- [ ] 2.0 Game Registry System and Plugin Architecture
+- [x] 2.0 Game Registry System and Plugin Architecture
+  - [x] 2.1 Create `GameEngineInterface` contract that all games must implement
+  - [x] 2.2 Create `GameConfigInterface` for validating game configuration files
+  - [x] 2.3 Create `config/games.php` configuration file for game system settings
+  - [x] 2.4 Create `GameRegistry` service to discover and load game modules
+  - [x] 2.5 Implement game discovery (scan games/ folder for valid modules)
+  - [x] 2.6 Implement config.json validation and loading
+  - [x] 2.7 Implement capabilities.json parsing and dependency checking
+  - [x] 2.8 Create Artisan command to register/discover games (`games:discover`)
+  - [x] 2.9 Create Artisan command to validate game modules (`games:validate`)
+  - [x] 2.10 Write tests for GameRegistry service (14 tests, 46 assertions - all passing)
 - [ ] 3.0 Room Management and Lobby System (Core Compartido)
 - [ ] 4.0 Shared Optional Services (Microservicios Reutilizables)
 - [ ] 5.0 WebSocket Infrastructure (Optional Service)

@@ -382,22 +382,78 @@ if ($game->moduleExists()) {
 
 ---
 
-#### 2. `GameRegistry` *(Pendiente)*
+#### 2. `GameRegistry` ✅ *(Implementado)*
 **Ubicación:** `app/Services/Core/GameRegistry.php`
 
 **Responsabilidades:**
-- Descubrir juegos disponibles en `games/` folder
-- Validar que implementen `GameEngineInterface`
-- Cargar configuración de cada juego (`config.json`)
-- Leer capacidades de cada juego (`capabilities.json`)
-- Registrar rutas, eventos y vistas dinámicamente
+- ✅ Descubrir juegos disponibles en `games/` folder
+- ✅ Validar que implementen `GameEngineInterface`
+- ✅ Cargar configuración de cada juego (`config.json`)
+- ✅ Leer capacidades de cada juego (`capabilities.json`)
+- ✅ Validar estructura de módulos y archivos requeridos
+- ✅ Registrar juegos en la base de datos
+- ✅ Sistema de caché configurable
+
+**Implementa:** `GameConfigInterface`
+
+**Métodos principales:**
+- `discoverGames()`: Escanea y descubre todos los módulos válidos en games/
+- `validateGameModule(string $slug)`: Valida estructura completa de un módulo
+- `registerGame(string $slug)`: Registra un juego en la BD
+- `registerAllGames()`: Registra todos los juegos descubiertos
+- `getGameEngine(string $slug)`: Obtiene instancia del motor de un juego
+- `validateConfig(array $config)`: Valida config.json
+- `validateCapabilities(array $capabilities)`: Valida capabilities.json
+- `getActiveGames(bool $useCache = true)`: Obtiene juegos activos desde BD
 
 **Ejemplo de uso:**
 ```php
+// Descubrir y listar juegos disponibles
 $registry = app(GameRegistry::class);
-$availableGames = $registry->getActiveGames(); // Lista de juegos activos
-$game = $registry->loadGame('pictionary'); // Carga juego específico
+$discoveredGames = $registry->discoverGames();
+
+// Validar un módulo específico
+$validation = $registry->validateGameModule('pictionary');
+if ($validation['valid']) {
+    // Registrar el juego en la base de datos
+    $game = $registry->registerGame('pictionary');
+}
+
+// Registrar todos los juegos válidos
+$stats = $registry->registerAllGames();
+// $stats = ['registered' => 2, 'failed' => 0, 'games' => ['pictionary', 'trivia']]
+
+// Obtener juegos activos (con caché)
+$activeGames = $registry->getActiveGames();
+
+// Obtener instancia del motor de un juego
+$engine = $registry->getGameEngine('pictionary');
+$engine->initialize($match);
+
+// Limpiar caché
+$registry->clearGameCache('pictionary');
+$registry->clearAllCache();
 ```
+
+**Comandos Artisan disponibles:**
+```bash
+# Descubrir juegos en la carpeta games/
+php artisan games:discover
+
+# Descubrir y registrar automáticamente
+php artisan games:discover --register
+
+# Validar un juego específico
+php artisan games:validate pictionary
+
+# Validar todos los juegos
+php artisan games:validate --all
+
+# Validar con detalles verbosos
+php artisan games:validate --all --verbose
+```
+
+**Tests:** `tests/Unit/Services/Core/GameRegistryTest.php` (14 tests, 46 assertions)
 
 ---
 
@@ -602,44 +658,69 @@ class PictionaryEngine implements GameEngineInterface
 
 ### ✅ Completado
 
-#### Base de Datos - Migraciones
-- [x] Migración de tabla `games` creada (id, name, slug, description, config JSON, is_premium, is_active)
+#### 1.0 Core Infrastructure: Database Schema and Base Models ✅
+- [x] Migración de tabla `games` creada con path y metadata (config cache)
 - [x] Migración de tabla `rooms` creada (id, code, game_id, master_id, status enum, settings JSON)
-- [x] Migración de tabla `matches` creada (id, room_id, started_at, finished_at, winner_id, game_state JSON)
+- [x] Migración de tabla `matches` creada (id, room_id, started_at, finished_at, winner_id sin FK, game_state JSON)
 - [x] Migración de tabla `players` creada (id, match_id, name, role, score, is_connected, last_ping)
 - [x] Migración de tabla `match_events` creada (id, match_id, event_type, data JSON, created_at)
 - [x] Índices optimizados en todas las tablas para queries frecuentes
+- [x] Modelo `Game` creado con accessors para config y capabilities
+- [x] Modelo `Room` creado con generación automática de códigos únicos
+- [x] Modelo `GameMatch` creado (Match es palabra reservada) con game_state management
+- [x] Modelo `Player` creado con connection tracking y ping system
+- [x] Modelo `MatchEvent` creado con static log() helper
+- [x] Migraciones ejecutadas exitosamente en base de datos
+- [x] Tests básicos de modelos ejecutados
+- [x] Git commit: "Implementar sistema de base de datos completo para juegos modulares"
 
-### 🚧 En Progreso
-
-#### Base de Datos - Modelos
-- [x] Modelo `Game` creado con todas sus funcionalidades
-- [ ] Creando resto de modelos (Room, Match, Player, MatchEvent)
+#### 2.0 Game Registry System and Plugin Architecture ✅
+- [x] Contrato `GameEngineInterface` creado (8 métodos obligatorios)
+- [x] Contrato `GameConfigInterface` creado (validación de configuración)
+- [x] Archivo `config/games.php` creado con configuración completa del sistema
+- [x] Servicio `GameRegistry` implementado con:
+  - Descubrimiento automático de módulos en games/
+  - Validación completa de estructura y configuración
+  - Registro de juegos en base de datos
+  - Sistema de caché configurable
+  - Logging detallado
+- [x] Comando Artisan `games:discover` creado (con opción --register)
+- [x] Comando Artisan `games:validate` creado (validación individual y --all)
+- [x] Suite de tests completa: `GameRegistryTest.php` (14 tests, 46 assertions pasados)
+- [x] Documentación actualizada en ARQUITECTURA-JUEGOS-MODULARES.md
 
 ### 📋 Pendiente
 
-#### Base de Datos
-- [ ] Crear modelo `Room` con relaciones, status enum, y helper para códigos
-- [ ] Crear modelo `Match` con relaciones y game_state casting
-- [ ] Crear modelo `Player` con relaciones y connection tracking
-- [ ] Crear modelo `MatchEvent` con relaciones y data casting
-- [ ] Ejecutar migraciones en base de datos
-
-#### Servicios Core
+#### 3.0 Room Management and Lobby System (Core Compartido)
 - [ ] `RoomService` - Códigos únicos y QR
-- [ ] `GameRegistry` - Descubrimiento automático de juegos
-- [ ] `PlayerSessionService` - Sesiones de invitados
+- [ ] `RoomController` - CRUD de salas
+- [ ] `PlayerController` - Join y sesiones de invitados
+- [ ] Vistas de lobby y espera
 
-#### Servicios Compartidos
+#### 4.0 Shared Optional Services (Microservicios Reutilizables)
 - [ ] `WebSocketService` (opcional)
 - [ ] `TurnService` (opcional)
 - [ ] `PhaseService` (opcional)
 - [ ] `TimerService` (opcional)
 - [ ] `RoleService` (opcional)
+- [ ] `ScoreService` (opcional)
 
-#### Contratos e Interfaces
-- [ ] `GameEngineInterface` - Contrato que todos los juegos deben implementar
-- [ ] `GameConfigInterface` - Validación de configuración
+#### 5.0 WebSocket Infrastructure (Optional Service)
+- [ ] Instalar Laravel Reverb (solo si se necesita)
+- [ ] Configurar broadcasting
+- [ ] Crear eventos core (PlayerJoined, PlayerLeft, GameStarted, GameFinished)
+
+#### 6.0 Pictionary Game Module (Ejemplo de Implementación Modular)
+- [ ] Estructura de carpetas en `games/pictionary/`
+- [ ] Archivos de configuración (config.json, capabilities.json)
+- [ ] PictionaryEngine implementando GameEngineInterface
+- [ ] Canvas con sincronización en tiempo real
+- [ ] Sistema de palabras y turnos
+
+#### 7.0 Admin Panel Integration with Filament
+- [ ] GameResource para administrar catálogo de juegos
+- [ ] RoomResource para ver salas activas
+- [ ] MatchResource para historial de partidas
 
 #### Juego MVP: Pictionary
 - [ ] Estructura de carpetas en `games/pictionary/`
