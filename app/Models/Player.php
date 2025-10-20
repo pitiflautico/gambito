@@ -14,6 +14,7 @@ class Player extends Model
      */
     protected $fillable = [
         'match_id',
+        'session_id',
         'name',
         'role',
         'score',
