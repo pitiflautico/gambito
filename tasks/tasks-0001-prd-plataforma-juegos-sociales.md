@@ -264,14 +264,17 @@ Ver: [`docs/decisions/ADR-002-ITERATIVE_DEVELOPMENT.md`](../docs/decisions/ADR-0
   - **Documentación:** `docs/modules/optional/TURN_SYSTEM.md` ✅
   - **Convención:** `docs/conventions/GAME_CONFIGURATION_CONVENTION.md` ✅
 
-- [ ] **10.0 Extraer Scoring System Module**
-  - [ ] 10.1 Crear `app/Modules/ScoringSystem/ScoreManager.php`
-  - [ ] 10.2 Crear `ScoreCalculatorInterface`
-  - [ ] 10.3 Extraer lógica de puntuación de PictionaryEngine
-  - [ ] 10.4 Crear `PictionaryScoreCalculator` (implementa interface)
-  - [ ] 10.5 Crear tests para ScoreManager
-  - [ ] 10.6 Refactorizar Pictionary para usar ScoreManager
-  - **Documentación:** `docs/modules/optional/SCORING_SYSTEM.md`
+- [x] **10.0 Extraer Scoring System Module** - ✅ **COMPLETADO**
+  - [x] 10.1 Crear `app/Services/Modules/ScoringSystem/ScoreManager.php`
+  - [x] 10.2 Crear `ScoreCalculatorInterface`
+  - [x] 10.3 Extraer lógica de puntuación de PictionaryEngine
+  - [x] 10.4 Crear `PictionaryScoreCalculator` (implementa interface)
+  - [x] 10.5 Crear tests para ScoreManager (22 tests, 58 assertions)
+  - [x] 10.6 Crear tests para PictionaryScoreCalculator (19 tests, 36 assertions)
+  - [x] 10.7 Refactorizar Pictionary para usar ScoreManager
+  - [x] 10.8 Eliminar métodos antiguos (calculatePointsByTime, getDrawerPointsByTime)
+  - **Documentación:** `docs/modules/optional/SCORING_SYSTEM.md` ✅
+  - **Estado actual:** `docs/PROJECT_STATUS.md` ✅
 
 - [ ] **11.0 Extraer Timer System Module**
   - [ ] 11.1 Crear `app/Modules/TimerSystem/TimerService.php`

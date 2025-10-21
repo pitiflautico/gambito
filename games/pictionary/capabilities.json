@@ -4,8 +4,8 @@
   "requires": {
     "modules": {
       "turn_system": "^1.0",
-      "guest_system": "^1.0",
-      "scoring_system": "^1.0"
+      "scoring_system": "^1.0",
+      "guest_system": "^1.0"
     }
   },
   "provides": {

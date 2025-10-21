@@ -12,6 +12,8 @@ use Games\Pictionary\Events\GameStateUpdatedEvent;
 use Games\Pictionary\Events\RoundEndedEvent;
 use Games\Pictionary\Events\TurnChangedEvent;
 use App\Services\Modules\TurnSystem\TurnManager;
+use App\Services\Modules\ScoringSystem\ScoreManager;
+use Games\Pictionary\PictionaryScoreCalculator;
 
 /**
  * Motor del juego Pictionary.
@@ -20,8 +22,8 @@ use App\Services\Modules\TurnSystem\TurnManager;
  * una palabra mientras los demás intentan adivinarla.
  *
  * Módulos utilizados:
- * - Turn System: Gestión de turnos y rondas
- * - Scoring System: Puntuación (TODO - Fase 4)
+ * - Turn System: Gestión de turnos y rondas ✅
+ * - Scoring System: Puntuación basada en tiempo ✅
  * - Timer System: Temporizadores (TODO - Fase 4)
  * - Roles System: Roles drawer/guesser (TODO - Fase 4)
  */
@@ -102,11 +104,15 @@ class PictionaryEngine implements GameEngineInterface
             startingRound: 1
         );
 
-        // Inicializar puntuaciones en 0
-        $scores = [];
-        foreach ($turnManager->getTurnOrder() as $playerId) {
-            $scores[$playerId] = 0;
-        }
+        // ========================================================================
+        // SCORING SYSTEM MODULE: Inicializar gestión de puntuaciones
+        // ========================================================================
+        $scoreCalculator = new PictionaryScoreCalculator();
+        $scoreManager = new ScoreManager(
+            playerIds: $playerIds,
+            calculator: $scoreCalculator,
+            trackHistory: false // No necesitamos historial en Pictionary
+        );
 
         // Seleccionar primera palabra
         $firstWord = $this->selectRandomWordFromArray($words, $wordDifficulty);
@@ -118,14 +124,13 @@ class PictionaryEngine implements GameEngineInterface
             'current_word' => $firstWord,
             'current_word_difficulty' => $wordDifficulty,
             'game_is_paused' => false, // Se pausa cuando alguien pulsa "YO SÉ" (diferente de turn_system paused)
-            'scores' => $scores,
             'words_available' => $words, // Palabras disponibles por dificultad
             'words_used' => [$firstWord], // Ya usamos la primera palabra
             'eliminated_this_round' => [],
             'pending_answer' => null, // {player_id, player_name, timestamp}
             'turn_duration' => $turnDuration, // Desde configuración
             'turn_started_at' => now()->toIso8601String(),
-        ], $turnManager->toArray()); // Merge con estado del TurnManager
+        ], $turnManager->toArray(), $scoreManager->toArray()); // Merge con TurnManager y ScoreManager
 
         $match->save();
 
@@ -336,23 +341,35 @@ class PictionaryEngine implements GameEngineInterface
                         'total_players' => $turnManager->getPlayerCount()
                     ]);
 
+                    // ================================================================
+                    // SCORING SYSTEM MODULE: Encontrar ganador y generar ranking
+                    // ================================================================
+                    $scoreCalculator = new PictionaryScoreCalculator();
+                    $scoreManager = ScoreManager::fromArray(
+                        playerIds: array_keys($gameState['scores']),
+                        data: $gameState,
+                        calculator: $scoreCalculator
+                    );
+
                     // Encontrar ganador
-                    $scores = $gameState['scores'];
-                    arsort($scores); // Ordenar por puntuación descendente
-                    $winnerId = array_key_first($scores);
-                    $winner = Player::find($winnerId);
+                    $winnerData = $scoreManager->getWinner();
+                    $winnerId = $winnerData ? $winnerData['player_id'] : null;
+                    $winner = $winnerId ? Player::find($winnerId) : null;
                     $winnerName = $winner ? $winner->name : "Player {$winnerId}";
 
                     // Crear ranking
+                    $rawRanking = $scoreManager->getRanking();
                     $ranking = [];
-                    foreach ($scores as $playerId => $score) {
-                        $player = Player::find($playerId);
+                    foreach ($rawRanking as $entry) {
+                        $player = Player::find($entry['player_id']);
                         $ranking[] = [
-                            'player_id' => $playerId,
-                            'player_name' => $player ? $player->name : "Player {$playerId}",
-                            'score' => $score
+                            'player_id' => $entry['player_id'],
+                            'player_name' => $player ? $player->name : "Player {$entry['player_id']}",
+                            'score' => $entry['score']
                         ];
                     }
+
+                    $scores = $gameState['scores'];
 
                     // Emitir evento de juego terminado
                     $roomCode = $match->room->code ?? 'UNKNOWN';
@@ -457,24 +474,31 @@ class PictionaryEngine implements GameEngineInterface
         Log::info("Finalizing Pictionary game", ['match_id' => $match->id]);
 
         $gameState = $match->game_state;
-        $scores = $gameState['scores'];
 
-        // Ordenar jugadores por puntuación (descendente)
-        arsort($scores);
+        // ========================================================================
+        // SCORING SYSTEM MODULE: Generar ranking final
+        // ========================================================================
+        $scoreCalculator = new PictionaryScoreCalculator();
+        $scoreManager = ScoreManager::fromArray(
+            playerIds: array_keys($gameState['scores']),
+            data: $gameState,
+            calculator: $scoreCalculator
+        );
 
-        // Crear ranking con información de jugadores
+        // Obtener ranking ordenado
+        $rawRanking = $scoreManager->getRanking();
+
+        // Enriquecer ranking con información de jugadores
         $ranking = [];
-        $position = 1;
-
-        foreach ($scores as $playerId => $score) {
-            $player = Player::find($playerId);
+        foreach ($rawRanking as $entry) {
+            $player = Player::find($entry['player_id']);
 
             if ($player) {
                 $ranking[] = [
-                    'position' => $position++,
-                    'player_id' => $playerId,
+                    'position' => $entry['position'],
+                    'player_id' => $entry['player_id'],
                     'player_name' => $player->name,
-                    'score' => $score,
+                    'score' => $entry['score'],
                 ];
             }
         }
@@ -616,13 +640,30 @@ class PictionaryEngine implements GameEngineInterface
             $now = new \DateTime();
             $secondsElapsed = $now->getTimestamp() - $turnStartedAt->getTimestamp();
 
-            // Calcular puntos según el tiempo
-            $guesserPoints = $this->calculatePointsByTime($secondsElapsed, $gameState);
-            $drawerPoints = $this->getDrawerPointsByTime($secondsElapsed, $gameState);
+            // ========================================================================
+            // SCORING SYSTEM MODULE: Otorgar puntos usando ScoreManager
+            // ========================================================================
+            $scoreCalculator = new PictionaryScoreCalculator();
+            $scoreManager = ScoreManager::fromArray(
+                playerIds: array_keys($gameState['scores']),
+                data: $gameState,
+                calculator: $scoreCalculator
+            );
 
-            // Otorgar puntos
-            $gameState['scores'][$guesserPlayerId] += $guesserPoints;
-            $gameState['scores'][$player->id] += $drawerPoints;
+            // Otorgar puntos al adivinador
+            $guesserPoints = $scoreManager->awardPoints($guesserPlayerId, 'correct_answer', [
+                'seconds_elapsed' => $secondsElapsed,
+                'turn_duration' => $gameState['turn_duration'],
+            ]);
+
+            // Otorgar puntos bonus al dibujante
+            $drawerPoints = $scoreManager->awardPoints($player->id, 'drawer_bonus', [
+                'seconds_elapsed' => $secondsElapsed,
+                'turn_duration' => $gameState['turn_duration'],
+            ]);
+
+            // Actualizar scores en game_state
+            $gameState['scores'] = $scoreManager->getScores();
 
             // Limpiar estado
             $gameState['pending_answer'] = null;
@@ -850,71 +891,11 @@ class PictionaryEngine implements GameEngineInterface
         ]);
     }
 
-    /**
-     * Calcular puntos para el adivinador según el tiempo transcurrido.
-     *
-     * Sistema de puntuación:
-     * - 0-30s (rápido): 150 puntos
-     * - 31-60s (normal): 100 puntos
-     * - 61-90s (lento): 50 puntos (puntuación mínima)
-     * - >90s: 0 puntos (tiempo agotado, no debería llegar aquí)
-     *
-     * @param int $secondsElapsed Segundos transcurridos desde el inicio del turno
-     * @param array $gameState Estado actual del juego
-     * @return int Puntos otorgados
-     */
-    private function calculatePointsByTime(int $secondsElapsed, array $gameState): int
-    {
-        $maxTime = $gameState['turn_duration'] ?? 90;
-        $normalThreshold = $maxTime * 0.33; // 30s si maxTime=90
-        $slowThreshold = $maxTime * 0.67; // 60s si maxTime=90
-
-        if ($secondsElapsed <= $normalThreshold) {
-            // Rápido: 150 puntos
-            return 150;
-        } elseif ($secondsElapsed <= $slowThreshold) {
-            // Normal: 100 puntos
-            return 100;
-        } elseif ($secondsElapsed <= $maxTime) {
-            // Lento: 50 puntos (puntuación mínima)
-            return 50;
-        } else {
-            // Tiempo agotado: 0 puntos
-            return 0;
-        }
-    }
-
-    /**
-     * Calcular puntos para el dibujante según el tiempo transcurrido.
-     *
-     * El dibujante recibe puntos similares pero menores que el adivinador:
-     * - 0-30s (rápido): 75 puntos
-     * - 31-60s (normal): 50 puntos
-     * - 61-90s (lento): 25 puntos (puntuación mínima)
-     * - >90s: 0 puntos
-     *
-     * @param int $secondsElapsed Segundos transcurridos
-     * @param array $gameState Estado actual del juego
-     * @return int Puntos otorgados
-     */
-    private function getDrawerPointsByTime(int $secondsElapsed, array $gameState): int
-    {
-        $maxTime = $gameState['turn_duration'] ?? 90;
-        $normalThreshold = $maxTime * 0.33; // 30s
-        $slowThreshold = $maxTime * 0.67; // 60s
-
-        if ($secondsElapsed <= $normalThreshold) {
-            // Rápido: 75 puntos
-            return 75;
-        } elseif ($secondsElapsed <= $slowThreshold) {
-            // Normal: 50 puntos
-            return 50;
-        } elseif ($secondsElapsed <= $maxTime) {
-            // Lento: 25 puntos (puntuación mínima)
-            return 25;
-        } else {
-            // Tiempo agotado: 0 puntos
-            return 0;
-        }
-    }
+    // ============================================================================
+    // MÉTODOS ANTIGUOS DE PUNTUACIÓN ELIMINADOS
+    // ============================================================================
+    // Los métodos calculatePointsByTime() y getDrawerPointsByTime() han sido
+    // reemplazados por el módulo ScoreManager + PictionaryScoreCalculator
+    // Ver: app/Services/Modules/ScoringSystem/
+    // ============================================================================
 }
