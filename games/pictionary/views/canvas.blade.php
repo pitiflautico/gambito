@@ -1,4 +1,4 @@
-@extends('layouts.app')
+@extends('layouts.guest-public')
 
 @section('title', 'Pictionary - ' . $room->name)
 
@@ -28,6 +28,9 @@
             </div>
         </div>
     </div>
+
+    {{-- Mensajes del juego --}}
+    <div id="game-messages" class="game-messages"></div>
 
     {{-- Contenedor principal del juego --}}
     <div class="game-content">
@@ -121,7 +124,16 @@
             <div class="players-panel">
                 <h3>Jugadores</h3>
                 <div id="players-list" class="players-list">
-                    {{-- Se llenará dinámicamente con JavaScript --}}
+                    {{-- Ejemplo inicial para demo, se llenará dinámicamente con JavaScript --}}
+                    @if(isset($role))
+                    <div class="player-item {{ $role === 'drawer' ? 'is-drawer' : '' }}" data-player-id="{{ $playerId }}">
+                        <span class="player-name">{{ $role === 'drawer' ? 'Dibujante' : 'Adivinador' }}</span>
+                        <span class="player-score">0 pts</span>
+                        @if($role === 'drawer')
+                        <span class="drawer-badge">🎨</span>
+                        @endif
+                    </div>
+                    @endif
                 </div>
             </div>
 
@@ -186,10 +198,13 @@
         // Datos iniciales desde el servidor
         window.gameData = {
             matchId: {{ $match->id }},
-            playerId: {{ auth()->user()->id }},
+            playerId: {{ $playerId ?? auth()->user()->id }},
             roomCode: '{{ $room->code }}',
-            csrfToken: '{{ csrf_token() }}'
+            csrfToken: '{{ csrf_token() }}',
+            @if(isset($role))
+            role: '{{ $role }}',
+            @endif
         };
     </script>
-    <script src="{{ asset('games/pictionary/js/canvas.js') }}"></script>
+    {{-- El canvas.js se carga a través de Vite en app.js --}}
 @endpush

@@ -356,12 +356,12 @@ class PictionaryCanvas {
      * Vincular eventos de formularios
      */
     bindFormEvents() {
-        // Formulario de respuesta (adivinadores)
-        const answerForm = document.getElementById('answer-form');
-        if (answerForm) {
-            answerForm.addEventListener('submit', (e) => {
-                e.preventDefault();
-                this.submitAnswer();
+        // Botón "YO SÉ" (adivinadores)
+        const btnYoSe = document.getElementById('btn-yo-se');
+        if (btnYoSe) {
+            btnYoSe.addEventListener('click', () => {
+                console.log('¡YO SÉ! button clicked');
+                this.playerAnswered();
             });
         }
 
@@ -568,31 +568,52 @@ class PictionaryCanvas {
      * Establecer rol del jugador
      */
     setRole(isDrawer, word = null) {
+        console.log('🎭 setRole called with isDrawer:', isDrawer, 'word:', word);
         this.isDrawer = isDrawer;
 
         const wordDisplay = document.getElementById('word-display');
         const secretWord = document.getElementById('secret-word');
-        const answerInputContainer = document.getElementById('answer-input-container');
+        const drawingTools = document.querySelector('.drawing-tools');
+        const yoSeContainer = document.getElementById('yo-se-container');
+
+        console.log('Elements found:', {
+            wordDisplay: !!wordDisplay,
+            secretWord: !!secretWord,
+            drawingTools: !!drawingTools,
+            yoSeContainer: !!yoSeContainer
+        });
 
         if (isDrawer) {
+            // DIBUJANTE
             // Mostrar palabra secreta
-            wordDisplay.classList.remove('hidden');
-            secretWord.textContent = word || '-';
+            if (wordDisplay) wordDisplay.classList.remove('hidden');
+            if (secretWord) secretWord.textContent = word || '-';
 
-            // Ocultar input de respuesta
-            answerInputContainer.classList.add('hidden');
+            // Mostrar herramientas de dibujo
+            if (drawingTools) drawingTools.classList.remove('hidden');
+
+            // Ocultar botón "YO SÉ"
+            if (yoSeContainer) yoSeContainer.classList.add('hidden');
 
             // Habilitar herramientas
             this.canvas.style.cursor = 'crosshair';
-        } else {
-            // Ocultar palabra secreta
-            wordDisplay.classList.add('hidden');
 
-            // Mostrar input de respuesta
-            answerInputContainer.classList.remove('hidden');
+            console.log('✅ Demo mode: Drawer (Dibujante)');
+        } else {
+            // ADIVINADOR
+            // Ocultar palabra secreta
+            if (wordDisplay) wordDisplay.classList.add('hidden');
+
+            // Ocultar herramientas de dibujo
+            if (drawingTools) drawingTools.classList.add('hidden');
+
+            // Mostrar botón "YO SÉ"
+            if (yoSeContainer) yoSeContainer.classList.remove('hidden');
 
             // Deshabilitar dibujo
             this.canvas.style.cursor = 'default';
+
+            console.log('✅ Demo mode: Guesser (Adivinador)');
         }
     }
 
@@ -628,27 +649,82 @@ class PictionaryCanvas {
     }
 
     /**
+     * Jugador pulsa "¡YO SÉ!" (guesser)
+     */
+    playerAnswered() {
+        if (!this.roomCode) return;
+
+        const playerName = `Jugador ${window.gameData.playerId}`;
+
+        console.log('Emitting player answered event:', playerName);
+
+        // Enviar al servidor para broadcast
+        fetch('/api/pictionary/player-answered', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': window.gameData.csrfToken
+            },
+            body: JSON.stringify({
+                room_code: this.roomCode,
+                match_id: window.gameData.matchId,
+                player_id: window.gameData.playerId,
+                player_name: playerName
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            console.log('Player answered result:', data);
+
+            // Ocultar botón "YO SÉ" y mostrar mensaje de espera
+            const yoSeContainer = document.getElementById('yo-se-container');
+            const waitingConfirmation = document.getElementById('waiting-confirmation');
+
+            if (yoSeContainer) yoSeContainer.classList.add('hidden');
+            if (waitingConfirmation) waitingConfirmation.classList.remove('hidden');
+        })
+        .catch(error => {
+            console.error('Error emitting player answered:', error);
+        });
+    }
+
+    /**
      * Confirmar respuesta (dibujante)
      */
     confirmAnswer(isCorrect) {
-        console.log('Answer confirmed as:', isCorrect ? 'correct' : 'incorrect');
+        const confirmationContainer = document.getElementById('confirmation-container');
+        const pendingPlayerId = confirmationContainer?.dataset?.pendingPlayerId;
+        const pendingPlayerName = document.getElementById('pending-player-name')?.textContent;
 
-        // TODO Task 6.0: Enviar confirmación al servidor
-        // fetch('/api/pictionary/confirm-answer', {
-        //     method: 'POST',
-        //     headers: {
-        //         'Content-Type': 'application/json',
-        //         'X-CSRF-TOKEN': window.gameData.csrfToken
-        //     },
-        //     body: JSON.stringify({
-        //         match_id: window.gameData.matchId,
-        //         player_id: pendingPlayerId,
-        //         is_correct: isCorrect
-        //     })
-        // });
+        if (!pendingPlayerId || !this.roomCode) return;
 
-        // Ocultar panel de confirmación
-        document.getElementById('confirmation-container').classList.add('hidden');
+        console.log('Confirming answer as:', isCorrect ? 'correct' : 'incorrect', 'for player:', pendingPlayerName);
+
+        // Enviar confirmación al servidor para broadcast
+        fetch('/api/pictionary/confirm-answer', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': window.gameData.csrfToken
+            },
+            body: JSON.stringify({
+                room_code: this.roomCode,
+                match_id: window.gameData.matchId,
+                player_id: parseInt(pendingPlayerId),
+                player_name: pendingPlayerName,
+                is_correct: isCorrect
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            console.log('Confirm answer result:', data);
+
+            // Ocultar panel de confirmación
+            if (confirmationContainer) confirmationContainer.classList.add('hidden');
+        })
+        .catch(error => {
+            console.error('Error confirming answer:', error);
+        });
     }
 
     /**
@@ -783,6 +859,14 @@ class PictionaryCanvas {
 
 // Inicializar cuando el DOM esté listo
 document.addEventListener('DOMContentLoaded', () => {
+    // Solo inicializar si existe el canvas de Pictionary
+    const canvas = document.getElementById('drawing-canvas');
+    if (!canvas) {
+        console.log('Pictionary canvas not found, skipping initialization');
+        return;
+    }
+
+    console.log('🚀 Initializing Pictionary Canvas...');
     window.pictionaryCanvas = new PictionaryCanvas();
 
     // Configurar rol inicial si está disponible en gameData

@@ -6,6 +6,9 @@ use App\Contracts\GameEngineInterface;
 use App\Models\GameMatch;
 use App\Models\Player;
 use Illuminate\Support\Facades\Log;
+use Games\Pictionary\Events\PlayerAnsweredEvent;
+use Games\Pictionary\Events\PlayerEliminatedEvent;
+use Games\Pictionary\Events\GameStateUpdatedEvent;
 
 /**
  * Motor del juego Pictionary.
@@ -240,6 +243,7 @@ class PictionaryEngine implements GameEngineInterface
                 $gameState['current_drawer_id'] = $gameState['turn_order'][0];
                 $gameState['current_word'] = $this->selectRandomWord($match, 'easy');
                 $gameState['turn_started_at'] = now()->toDateTimeString();
+                $gameState['eliminated_this_round'] = []; // Resetear eliminados al iniciar
 
                 if ($gameState['current_word']) {
                     $gameState['words_used'][] = $gameState['current_word'];
@@ -459,10 +463,8 @@ class PictionaryEngine implements GameEngineInterface
             'player_name' => $player->name
         ]);
 
-        // TODO Task 7.0: Broadcast a todos los jugadores vía WebSocket
-        // - Pausar canvas para todos
-        // - Mostrar al dibujante los botones de confirmación
-        // - Mostrar a todos que [jugador] cree saber la respuesta
+        // Broadcast a todos los jugadores vía WebSocket
+        event(new PlayerAnsweredEvent($match, $player));
 
         return [
             'success' => true,
@@ -532,9 +534,8 @@ class PictionaryEngine implements GameEngineInterface
                 'seconds_elapsed' => $secondsElapsed
             ]);
 
-            // TODO Task 7.0: Broadcast vía WebSocket
-            // - Mostrar pantalla de resultados de la ronda
-            // - Mostrar puntos otorgados
+            // Broadcast actualización de estado (fase scoring, puntos actualizados)
+            event(new GameStateUpdatedEvent($match, 'round_ended'));
 
             return [
                 'success' => true,
@@ -568,10 +569,14 @@ class PictionaryEngine implements GameEngineInterface
                 'eliminated_count' => count($gameState['eliminated_this_round'])
             ]);
 
-            // TODO Task 7.0: Broadcast vía WebSocket
-            // - Reanudar canvas
-            // - Notificar que el jugador fue eliminado
-            // - Permitir que otros sigan jugando
+            // Obtener el Player model para el evento
+            $eliminatedPlayer = Player::find($guesserPlayerId);
+
+            // Broadcast eliminación del jugador
+            event(new PlayerEliminatedEvent($match, $eliminatedPlayer));
+
+            // Broadcast actualización de estado (juego reanudado, lista de eliminados actualizada)
+            event(new GameStateUpdatedEvent($match, 'player_eliminated'));
 
             return [
                 'success' => true,

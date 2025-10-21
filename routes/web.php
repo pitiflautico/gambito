@@ -27,6 +27,11 @@ Route::get('/games/{slug}', [GameController::class, 'show'])->name('games.show')
 // Ruta de demo de Pictionary (solo desarrollo)
 Route::get('/pictionary/demo', [PictionaryController::class, 'demo'])->name('pictionary.demo');
 
+// Ruta de test de WebSocket (solo desarrollo)
+Route::get('/test-websocket', function () {
+    return view('test-websocket');
+})->name('test.websocket');
+
 // Rutas de Salas
 Route::prefix('rooms')->name('rooms.')->group(function () {
     // Crear sala (requiere autenticación)

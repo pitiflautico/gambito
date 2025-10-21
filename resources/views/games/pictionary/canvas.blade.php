@@ -11,6 +11,9 @@
 
     <!-- Canvas CSS -->
     <link rel="stylesheet" href="{{ asset('games/pictionary/css/canvas.css') }}">
+
+    <!-- Vite Assets (incluye Echo + Bootstrap + Canvas JS) -->
+    @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
 <body>
 <div class="pictionary-container">
@@ -225,11 +228,14 @@
     // Datos iniciales desde el servidor
     window.gameData = {
         matchId: {{ $match->id }},
-        playerId: {{ auth()->check() ? auth()->user()->id : 999 }},
+        playerId: {{ $playerId ?? (auth()->check() ? auth()->user()->id : 999) }},
         roomCode: '{{ $room->code }}',
-        csrfToken: '{{ csrf_token() }}'
+        csrfToken: '{{ csrf_token() }}',
+        @if(isset($role))
+        role: '{{ $role }}',
+        @endif
     };
 </script>
-<script src="{{ asset('games/pictionary/js/canvas.js') }}"></script>
+{{-- El canvas.js se carga a través de Vite en app.js --}}
 </body>
 </html>

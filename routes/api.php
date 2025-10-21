@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\GameController;
+use App\Http\Controllers\PictionaryController;
 use App\Http\Controllers\RoomController;
 use Illuminate\Support\Facades\Route;
 
@@ -15,4 +16,12 @@ Route::prefix('rooms')->name('api.rooms.')->group(function () {
     Route::post('/{code}/start', [RoomController::class, 'apiStart'])->name('start')->middleware('auth:sanctum');
     Route::get('/{code}/stats', [RoomController::class, 'apiStats'])->name('stats');
     Route::post('/{code}/close', [RoomController::class, 'apiClose'])->name('close')->middleware('auth:sanctum');
+});
+
+// API de Pictionary (eventos de canvas en tiempo real)
+Route::prefix('pictionary')->name('api.pictionary.')->group(function () {
+    Route::post('/draw', [PictionaryController::class, 'broadcastDraw'])->name('draw');
+    Route::post('/clear', [PictionaryController::class, 'broadcastClear'])->name('clear');
+    Route::post('/player-answered', [PictionaryController::class, 'playerAnswered'])->name('player-answered');
+    Route::post('/confirm-answer', [PictionaryController::class, 'confirmAnswer'])->name('confirm-answer');
 });

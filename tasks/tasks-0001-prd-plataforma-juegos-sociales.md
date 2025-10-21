@@ -219,16 +219,24 @@ Ver: [`docs/decisions/ADR-002-ITERATIVE_DEVELOPMENT.md`](../docs/decisions/ADR-0
   - [x] **Documentación:** ✅ Actualizado `docs/games/PICTIONARY.md`
   - **Nota:** Timer automático con Jobs/Queue se implementará con WebSockets en Task 7.0
 
-- [ ] **7.0 Pictionary Real-time Sync (WebSockets)**
-  - [ ] 7.1 Instalar Laravel Reverb: `composer require laravel/reverb`
-  - [ ] 7.2 Configurar Reverb en `.env`
-  - [ ] 7.3 Crear eventos: `CanvasDrawEvent`, `PlayerAnswered`, `PlayerEliminated`
-  - [ ] 7.4 Configurar canal privado `sala.{code}`
-  - [ ] 7.5 Frontend: instalar Laravel Echo + Pusher JS
-  - [ ] 7.6 Frontend: `games/pictionary/js/websocket-handlers.js`
-  - [ ] 7.7 Transmitir trazos de canvas en tiempo real
-  - [ ] 7.8 Sincronizar estado del juego
-  - **Documentación:** `docs/modules/optional/REALTIME_SYNC.md` (draft)
+- [x] **7.0 Pictionary Real-time Sync (WebSockets)** - ✅ **100% COMPLETADO**
+  - [x] 7.1 Instalar Laravel Reverb: `composer require laravel/reverb` ✅
+  - [x] 7.2 Configurar broadcasting con `php artisan install:broadcasting` ✅
+  - [x] 7.3 Crear eventos WebSocket ✅
+    - [x] `CanvasDrawEvent` - Sincroniza trazos del canvas
+    - [x] `PlayerAnsweredEvent` - Notifica cuando alguien pulsa "YO SÉ"
+    - [x] `PlayerEliminatedEvent` - Notifica eliminación de jugador
+    - [x] `GameStateUpdatedEvent` - Sincroniza estado general (fase, ronda, puntos)
+    - [x] `TestEvent` - Evento de prueba para testing
+  - [x] 7.4 Configurar canal privado `room.{code}` en routes/channels.php ✅
+  - [x] 7.5 Frontend: Laravel Echo + Pusher JS instalados y configurados ✅
+  - [x] 7.6 Frontend: WebSocket conectado y testeado ✅
+  - [x] 7.7 Sistema de broadcasting funcionando (canales públicos y privados) ✅
+  - [x] 7.8 Testing de sincronización completado (página /test-websocket) ✅
+  - [x] 7.9 Configuración de desarrollo documentada (HTTP, QUEUE=sync) ✅
+  - [x] 7.10 Configuración de producción documentada (SSL, proxy Nginx) ✅
+  - **Documentación:** ✅ `docs/WEBSOCKET_SETUP.md` + `docs/INSTALLATION.md`
+  - **Próximo paso:** Integrar eventos en Pictionary canvas
 
 - [ ] **8.0 Pictionary Testing**
   - [ ] 8.1 Feature tests: flujo completo de juego

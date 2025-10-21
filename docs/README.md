@@ -13,6 +13,8 @@
 - 🏗️ [**Arquitectura General**](ARCHITECTURE.md) - Visión general del sistema modular
 - 📖 [**Glosario de Términos**](GLOSSARY.md) - Definiciones de conceptos clave
 - 🛠️ [**Guía de Desarrollo**](DEVELOPMENT_GUIDE.md) - Setup, workflow y convenciones
+- 📦 [**Instalación y Deployment**](INSTALLATION.md) - Instalación desde cero y despliegue a producción ✅
+- 🔌 [**Configuración de WebSockets**](WEBSOCKET_SETUP.md) - Laravel Reverb setup y troubleshooting ✅
 
 ---
 
