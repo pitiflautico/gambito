@@ -2,7 +2,27 @@
 
 **PRD Reference:** `tasks/0001-prd-plataforma-juegos-sociales.md`
 **Created:** 2025-10-20
+**Última actualización:** 2025-10-21
 **Status:** In Progress
+
+> ⚠️ **IMPORTANTE:** Antes de trabajar en este proyecto, lee [`docs/INSTRUCTIONS_FOR_AGENTS.md`](../docs/INSTRUCTIONS_FOR_AGENTS.md)
+
+> 📚 **Documentación:** Ver índice completo en [`docs/README.md`](../docs/README.md)
+
+---
+
+## 🎯 Estrategia de Desarrollo
+
+**Decisión:** Desarrollo Iterativo (Opción C)
+
+Ver: [`docs/decisions/ADR-002-ITERATIVE_DEVELOPMENT.md`](../docs/decisions/ADR-002-ITERATIVE_DEVELOPMENT.md)
+
+**Fases:**
+1. ✅ **Fase 1:** Core Infrastructure (DB, Models, Game Registry) - **COMPLETADA**
+2. ✅ **Fase 2:** Room Management & Lobby - **COMPLETADA**
+3. 🚧 **Fase 3:** Pictionary MVP Monolítico (sin módulos opcionales) - **EN DESARROLLO**
+4. ⏳ **Fase 4:** Extracción de Módulos Opcionales - **PENDIENTE**
+5. ⏳ **Fase 5:** Segundo Juego (validación de módulos) - **PENDIENTE**
 
 ---
 
@@ -114,66 +134,249 @@
 
 ## Tasks
 
-- [x] 1.0 Core Infrastructure: Database Schema and Base Models
-  - [x] 1.1 Create migration for `games` table with columns: id, name, slug, description, config (JSON), is_premium, is_active, timestamps
-  - [x] 1.2 Create migration for `rooms` table with columns: id, code (6 chars unique), game_id, master_id (user), status (enum), settings (JSON), timestamps
-  - [x] 1.3 Create migration for `matches` table with columns: id, room_id, started_at, finished_at, winner_id, game_state (JSON), timestamps
-  - [x] 1.4 Create migration for `players` table with columns: id, match_id, name, role, score, is_connected, last_ping, timestamps
-  - [x] 1.5 Create migration for `match_events` table with columns: id, match_id, event_type, data (JSON), created_at
-  - [x] 1.6 Create `Game` model with relationships and config casting
-  - [x] 1.7 Create `Room` model with relationships, status enum, and code generation helper
-  - [x] 1.8 Create `GameMatch` model (Match is reserved) with relationships and game_state casting
-  - [x] 1.9 Create `Player` model with relationships and connection tracking
-  - [x] 1.10 Create `MatchEvent` model with relationships and data casting
-  - [x] 1.11 Run migrations and verify database schema
+### ✅ FASE 1: Core Infrastructure (COMPLETADA)
 
-- [x] 2.0 Game Registry System and Plugin Architecture
-  - [x] 2.1 Create `GameEngineInterface` contract that all games must implement
-  - [x] 2.2 Create `GameConfigInterface` for validating game configuration files
-  - [x] 2.3 Create `config/games.php` configuration file for game system settings
-  - [x] 2.4 Create `GameRegistry` service to discover and load game modules
-  - [x] 2.5 Implement game discovery (scan games/ folder for valid modules)
-  - [x] 2.6 Implement config.json validation and loading
-  - [x] 2.7 Implement capabilities.json parsing and dependency checking
-  - [x] 2.8 Create Artisan command to register/discover games (`games:discover`)
-  - [x] 2.9 Create Artisan command to validate game modules (`games:validate`)
-  - [x] 2.10 Write tests for GameRegistry service (14 tests, 46 assertions - all passing)
-- [ ] 3.0 Room Management and Lobby System (Core Compartido)
-- [ ] 4.0 Shared Optional Services (Microservicios Reutilizables)
-- [ ] 5.0 WebSocket Infrastructure (Optional Service)
-- [ ] 6.0 Pictionary Game Module (Ejemplo de Implementación Modular)
-- [ ] 7.0 Admin Panel Integration with Filament
-- [ ] 8.0 Testing and Quality Assurance
+- [x] **1.0 Core Infrastructure: Database Schema and Base Models**
+  - [x] 1.1 Create migration for `games` table
+  - [x] 1.2 Create migration for `rooms` table
+  - [x] 1.3 Create migration for `matches` table
+  - [x] 1.4 Create migration for `players` table
+  - [x] 1.5 Create migration for `match_events` table
+  - [x] 1.6 Create `Game` model
+  - [x] 1.7 Create `Room` model
+  - [x] 1.8 Create `GameMatch` model
+  - [x] 1.9 Create `Player` model
+  - [x] 1.10 Create `MatchEvent` model
+  - [x] 1.11 Run migrations and verify database schema
+  - **Documentación:** ✅ Modelos documentados
+
+- [x] **2.0 Game Registry System and Plugin Architecture**
+  - [x] 2.1 Create `GameEngineInterface` contract
+  - [x] 2.2 Create `GameConfigInterface` for validation
+  - [x] 2.3 Create `config/games.php` configuration file
+  - [x] 2.4 Create `GameRegistry` service
+  - [x] 2.5 Implement game discovery (scan games/)
+  - [x] 2.6 Implement config.json validation
+  - [x] 2.7 Implement capabilities.json parsing
+  - [x] 2.8 Create Artisan command `games:discover`
+  - [x] 2.9 Create Artisan command `games:validate`
+  - [x] 2.10 Write tests (14 tests, 46 assertions - passing)
+  - **Documentación:** ✅ `docs/modules/core/GAME_REGISTRY.md`
 
 ---
 
-## Architecture Philosophy
+### ✅ FASE 2: Room Management & Lobby (COMPLETADA)
 
-Esta plataforma sigue una **arquitectura de microservicios internos** donde:
+- [x] **3.0 Room Management and Lobby System**
+  - [x] 3.1 RoomController (create, join, lobby, show, results)
+  - [x] 3.2 RoomService (codes únicos, QR, validación)
+  - [x] 3.3 PlayerSessionService (guests, heartbeat, reconnect)
+  - [x] 3.4 Vistas: create.blade.php, join.blade.php, lobby.blade.php
+  - [x] 3.5 Vistas: guest-name.blade.php, show.blade.php, results.blade.php
+  - [x] 3.6 Rutas web y API
+  - [x] 3.7 Tests Feature y Unit
+  - **Documentación:** ✅ `docs/modules/core/ROOM_MANAGER.md`, `docs/modules/core/PLAYER_SESSION.md`
 
-1. **Core Services (Obligatorios):** Servicios básicos que todos los juegos necesitan
-   - Room management (crear salas, códigos, QR)
-   - Player sessions (jugadores invitados)
-   - Game registry (descubrir juegos disponibles)
+---
 
-2. **Shared Services (Opcionales):** Servicios reutilizables que los juegos pueden usar o no
-   - WebSocketService (solo si juego necesita tiempo real)
-   - TurnService (solo si juego es por turnos)
-   - PhaseService (solo si juego tiene fases)
-   - TimerService (solo si juego necesita timers)
-   - RoleService (solo si juego tiene roles)
+### 🚧 FASE 3: Pictionary MVP Monolítico (EN DESARROLLO)
 
-3. **Game Modules (Independientes):** Cada juego es un módulo autocontenido en `games/{nombre}/`
-   - Implementa `GameEngineInterface` (contrato obligatorio)
-   - Declara sus dependencias en `capabilities.json`
-   - Tiene su propia lógica, vistas, JS, CSS, eventos
-   - Se registra automáticamente al detectarse en `games/` folder
+**Estrategia:** Implementar Pictionary de forma monolítica (sin módulos opcionales). Toda la lógica en `PictionaryEngine.php`.
 
-4. **Plugin System:** Los juegos se cargan dinámicamente
-   - Sistema detecta carpetas en `games/`
-   - Valida que implementen la interfaz requerida
-   - Carga solo los shared services que el juego necesita
-   - Registra rutas, eventos y vistas del juego
+- [ ] **4.0 Pictionary Game Structure**
+  - [ ] 4.1 Crear carpeta `games/pictionary/`
+  - [ ] 4.2 Crear `PictionaryEngine.php` (implementa GameEngineInterface)
+  - [ ] 4.3 Crear `config.json` (metadata del juego)
+  - [ ] 4.4 Crear `capabilities.json` (sin módulos opcionales aún)
+  - [ ] 4.5 Crear `assets/words.json` (lista de palabras)
+  - [ ] 4.6 Registrar juego con GameRegistry
+  - **Documentación:** `docs/games/PICTIONARY.md`
+
+- [ ] **5.0 Pictionary Canvas System**
+  - [ ] 5.1 Vista `games/pictionary/views/canvas.blade.php` (dibujante)
+  - [ ] 5.2 Vista `games/pictionary/views/spectator.blade.php` (adivinadores)
+  - [ ] 5.3 JavaScript `games/pictionary/js/canvas.js` (HTML5 Canvas)
+  - [ ] 5.4 CSS `games/pictionary/css/pictionary.css`
+  - [ ] 5.5 Herramientas: lápiz, borrador, colores, grosor
+  - [ ] 5.6 Eventos touch y mouse
+  - **Documentación:** Actualizar `docs/games/PICTIONARY.md`
+
+- [ ] **6.0 Pictionary Game Logic (Monolítico en Engine)**
+  - [ ] 6.1 Selección aleatoria de palabras (WordService interno)
+  - [ ] 6.2 Sistema de turnos (lógica en PictionaryEngine)
+  - [ ] 6.3 Asignación de roles: drawer/guesser (en Engine)
+  - [ ] 6.4 Sistema de puntuación (hardcoded en Engine)
+  - [ ] 6.5 Timer de 60 segundos (lógica en Engine)
+  - [ ] 6.6 Botón "¡Ya lo sé!" y confirmación de respuesta
+  - [ ] 6.7 Eliminación de jugadores en ronda
+  - [ ] 6.8 Cálculo de puntos según tiempo
+  - [ ] 6.9 Condición de victoria (mayor puntuación)
+  - **Documentación:** Actualizar `docs/games/PICTIONARY.md`
+
+- [ ] **7.0 Pictionary Real-time Sync (WebSockets)**
+  - [ ] 7.1 Instalar Laravel Reverb: `composer require laravel/reverb`
+  - [ ] 7.2 Configurar Reverb en `.env`
+  - [ ] 7.3 Crear eventos: `CanvasDrawEvent`, `PlayerAnswered`, `PlayerEliminated`
+  - [ ] 7.4 Configurar canal privado `sala.{code}`
+  - [ ] 7.5 Frontend: instalar Laravel Echo + Pusher JS
+  - [ ] 7.6 Frontend: `games/pictionary/js/websocket-handlers.js`
+  - [ ] 7.7 Transmitir trazos de canvas en tiempo real
+  - [ ] 7.8 Sincronizar estado del juego
+  - **Documentación:** `docs/modules/optional/REALTIME_SYNC.md` (draft)
+
+- [ ] **8.0 Pictionary Testing**
+  - [ ] 8.1 Feature tests: flujo completo de juego
+  - [ ] 8.2 Unit tests: PictionaryEngine
+  - [ ] 8.3 Unit tests: WordService
+  - [ ] 8.4 Unit tests: Cálculo de puntos
+  - [ ] 8.5 Tests de canvas (JS tests con Jest - opcional)
+  - **Documentación:** Actualizar `docs/games/PICTIONARY.md`
+
+---
+
+### ⏳ FASE 4: Extracción de Módulos Opcionales (PENDIENTE)
+
+**Estrategia:** Refactorizar Pictionary para extraer lógica reutilizable como módulos.
+
+- [ ] **9.0 Extraer Turn System Module**
+  - [ ] 9.1 Crear `app/Modules/TurnSystem/TurnManager.php`
+  - [ ] 9.2 Extraer lógica de turnos de PictionaryEngine
+  - [ ] 9.3 Crear tests para TurnManager
+  - [ ] 9.4 Refactorizar Pictionary para usar TurnManager
+  - [ ] 9.5 Actualizar capabilities.json de Pictionary
+  - **Documentación:** `docs/modules/optional/TURN_SYSTEM.md`
+
+- [ ] **10.0 Extraer Scoring System Module**
+  - [ ] 10.1 Crear `app/Modules/ScoringSystem/ScoreManager.php`
+  - [ ] 10.2 Crear `ScoreCalculatorInterface`
+  - [ ] 10.3 Extraer lógica de puntuación de PictionaryEngine
+  - [ ] 10.4 Crear `PictionaryScoreCalculator` (implementa interface)
+  - [ ] 10.5 Crear tests para ScoreManager
+  - [ ] 10.6 Refactorizar Pictionary para usar ScoreManager
+  - **Documentación:** `docs/modules/optional/SCORING_SYSTEM.md`
+
+- [ ] **11.0 Extraer Timer System Module**
+  - [ ] 11.1 Crear `app/Modules/TimerSystem/TimerService.php`
+  - [ ] 11.2 Extraer lógica de timer de PictionaryEngine
+  - [ ] 11.3 Crear tests para TimerService
+  - [ ] 11.4 Refactorizar Pictionary para usar TimerService
+  - **Documentación:** `docs/modules/optional/TIMER_SYSTEM.md`
+
+- [ ] **12.0 Extraer Roles System Module**
+  - [ ] 12.1 Crear `app/Modules/RolesSystem/RoleManager.php`
+  - [ ] 12.2 Extraer lógica de roles de PictionaryEngine
+  - [ ] 12.3 Crear tests para RoleManager
+  - [ ] 12.4 Refactorizar Pictionary para usar RoleManager
+  - **Documentación:** `docs/modules/optional/ROLES_SYSTEM.md`
+
+- [ ] **13.0 Formalizar Realtime Sync Module**
+  - [ ] 13.1 Crear `app/Modules/RealtimeSync/WebSocketService.php`
+  - [ ] 13.2 Crear `BroadcastManager`
+  - [ ] 13.3 Documentar eventos estándar
+  - [ ] 13.4 Crear tests
+  - **Documentación:** `docs/modules/optional/REALTIME_SYNC.md`
+
+- [ ] **14.0 Actualizar Pictionary para Modularidad**
+  - [ ] 14.1 Actualizar `capabilities.json` con módulos requeridos
+  - [ ] 14.2 Simplificar `PictionaryEngine.php` (delegar a módulos)
+  - [ ] 14.3 Verificar que todos los tests pasan
+  - [ ] 14.4 Actualizar documentación
+  - **Documentación:** Actualizar `docs/games/PICTIONARY.md`
+
+---
+
+### ⏳ FASE 5: Segundo Juego - Validación (PENDIENTE)
+
+**Estrategia:** Implementar segundo juego (Trivia o UNO) reutilizando módulos extraídos.
+
+- [ ] **15.0 Implementar Segundo Juego (TBD: Trivia o UNO)**
+  - [ ] 15.1 Crear carpeta `games/{nombre}/`
+  - [ ] 15.2 Implementar `{Nombre}Engine.php`
+  - [ ] 15.3 Crear `config.json` y `capabilities.json`
+  - [ ] 15.4 Reutilizar módulos: Turn, Scoring, Timer, etc.
+  - [ ] 15.5 Implementar lógica específica del juego
+  - [ ] 15.6 Crear vistas y assets
+  - [ ] 15.7 Escribir tests
+  - [ ] 15.8 Validar que módulos son realmente reutilizables
+  - **Documentación:** `docs/games/{NOMBRE}.md`
+
+---
+
+### ⏳ FASE 6: Admin Panel & Polish (PENDIENTE)
+
+- [ ] **16.0 Admin Panel with Filament**
+  - [ ] 16.1 GameResource (CRUD de juegos)
+  - [ ] 16.2 RoomResource (ver salas activas)
+  - [ ] 16.3 MatchResource (historial de partidas)
+  - [ ] 16.4 Dashboard con estadísticas
+  - **Documentación:** Actualizar `docs/ARCHITECTURE.md`
+
+- [ ] **17.0 Testing and Quality Assurance**
+  - [ ] 17.1 Tests end-to-end completos
+  - [ ] 17.2 Refinamiento de UX
+  - [ ] 17.3 Optimización de performance
+  - [ ] 17.4 Documentación completa
+  - **Documentación:** `docs/testing/TESTING_STRATEGY.md`
+
+---
+
+## 🏗️ Architecture Philosophy
+
+> **Documentación completa:** [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md)
+
+Esta plataforma sigue una **arquitectura modular** donde:
+
+### 1️⃣ Core Modules (Siempre Activos)
+
+Servicios **obligatorios** que todos los juegos utilizan:
+
+| Módulo | Estado | Descripción | Docs |
+|--------|--------|-------------|------|
+| **Game Core** | ⏳ Pendiente | Motor del ciclo de vida del juego | [`docs/modules/core/GAME_CORE.md`](../docs/modules/core/GAME_CORE.md) |
+| **Room Manager** | ✅ Implementado | Crear salas, códigos, QR | [`docs/modules/core/ROOM_MANAGER.md`](../docs/modules/core/ROOM_MANAGER.md) |
+| **Player Session** | ✅ Implementado | Jugadores invitados, heartbeat | [`docs/modules/core/PLAYER_SESSION.md`](../docs/modules/core/PLAYER_SESSION.md) |
+| **Game Registry** | ✅ Implementado | Descubrimiento de juegos | [`docs/modules/core/GAME_REGISTRY.md`](../docs/modules/core/GAME_REGISTRY.md) |
+
+### 2️⃣ Optional Modules (Configurables)
+
+Servicios **reutilizables** que los juegos pueden usar o no. Se declaran en `capabilities.json`:
+
+| Módulo | Prioridad | Descripción | Docs |
+|--------|-----------|-------------|------|
+| **Guest System** | 🔥 MVP | Jugadores sin registro | [`docs/modules/optional/GUEST_SYSTEM.md`](../docs/modules/optional/GUEST_SYSTEM.md) |
+| **Turn System** | 🔥 MVP | Turnos secuenciales/simultáneos | [`docs/modules/optional/TURN_SYSTEM.md`](../docs/modules/optional/TURN_SYSTEM.md) |
+| **Scoring System** | 🔥 MVP | Puntuación y ranking | [`docs/modules/optional/SCORING_SYSTEM.md`](../docs/modules/optional/SCORING_SYSTEM.md) |
+| **Timer System** | 🔥 MVP | Temporizadores | [`docs/modules/optional/TIMER_SYSTEM.md`](../docs/modules/optional/TIMER_SYSTEM.md) |
+| **Roles System** | 🔥 MVP | Asignación de roles | [`docs/modules/optional/ROLES_SYSTEM.md`](../docs/modules/optional/ROLES_SYSTEM.md) |
+| **Realtime Sync** | 🔥 MVP | WebSockets (Reverb) | [`docs/modules/optional/REALTIME_SYNC.md`](../docs/modules/optional/REALTIME_SYNC.md) |
+| **Teams System** | ⏳ Post-MVP | Equipos | [`docs/modules/optional/TEAMS_SYSTEM.md`](../docs/modules/optional/TEAMS_SYSTEM.md) |
+| **Card/Deck System** | ⏳ Post-MVP | Mazos de cartas | [`docs/modules/optional/CARD_SYSTEM.md`](../docs/modules/optional/CARD_SYSTEM.md) |
+| **Board/Grid System** | ⏳ Post-MVP | Tableros | [`docs/modules/optional/BOARD_SYSTEM.md`](../docs/modules/optional/BOARD_SYSTEM.md) |
+| **Spectator Mode** | ⏳ Post-MVP | Observadores | [`docs/modules/optional/SPECTATOR_MODE.md`](../docs/modules/optional/SPECTATOR_MODE.md) |
+| **AI Players** | ⏳ Post-MVP | Bots/IA | [`docs/modules/optional/AI_PLAYERS.md`](../docs/modules/optional/AI_PLAYERS.md) |
+| **Replay System** | ⏳ Post-MVP | Grabación de partidas | [`docs/modules/optional/REPLAY_SYSTEM.md`](../docs/modules/optional/REPLAY_SYSTEM.md) |
+
+**Leyenda:**
+- 🔥 MVP = Necesario para Pictionary (extracción en Fase 4)
+- ⏳ Post-MVP = Para juegos futuros
+
+### 3️⃣ Game Modules (Plugins Independientes)
+
+Cada juego es un módulo autocontenido en `games/{nombre}/`:
+
+- **Implementa:** `GameEngineInterface` (contrato obligatorio)
+- **Declara:** Dependencias en `capabilities.json`
+- **Contiene:** Lógica, vistas, JS, CSS, eventos propios
+- **Registro:** Automático al detectarse en `games/` folder
+
+### 4️⃣ Plugin System
+
+Los juegos se cargan dinámicamente:
+
+1. Sistema escanea `games/` folder
+2. Valida que implementen `GameEngineInterface`
+3. Carga solo los módulos opcionales que el juego necesita
+4. Registra rutas, eventos y vistas del juego
 
 ## Ejemplo: capabilities.json
 
@@ -196,7 +399,38 @@ Esta plataforma sigue una **arquitectura de microservicios internos** donde:
 }
 ```
 
-## Notes
+## 📝 Decisiones Arquitectónicas Importantes
+
+Ver ADRs completos en [`docs/decisions/`](../docs/decisions/)
+
+### ADR-001: Sistema Modular vs Monolítico
+**Decisión:** Arquitectura modular con plugins de juegos
+**Razón:** Escalabilidad, reutilización de código, facilita agregar nuevos juegos
+
+### ADR-002: Desarrollo Iterativo (Opción C)
+**Decisión:** Implementar Pictionary primero de forma monolítica, luego extraer módulos
+**Razón:** Evita sobre-ingeniería, valida módulos con casos de uso reales
+**Fases:**
+1. ✅ Core + Room Management
+2. 🚧 Pictionary MVP (monolítico)
+3. ⏳ Extracción de módulos
+4. ⏳ Validación con segundo juego
+
+### ADR-003: WebSockets con Laravel Reverb
+**Decisión:** Laravel Reverb para WebSockets (no Pusher, no Socket.io)
+**Razón:** Nativo de Laravel, gratuito, suficiente para MVP (~1000 conexiones)
+
+### ADR-004: Sin Chat en MVP
+**Decisión:** No implementar chat de texto en MVP
+**Razón:** Juegos presenciales (hablan cara a cara), reduce complejidad
+
+### ADR-005: Phase System en Game Core
+**Decisión:** Fases gestionadas por cada juego (no módulo separado)
+**Razón:** Cada juego tiene fases muy específicas, poca reutilización
+
+---
+
+## 📋 Notes
 
 - **Laravel Reverb** se instala SOLO si algún juego activo requiere WebSockets: `composer require laravel/reverb`
 - **Laravel Echo** y **Pusher JS** se cargan SOLO si el juego en la sala usa sockets: `npm install laravel-echo pusher-js`
@@ -207,3 +441,16 @@ Esta plataforma sigue una **arquitectura de microservicios internos** donde:
 - Each game can have its own Composer dependencies in `games/{name}/composer.json` (optional)
 - Shared services are **injected on-demand** based on game's `capabilities.json`
 - Testing strategy: Core tests, Shared service tests, Per-game tests (isolated)
+
+---
+
+## 🎯 Próximos Pasos Inmediatos
+
+1. **Documentar módulos core existentes** (Room Manager, Player Session, Game Registry)
+2. **Crear plantillas** de documentación para módulos y juegos
+3. **Empezar Fase 3:** Pictionary MVP Mon olítico (Task 4.0)
+
+---
+
+**Última actualización:** 2025-10-21
+**Responsable:** Todo el equipo de desarrollo
