@@ -252,13 +252,17 @@ Ver: [`docs/decisions/ADR-002-ITERATIVE_DEVELOPMENT.md`](../docs/decisions/ADR-0
 
 **Estrategia:** Refactorizar Pictionary para extraer lógica reutilizable como módulos.
 
-- [ ] **9.0 Extraer Turn System Module**
-  - [ ] 9.1 Crear `app/Modules/TurnSystem/TurnManager.php`
-  - [ ] 9.2 Extraer lógica de turnos de PictionaryEngine
-  - [ ] 9.3 Crear tests para TurnManager
-  - [ ] 9.4 Refactorizar Pictionary para usar TurnManager
-  - [ ] 9.5 Actualizar capabilities.json de Pictionary
-  - **Documentación:** `docs/modules/optional/TURN_SYSTEM.md`
+- [x] **9.0 Extraer Turn System Module** - ✅ **COMPLETADO**
+  - [x] 9.1 Crear `app/Services/Modules/TurnSystem/TurnManager.php`
+  - [x] 9.2 Extraer lógica de turnos de PictionaryEngine
+  - [x] 9.3 Crear tests para TurnManager (35 tests, 127 assertions)
+  - [x] 9.4 Refactorizar Pictionary para usar TurnManager
+  - [x] 9.5 Actualizar capabilities.json de Pictionary
+  - [x] 9.6 Crear sistema de configuración declarativa (config.json)
+  - [x] 9.7 Crear GameConfigService para leer/validar configs
+  - [x] 9.8 Implementar UI dinámica en room creation
+  - **Documentación:** `docs/modules/optional/TURN_SYSTEM.md` ✅
+  - **Convención:** `docs/conventions/GAME_CONFIGURATION_CONVENTION.md` ✅
 
 - [ ] **10.0 Extraer Scoring System Module**
   - [ ] 10.1 Crear `app/Modules/ScoringSystem/ScoreManager.php`
