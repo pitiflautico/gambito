@@ -1,0 +1,10 @@
+{
+  "slug": "pictionary",
+  "version": "1.0",
+  "requires": {},
+  "provides": {
+    "events": [],
+    "routes": [],
+    "views": []
+  }
+}

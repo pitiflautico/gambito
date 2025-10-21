@@ -1,0 +1,13 @@
+{
+  "id": "pictionary",
+  "name": "Pictionary",
+  "slug": "pictionary",
+  "description": "Dibuja y adivina palabras antes que los demás. Un jugador dibuja mientras el resto intenta adivinar la palabra secreta.",
+  "minPlayers": 3,
+  "maxPlayers": 10,
+  "estimatedDuration": "15-20 minutos",
+  "type": "drawing",
+  "isPremium": false,
+  "version": "1.0",
+  "author": "Gambito"
+}
