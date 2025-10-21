@@ -10,6 +10,7 @@ games/
     ├── {GameName}Engine.php       # Motor del juego (ej: PictionaryEngine.php)
     ├── capabilities.json          # Módulos que requiere el juego
     ├── config.php                 # Configuración específica del juego
+    ├── routes.php                 # Rutas API y Web del juego (auto-cargadas)
     ├── Events/                    # Eventos de broadcasting del juego
     │   ├── PlayerAnsweredEvent.php
     │   ├── GameStateUpdatedEvent.php
@@ -72,6 +73,36 @@ Y se cargan directamente en las vistas Blade:
 
 **Debe implementar:** `App\Contracts\GameEngineInterface`
 
+## 🛣️ Rutas del Juego (Routes)
+
+**Ubicación:** `games/{slug}/routes.php`
+
+**Auto-carga:** Las rutas se cargan automáticamente por el `GameServiceProvider`
+
+**Estructura estándar:**
+```php
+<?php
+
+use App\Http\Controllers\{GameName}Controller;
+use Illuminate\Support\Facades\Route;
+
+// API Routes
+Route::prefix('api/{slug}')->name('api.{slug}.')->group(function () {
+    Route::post('/action', [Controller::class, 'method'])->name('action');
+});
+
+// Web Routes
+Route::prefix('{slug}')->name('{slug}.')->group(function () {
+    Route::get('/page', [Controller::class, 'method'])->name('page');
+});
+```
+
+**Convenciones:**
+- API routes: `api/{slug}/action` → nombre: `api.{slug}.action`
+- Web routes: `{slug}/page` → nombre: `{slug}.page`
+
+**Documentación completa:** Ver [DYNAMIC_ROUTES.md](architecture/DYNAMIC_ROUTES.md)
+
 ## 📝 Vistas Blade
 
 **Ubicación:** `games/{slug}/views/`
@@ -94,6 +125,7 @@ public function boot(): void
 | Tipo de Archivo | Ubicación | ¿Se compila? |
 |-----------------|-----------|-------------|
 | Motor (Engine) | `games/{slug}/{Game}Engine.php` | ❌ No |
+| Rutas | `games/{slug}/routes.php` | ❌ No (auto-cargadas) |
 | Eventos | `games/{slug}/Events/*.php` | ❌ No |
 | Vistas Blade | `games/{slug}/views/*.blade.php` | ❌ No |
 | **JavaScript** | **`resources/js/{slug}-*.js`** | **✅ SÍ (Vite)** |
@@ -140,6 +172,8 @@ Si ya tienes archivos en ubicaciones incorrectas:
 games/pictionary/
 ├── PictionaryEngine.php           ✅ Motor del juego
 ├── capabilities.json
+├── config.php                     ✅ Configuración del juego
+├── routes.php                     ✅ Rutas (auto-cargadas)
 ├── Events/
 │   ├── PlayerAnsweredEvent.php
 │   └── GameStateUpdatedEvent.php

@@ -1,10 +1,20 @@
 <?php
 
 use App\Http\Controllers\GameController;
-use App\Http\Controllers\PictionaryController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\RoomController;
 use Illuminate\Support\Facades\Route;
+
+/*
+|--------------------------------------------------------------------------
+| Web Routes
+|--------------------------------------------------------------------------
+|
+| Rutas web generales de la plataforma.
+| Las rutas específicas de cada juego se cargan automáticamente desde
+| games/{slug}/routes.php por el GameServiceProvider.
+|
+*/
 
 Route::get('/', function () {
     return view('home');
@@ -27,9 +37,6 @@ Route::middleware('auth')->group(function () {
 // Rutas de Juegos
 Route::get('/games', [GameController::class, 'index'])->name('games.index');
 Route::get('/games/{slug}', [GameController::class, 'show'])->name('games.show');
-
-// Ruta de demo de Pictionary (solo desarrollo)
-Route::get('/pictionary/demo', [PictionaryController::class, 'demo'])->name('pictionary.demo');
 
 // Ruta de test de WebSocket (solo desarrollo)
 Route::get('/test-websocket', function () {
