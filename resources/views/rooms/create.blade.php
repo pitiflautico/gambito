@@ -28,13 +28,14 @@
                             @else
                                 <div class="space-y-3">
                                     @foreach($games as $game)
-                                        <label class="flex items-start p-4 border-2 border-gray-200 rounded-lg cursor-pointer hover:border-blue-500 hover:bg-blue-50 transition">
+                                        <label class="flex items-start p-4 border-2 {{ $selectedGame && $selectedGame->id == $game->id ? 'border-blue-500 bg-blue-50' : 'border-gray-200' }} rounded-lg cursor-pointer hover:border-blue-500 hover:bg-blue-50 transition">
                                             <input
                                                 type="radio"
                                                 name="game_id"
                                                 value="{{ $game->id }}"
                                                 class="mt-1 mr-3 game-selector"
                                                 required
+                                                {{ $selectedGame && $selectedGame->id == $game->id ? 'checked' : '' }}
                                                 onchange="window.location.href='{{ route('rooms.create') }}?game_id={{ $game->id }}'"
                                             >
                                             <div class="flex-1">
