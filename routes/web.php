@@ -33,6 +33,10 @@ Route::prefix('rooms')->name('rooms.')->group(function () {
     Route::get('/join', [RoomController::class, 'join'])->name('join');
     Route::post('/join', [RoomController::class, 'joinByCode'])->name('joinByCode');
 
+    // Nombre de invitado (público)
+    Route::get('/{code}/guest-name', [RoomController::class, 'guestName'])->name('guestName');
+    Route::post('/{code}/guest-name', [RoomController::class, 'storeGuestName'])->name('storeGuestName');
+
     // Vistas de sala (público con código)
     Route::get('/{code}/lobby', [RoomController::class, 'lobby'])->name('lobby');
     Route::get('/{code}', [RoomController::class, 'show'])->name('show');

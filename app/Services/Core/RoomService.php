@@ -153,7 +153,7 @@ class RoomService
      */
     public function getInviteUrl(Room $room): string
     {
-        return route('rooms.join', ['code' => $room->code]);
+        return route('rooms.lobby', ['code' => $room->code]);
     }
 
     /**

@@ -140,13 +140,22 @@ class GameMatch extends Model
     /**
      * Obtener la duración de la partida en segundos.
      */
-    public function getDurationAttribute(): ?int
+    public function duration(): ?int
     {
-        if ($this->started_at && $this->finished_at) {
-            return $this->finished_at->diffInSeconds($this->started_at);
+        if (!$this->started_at) {
+            return null;
         }
 
-        return null;
+        $endTime = $this->finished_at ?? now();
+        return $this->started_at->diffInSeconds($endTime);
+    }
+
+    /**
+     * Accessor para duración (para usar como atributo).
+     */
+    public function getDurationAttribute(): ?int
+    {
+        return $this->duration();
     }
 
     /**

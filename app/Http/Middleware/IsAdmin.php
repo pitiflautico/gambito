@@ -20,7 +20,9 @@ class IsAdmin
         }
 
         if (!auth()->user()->isAdmin()) {
-            abort(403, 'No tienes permisos para acceder a esta área.');
+            // Redirigir al dashboard en lugar de mostrar error 403
+            return redirect()->route('dashboard')
+                ->with('error', 'No tienes permisos para acceder al panel de administración.');
         }
 
         return $next($request);

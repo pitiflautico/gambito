@@ -264,6 +264,107 @@ class PlayerSessionService
     }
 
     /**
+     * Verificar si hay una sesión de invitado activa.
+     *
+     * @return bool True si hay una sesión de invitado
+     */
+    public function hasGuestSession(): bool
+    {
+        return Session::has('guest_player_name') && Session::has('guest_session_id');
+    }
+
+    /**
+     * Crear una sesión de invitado temporal.
+     *
+     * @param string $name Nombre del jugador
+     * @return array Datos de la sesión creada
+     * @throws \InvalidArgumentException Si el nombre es inválido
+     */
+    public function createGuestSession(string $name): array
+    {
+        // Validar nombre
+        $this->validatePlayerName($name);
+
+        // Generar session_id único
+        $sessionId = $this->generateSessionId();
+
+        // Guardar en sesión de Laravel
+        Session::put('guest_player_name', $name);
+        Session::put('guest_session_id', $sessionId);
+
+        Log::info("Guest session created", [
+            'name' => $name,
+            'session_id' => $sessionId,
+        ]);
+
+        return [
+            'name' => $name,
+            'session_id' => $sessionId,
+        ];
+    }
+
+    /**
+     * Obtener datos de la sesión de invitado.
+     *
+     * @return array|null Datos de la sesión o null
+     */
+    public function getGuestData(): ?array
+    {
+        if (!$this->hasGuestSession()) {
+            return null;
+        }
+
+        return [
+            'name' => Session::get('guest_player_name'),
+            'session_id' => Session::get('guest_session_id'),
+        ];
+    }
+
+    /**
+     * Crear jugador invitado en una partida usando sesión existente.
+     *
+     * @param GameMatch $match La partida
+     * @param string $name Nombre del jugador
+     * @return Player El jugador creado
+     * @throws \InvalidArgumentException Si hay error
+     */
+    public function createGuestPlayer(GameMatch $match, string $name): Player
+    {
+        $guestData = $this->getGuestData();
+
+        if (!$guestData) {
+            throw new \InvalidArgumentException('No hay sesión de invitado activa');
+        }
+
+        // Verificar que el nombre coincida
+        if ($guestData['name'] !== $name) {
+            throw new \InvalidArgumentException('El nombre no coincide con la sesión');
+        }
+
+        // Verificar que no haya duplicados de nombre en la partida
+        if ($this->isNameTaken($match, $name)) {
+            throw new \InvalidArgumentException("El nombre '{$name}' ya está en uso en esta partida");
+        }
+
+        // Crear jugador
+        $player = Player::create([
+            'match_id' => $match->id,
+            'name' => $name,
+            'session_id' => $guestData['session_id'],
+            'is_connected' => true,
+            'last_ping' => now(),
+        ]);
+
+        Log::info("Guest player created", [
+            'player_id' => $player->id,
+            'name' => $player->name,
+            'match_id' => $match->id,
+        ]);
+
+        return $player;
+    }
+
+    /**
      * Limpiar la sesión del jugador.
      *
      * @return void

@@ -117,6 +117,8 @@
                     @if($isMaster)
                         <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg">
                             <div class="p-6">
+                                <h3 class="text-sm font-medium text-gray-700 mb-3">Control de la Sala</h3>
+
                                 @if($canStart['can_start'])
                                     <button
                                         onclick="startGame()"
@@ -139,8 +141,27 @@
                                     onclick="closeRoom()"
                                     class="w-full mt-3 px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500"
                                 >
-                                    Cerrar Sala
+                                    ❌ Cerrar Sala
                                 </button>
+                            </div>
+                        </div>
+                    @else
+                        <!-- Mensaje para jugadores no-master -->
+                        <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg">
+                            <div class="p-6">
+                                <div class="text-center">
+                                    <div class="mb-3">
+                                        <svg class="w-16 h-16 mx-auto text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                        </svg>
+                                    </div>
+                                    <h3 class="text-lg font-medium text-gray-900 mb-2">
+                                        Esperando al organizador
+                                    </h3>
+                                    <p class="text-sm text-gray-600">
+                                        {{ $room->master->name }} iniciará la partida cuando todos estén listos
+                                    </p>
+                                </div>
                             </div>
                         </div>
                     @endif
@@ -154,8 +175,27 @@
         function copyToClipboard() {
             const input = document.getElementById('invite-url');
             input.select();
-            document.execCommand('copy');
-            alert('URL copiada al portapapeles');
+            input.setSelectionRange(0, 99999); // Para móviles
+
+            // Usar la API moderna de clipboard
+            navigator.clipboard.writeText(input.value).then(function() {
+                // Cambiar texto del botón temporalmente
+                const button = event.target;
+                const originalText = button.textContent;
+                button.textContent = '✓ Copiado';
+                button.classList.add('bg-green-600');
+                button.classList.remove('bg-gray-700');
+
+                setTimeout(function() {
+                    button.textContent = originalText;
+                    button.classList.remove('bg-green-600');
+                    button.classList.add('bg-gray-700');
+                }, 2000);
+            }).catch(function(err) {
+                // Fallback para navegadores antiguos
+                document.execCommand('copy');
+                alert('URL copiada al portapapeles');
+            });
         }
 
         function startGame() {
@@ -207,9 +247,30 @@
         }
 
         // Auto-refresh cada 5 segundos para actualizar lista de jugadores
-        setInterval(() => {
-            location.reload();
-        }, 5000);
+        let refreshInterval = setInterval(() => {
+            fetch('/api/rooms/{{ $room->code }}/stats')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // Si el número de jugadores cambió, recargar la página
+                        const currentPlayers = {{ $stats['players'] }};
+                        if (data.data.players !== currentPlayers) {
+                            location.reload();
+                        }
+
+                        // Si el estado de la sala cambió, redirigir
+                        @if($room->status === App\Models\Room::STATUS_WAITING)
+                            // Si la partida comenzó, redirigir a la sala activa
+                            if (data.data.status === 'playing') {
+                                window.location.href = '/rooms/{{ $room->code }}';
+                            }
+                        @endif
+                    }
+                })
+                .catch(error => {
+                    console.error('Error refreshing:', error);
+                });
+        }, 3000); // Cada 3 segundos
     </script>
     @endpush
 </x-app-layout>

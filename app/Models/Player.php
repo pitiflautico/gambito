@@ -14,6 +14,7 @@ class Player extends Model
      */
     protected $fillable = [
         'match_id',
+        'user_id',
         'session_id',
         'name',
         'role',
@@ -39,6 +40,14 @@ class Player extends Model
     public function match(): BelongsTo
     {
         return $this->belongsTo(GameMatch::class, 'match_id');
+    }
+
+    /**
+     * Relación: El jugador pertenece a un usuario (opcional).
+     */
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
     }
 
     /**

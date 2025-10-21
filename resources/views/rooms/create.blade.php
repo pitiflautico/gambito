@@ -26,22 +26,22 @@
                                     </p>
                                 </div>
                             @else
-                                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                <div class="space-y-3">
                                     @foreach($games as $game)
-                                        <label class="relative cursor-pointer">
+                                        <label class="flex items-start p-4 border-2 border-gray-200 rounded-lg cursor-pointer hover:border-blue-500 hover:bg-blue-50 transition">
                                             <input
                                                 type="radio"
                                                 name="game_id"
                                                 value="{{ $game->id }}"
-                                                class="peer sr-only"
+                                                class="mt-1 mr-3"
                                                 required
                                             >
-                                            <div class="border-2 border-gray-200 rounded-lg p-4 hover:border-blue-500 peer-checked:border-blue-600 peer-checked:bg-blue-50 transition">
-                                                <h3 class="font-bold text-lg mb-2">{{ $game->name }}</h3>
-                                                <p class="text-sm text-gray-600 mb-3">{{ $game->description }}</p>
-                                                <div class="text-xs text-gray-500 space-y-1">
-                                                    <p>👥 {{ $game->min_players }}-{{ $game->max_players }} jugadores</p>
-                                                    <p>⏱️ {{ $game->estimated_duration }}</p>
+                                            <div class="flex-1">
+                                                <h3 class="font-bold text-lg mb-1">{{ $game->name }}</h3>
+                                                <p class="text-sm text-gray-600 mb-2">{{ $game->description }}</p>
+                                                <div class="text-xs text-gray-500 flex gap-4">
+                                                    <span>👥 {{ $game->min_players }}-{{ $game->max_players }} jugadores</span>
+                                                    <span>⏱️ {{ $game->estimated_duration }}</span>
                                                 </div>
                                             </div>
                                         </label>
@@ -103,16 +103,16 @@
                         @endif
 
                         <!-- Botones -->
-                        <div class="flex items-center justify-end space-x-4">
+                        <div class="flex items-center justify-end space-x-4 mt-6">
                             <a
                                 href="{{ route('dashboard') }}"
-                                class="px-4 py-2 text-gray-700 hover:text-gray-900"
+                                class="text-sm text-gray-600 hover:text-gray-900 underline"
                             >
                                 Cancelar
                             </a>
                             <button
                                 type="submit"
-                                class="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50"
+                                class="inline-flex items-center px-6 py-3 bg-blue-600 border border-transparent rounded-md font-semibold text-xs text-white uppercase tracking-widest hover:bg-blue-700 focus:bg-blue-700 active:bg-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 transition ease-in-out duration-150"
                                 {{ $games->isEmpty() ? 'disabled' : '' }}
                             >
                                 Crear Sala

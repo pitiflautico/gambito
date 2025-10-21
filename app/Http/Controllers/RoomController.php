@@ -4,7 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Models\Game;
 use App\Models\GameMatch;
+use App\Models\Player;
 use App\Models\Room;
+use App\Services\Core\PlayerSessionService;
 use App\Services\Core\RoomService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -16,12 +18,15 @@ class RoomController extends Controller
      */
     protected RoomService $roomService;
 
-    public function __construct(RoomService $roomService)
+    /**
+     * Player session service.
+     */
+    protected PlayerSessionService $playerSessionService;
+
+    public function __construct(RoomService $roomService, PlayerSessionService $playerSessionService)
     {
         $this->roomService = $roomService;
-
-        // Solo usuarios autenticados pueden crear salas
-        $this->middleware('auth')->only(['create', 'store']);
+        $this->playerSessionService = $playerSessionService;
     }
 
     /**
@@ -70,6 +75,16 @@ class RoomController extends Controller
             $match = GameMatch::create([
                 'room_id' => $room->id,
                 'game_state' => [],
+            ]);
+
+            // Crear jugador para el master
+            Player::create([
+                'match_id' => $match->id,
+                'user_id' => Auth::id(),
+                'name' => Auth::user()->name,
+                'role' => 'master',
+                'is_connected' => true,
+                'last_ping' => now(),
             ]);
 
             return redirect()->route('rooms.lobby', ['code' => $room->code])
@@ -135,6 +150,12 @@ class RoomController extends Controller
             abort(404, 'Sala no encontrada');
         }
 
+        // Cargar relaciones necesarias
+        $room->load(['game', 'master']);
+        if ($room->match) {
+            $room->match->load('players');
+        }
+
         // Verificar que la sala no haya terminado
         if ($room->status === Room::STATUS_FINISHED) {
             return redirect()->route('home')
@@ -144,6 +165,53 @@ class RoomController extends Controller
         // Si la sala ya está jugando, redirigir a la sala activa
         if ($room->status === Room::STATUS_PLAYING) {
             return redirect()->route('rooms.show', ['code' => $code]);
+        }
+
+        // Si está autenticado, verificar que esté en la partida como jugador
+        if (Auth::check()) {
+            $existingPlayer = $room->match->players()
+                ->where('user_id', Auth::id())
+                ->first();
+
+            // Si no existe como jugador, agregarlo
+            if (!$existingPlayer) {
+                Player::create([
+                    'match_id' => $room->match->id,
+                    'user_id' => Auth::id(),
+                    'name' => Auth::user()->name,
+                    'role' => Auth::id() === $room->master_id ? 'master' : null,
+                    'is_connected' => true,
+                    'last_ping' => now(),
+                ]);
+                // Recargar jugadores
+                $room->match->load('players');
+            }
+        }
+
+        // Si no está autenticado y no tiene sesión de invitado, pedir nombre
+        if (!Auth::check() && !$this->playerSessionService->hasGuestSession()) {
+            return redirect()->route('rooms.guestName', ['code' => $code]);
+        }
+
+        // Si es invitado, intentar unirse automáticamente
+        if (!Auth::check() && $this->playerSessionService->hasGuestSession()) {
+            $guestData = $this->playerSessionService->getGuestData();
+
+            // Verificar si el jugador ya existe en esta partida
+            $existingPlayer = $room->match->players()
+                ->where('session_id', $guestData['session_id'])
+                ->first();
+
+            // Si no existe, crear el jugador
+            if (!$existingPlayer) {
+                try {
+                    $this->playerSessionService->createGuestPlayer($room->match, $guestData['name']);
+                    // Recargar jugadores
+                    $room->match->load('players');
+                } catch (\Exception $e) {
+                    return back()->withErrors(['error' => $e->getMessage()]);
+                }
+            }
         }
 
         // Obtener estadísticas de la sala
@@ -163,6 +231,64 @@ class RoomController extends Controller
     }
 
     /**
+     * Mostrar formulario para pedir nombre de invitado.
+     *
+     * @param string $code Código de la sala
+     */
+    public function guestName(string $code)
+    {
+        $code = strtoupper($code);
+
+        // Verificar que la sala existe
+        $room = $this->roomService->findRoomByCode($code);
+
+        if (!$room) {
+            abort(404, 'Sala no encontrada');
+        }
+
+        // Si el usuario está autenticado, redirigir al lobby directamente
+        if (Auth::check()) {
+            return redirect()->route('rooms.lobby', ['code' => $code]);
+        }
+
+        // Si ya tiene sesión de invitado, redirigir al lobby
+        if ($this->playerSessionService->hasGuestSession()) {
+            return redirect()->route('rooms.lobby', ['code' => $code]);
+        }
+
+        return view('rooms.guest-name', compact('code'));
+    }
+
+    /**
+     * Procesar el nombre del invitado y crear sesión temporal.
+     *
+     * @param string $code Código de la sala
+     */
+    public function storeGuestName(Request $request, string $code)
+    {
+        $validated = $request->validate([
+            'player_name' => 'required|string|min:2|max:50',
+        ]);
+
+        $code = strtoupper($code);
+        $room = $this->roomService->findRoomByCode($code);
+
+        if (!$room) {
+            return back()->withErrors(['error' => 'Sala no encontrada.']);
+        }
+
+        // Crear sesión de invitado
+        try {
+            $this->playerSessionService->createGuestSession($validated['player_name']);
+
+            return redirect()->route('rooms.lobby', ['code' => $code])
+                ->with('success', '¡Bienvenido ' . $validated['player_name'] . '!');
+        } catch (\Exception $e) {
+            return back()->withErrors(['error' => $e->getMessage()]);
+        }
+    }
+
+    /**
      * Mostrar sala activa (partida en curso).
      *
      * @param string $code Código de la sala
@@ -175,6 +301,9 @@ class RoomController extends Controller
         if (!$room) {
             abort(404, 'Sala no encontrada');
         }
+
+        // Cargar relaciones necesarias
+        $room->load(['game', 'match.players', 'master']);
 
         // Si la sala está esperando, redirigir al lobby
         if ($room->status === Room::STATUS_WAITING) {
@@ -203,6 +332,9 @@ class RoomController extends Controller
         if (!$room) {
             abort(404, 'Sala no encontrada');
         }
+
+        // Cargar relaciones necesarias
+        $room->load(['game', 'match.players', 'master']);
 
         // Verificar que la sala haya terminado
         if ($room->status !== Room::STATUS_FINISHED) {
@@ -278,6 +410,7 @@ class RoomController extends Controller
             'data' => array_merge($stats, [
                 'can_start' => $canStart['can_start'],
                 'can_start_reason' => $canStart['reason'],
+                'status' => $room->status,
             ]),
         ]);
     }

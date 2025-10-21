@@ -15,6 +15,20 @@
 
     <div class="py-12">
         <div class="max-w-7xl mx-auto sm:px-6 lg:px-8 space-y-6">
+            <!-- Mensajes de Error -->
+            @if(session('error'))
+                <div class="bg-red-50 border border-red-200 rounded-lg p-4">
+                    <p class="text-red-800">{{ session('error') }}</p>
+                </div>
+            @endif
+
+            <!-- Mensajes de Éxito -->
+            @if(session('success'))
+                <div class="bg-green-50 border border-green-200 rounded-lg p-4">
+                    <p class="text-green-800">{{ session('success') }}</p>
+                </div>
+            @endif
+
             <!-- Bienvenida -->
             <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg">
                 <div class="p-6 text-gray-900">
