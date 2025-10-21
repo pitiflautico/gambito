@@ -325,11 +325,33 @@ Ver: [`docs/decisions/ADR-002-ITERATIVE_DEVELOPMENT.md`](../docs/decisions/ADR-0
   - [ ] 16.4 Dashboard con estadísticas
   - **Documentación:** Actualizar `docs/ARCHITECTURE.md`
 
-- [ ] **17.0 Testing and Quality Assurance**
-  - [ ] 17.1 Tests end-to-end completos
-  - [ ] 17.2 Refinamiento de UX
-  - [ ] 17.3 Optimización de performance
-  - [ ] 17.4 Documentación completa
+- [ ] **17.0 Sistema de Rutas Dinámicas por Juego**
+  - [ ] 17.1 Crear `routes.php` en cada juego (`games/{game}/routes.php`)
+  - [ ] 17.2 Service Provider para cargar rutas dinámicamente
+  - [ ] 17.3 Cada juego declara sus rutas API y Web propias
+  - [ ] 17.4 Prefijos automáticos basados en slug del juego
+  - [ ] 17.5 Middleware configurables por juego
+  - [ ] 17.6 Actualizar Pictionary para usar rutas dinámicas
+  - **Objetivo:** Evitar hardcodear rutas de juegos en `routes/api.php` y `routes/web.php`
+  - **Documentación:** `docs/architecture/DYNAMIC_ROUTES.md`
+
+- [ ] **18.0 Extracción de Módulos Opcionales desde Pictionary**
+  - [ ] 18.1 Extraer Turn System (orden de turnos, rotación)
+  - [ ] 18.2 Extraer Round System (control de rondas)
+  - [ ] 18.3 Extraer Scoring System (puntuación genérica)
+  - [ ] 18.4 Extraer Timer System (temporizadores configurables)
+  - [ ] 18.5 Extraer Roles System (asignación de roles)
+  - [ ] 18.6 Extraer Real-time Sync (WebSocket helpers)
+  - [ ] 18.7 Actualizar PictionaryEngine para usar módulos
+  - [ ] 18.8 Documentar cada módulo extraído
+  - **Objetivo:** Separar lógica reutilizable de Pictionary en módulos independientes
+  - **Documentación:** `docs/modules/optional/` (actualizar cada módulo)
+
+- [ ] **19.0 Testing and Quality Assurance**
+  - [ ] 19.1 Tests end-to-end completos
+  - [ ] 19.2 Refinamiento de UX
+  - [ ] 19.3 Optimización de performance
+  - [ ] 19.4 Documentación completa
   - **Documentación:** `docs/testing/TESTING_STRATEGY.md`
 
 ---
