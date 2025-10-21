@@ -1,0 +1,829 @@
+/**
+ * Pictionary Canvas - Sistema de dibujo
+ *
+ * Maneja el canvas HTML5 para dibujar, herramientas de dibujo,
+ * y eventos de mouse/touch.
+ *
+ * TODO Task 7.0: Integrar WebSockets para sincronización en tiempo real
+ */
+
+class PictionaryCanvas {
+    constructor() {
+        this.canvas = document.getElementById('drawing-canvas');
+        this.ctx = this.canvas.getContext('2d');
+
+        // Estado del dibujo
+        this.isDrawing = false;
+        this.lastX = 0;
+        this.lastY = 0;
+
+        // Herramientas
+        this.currentTool = 'pencil'; // 'pencil' o 'eraser'
+        this.currentColor = '#000000';
+        this.currentSize = 5;
+
+        // Estado del juego
+        this.isDrawer = false;
+        this.isPaused = false; // Se pausa cuando alguien pulsa "YO SÉ"
+        this.isEliminated = false; // Si este jugador fue eliminado
+        this.gameState = null;
+
+        // Inicializar
+        this.init();
+    }
+
+    init() {
+        this.setupCanvas();
+        this.bindToolEvents();
+        this.bindCanvasEvents();
+        this.bindFormEvents();
+
+        console.log('Pictionary Canvas initialized');
+    }
+
+    /**
+     * Configurar canvas inicial
+     */
+    setupCanvas() {
+        // Fondo blanco
+        this.ctx.fillStyle = '#FFFFFF';
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+        // Configuración de dibujo
+        this.ctx.lineCap = 'round';
+        this.ctx.lineJoin = 'round';
+    }
+
+    /**
+     * Vincular eventos de las herramientas
+     */
+    bindToolEvents() {
+        // Botones de herramientas (lápiz/borrador)
+        document.getElementById('tool-pencil').addEventListener('click', () => {
+            this.setTool('pencil');
+        });
+
+        document.getElementById('tool-eraser').addEventListener('click', () => {
+            this.setTool('eraser');
+        });
+
+        // Selector de colores
+        document.querySelectorAll('.color-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const color = e.currentTarget.dataset.color;
+                this.setColor(color);
+
+                // Actualizar UI
+                document.querySelectorAll('.color-btn').forEach(b => b.classList.remove('active'));
+                e.currentTarget.classList.add('active');
+            });
+        });
+
+        // Selector de grosor
+        document.querySelectorAll('.size-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const size = parseInt(e.currentTarget.dataset.size);
+                this.setSize(size);
+
+                // Actualizar UI
+                document.querySelectorAll('.size-btn').forEach(b => b.classList.remove('active'));
+                e.currentTarget.classList.add('active');
+            });
+        });
+
+        // Botón limpiar canvas
+        document.getElementById('clear-canvas').addEventListener('click', () => {
+            if (this.isDrawer) {
+                this.clearCanvas();
+            }
+        });
+    }
+
+    /**
+     * Vincular eventos del canvas (mouse y touch)
+     */
+    bindCanvasEvents() {
+        // Eventos de mouse
+        this.canvas.addEventListener('mousedown', (e) => this.startDrawing(e));
+        this.canvas.addEventListener('mousemove', (e) => this.draw(e));
+        this.canvas.addEventListener('mouseup', () => this.stopDrawing());
+        this.canvas.addEventListener('mouseout', () => this.stopDrawing());
+
+        // Eventos de touch (móvil/tablet)
+        this.canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const mouseEvent = new MouseEvent('mousedown', {
+                clientX: touch.clientX,
+                clientY: touch.clientY
+            });
+            this.canvas.dispatchEvent(mouseEvent);
+        });
+
+        this.canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const mouseEvent = new MouseEvent('mousemove', {
+                clientX: touch.clientX,
+                clientY: touch.clientY
+            });
+            this.canvas.dispatchEvent(mouseEvent);
+        });
+
+        this.canvas.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            const mouseEvent = new MouseEvent('mouseup', {});
+            this.canvas.dispatchEvent(mouseEvent);
+        });
+    }
+
+    /**
+     * Vincular eventos de formularios y botones
+     */
+    bindFormEvents() {
+        // Botón "YO SÉ" (adivinadores)
+        const btnYoSe = document.getElementById('btn-yo-se');
+        if (btnYoSe) {
+            btnYoSe.addEventListener('click', () => this.pressYoSe());
+        }
+
+        // Botones de confirmación (dibujante)
+        const btnCorrect = document.getElementById('btn-correct');
+        const btnIncorrect = document.getElementById('btn-incorrect');
+
+        if (btnCorrect) {
+            btnCorrect.addEventListener('click', () => this.confirmAnswer(true));
+        }
+
+        if (btnIncorrect) {
+            btnIncorrect.addEventListener('click', () => this.confirmAnswer(false));
+        }
+
+        // Botón refrescar
+        const btnRefresh = document.getElementById('btn-refresh');
+        if (btnRefresh) {
+            btnRefresh.addEventListener('click', () => this.refreshGameState());
+        }
+    }
+
+    /**
+     * Iniciar dibujo
+     */
+    startDrawing(e) {
+        if (!this.isDrawer) return; // Solo el dibujante puede dibujar
+        if (this.isPaused) return; // No dibujar si está pausado
+
+        this.isDrawing = true;
+        const coords = this.getCanvasCoordinates(e);
+        this.lastX = coords.x;
+        this.lastY = coords.y;
+    }
+
+    /**
+     * Dibujar en el canvas
+     */
+    draw(e) {
+        if (!this.isDrawing) return;
+        if (!this.isDrawer) return;
+        if (this.isPaused) return; // No dibujar si está pausado
+
+        const coords = this.getCanvasCoordinates(e);
+
+        this.ctx.strokeStyle = this.currentTool === 'eraser' ? '#FFFFFF' : this.currentColor;
+        this.ctx.lineWidth = this.currentTool === 'eraser' ? this.currentSize * 2 : this.currentSize;
+
+        this.ctx.beginPath();
+        this.ctx.moveTo(this.lastX, this.lastY);
+        this.ctx.lineTo(coords.x, coords.y);
+        this.ctx.stroke();
+
+        // TODO Task 7.0: Emitir evento WebSocket con los datos del trazo
+        // this.emitDrawEvent({
+        //     x0: this.lastX,
+        //     y0: this.lastY,
+        //     x1: coords.x,
+        //     y1: coords.y,
+        //     color: this.currentTool === 'eraser' ? '#FFFFFF' : this.currentColor,
+        //     size: this.currentTool === 'eraser' ? this.currentSize * 2 : this.currentSize
+        // });
+
+        // TEMPORAL: Guardar canvas en localStorage para demo mode
+        if (this.isDrawer) {
+            this.saveCanvasToBase64();
+        }
+
+        this.lastX = coords.x;
+        this.lastY = coords.y;
+    }
+
+    /**
+     * Detener dibujo
+     */
+    stopDrawing() {
+        this.isDrawing = false;
+    }
+
+    /**
+     * Obtener coordenadas relativas al canvas
+     */
+    getCanvasCoordinates(e) {
+        const rect = this.canvas.getBoundingClientRect();
+        const scaleX = this.canvas.width / rect.width;
+        const scaleY = this.canvas.height / rect.height;
+
+        return {
+            x: (e.clientX - rect.left) * scaleX,
+            y: (e.clientY - rect.top) * scaleY
+        };
+    }
+
+    /**
+     * Cambiar herramienta
+     */
+    setTool(tool) {
+        this.currentTool = tool;
+
+        // Actualizar UI
+        document.querySelectorAll('.tool-btn').forEach(btn => btn.classList.remove('active'));
+        document.getElementById(`tool-${tool}`).classList.add('active');
+
+        console.log('Tool changed to:', tool);
+    }
+
+    /**
+     * Cambiar color
+     */
+    setColor(color) {
+        this.currentColor = color;
+        console.log('Color changed to:', color);
+    }
+
+    /**
+     * Cambiar grosor
+     */
+    setSize(size) {
+        this.currentSize = size;
+        console.log('Brush size changed to:', size);
+    }
+
+    /**
+     * Limpiar canvas
+     */
+    clearCanvas() {
+        this.ctx.fillStyle = '#FFFFFF';
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+        // TODO Task 7.0: Emitir evento WebSocket de limpieza
+        // this.emitClearEvent();
+
+        // TEMPORAL: Guardar canvas limpio en localStorage
+        if (this.isDrawer) {
+            this.saveCanvasToBase64();
+        }
+
+        console.log('Canvas cleared');
+    }
+
+    /**
+     * Dibujar trazo desde evento remoto (WebSocket)
+     * TODO Task 7.0: Implementar cuando se agregue WebSocket
+     */
+    drawRemoteStroke(data) {
+        this.ctx.strokeStyle = data.color;
+        this.ctx.lineWidth = data.size;
+
+        this.ctx.beginPath();
+        this.ctx.moveTo(data.x0, data.y0);
+        this.ctx.lineTo(data.x1, data.y1);
+        this.ctx.stroke();
+    }
+
+    /**
+     * Establecer rol del jugador
+     */
+    setRole(isDrawer, word = null) {
+        this.isDrawer = isDrawer;
+
+        const wordDisplay = document.getElementById('word-display');
+        const secretWord = document.getElementById('secret-word');
+        const yoSeContainer = document.getElementById('yo-se-container');
+        const confirmationContainer = document.getElementById('confirmation-container');
+        const drawingTools = document.querySelector('.drawing-tools');
+
+        if (isDrawer) {
+            // DIBUJANTE
+            // Mostrar palabra secreta
+            wordDisplay.classList.remove('hidden');
+            secretWord.textContent = word || '-';
+
+            // Ocultar botón "YO SÉ"
+            yoSeContainer.classList.add('hidden');
+
+            // Mostrar herramientas de dibujo
+            if (drawingTools) {
+                drawingTools.style.display = 'flex';
+            }
+
+            // Habilitar herramientas
+            this.canvas.style.cursor = 'crosshair';
+        } else {
+            // ADIVINADOR
+            // Ocultar palabra secreta
+            wordDisplay.classList.add('hidden');
+
+            // Mostrar botón "YO SÉ" si no está eliminado
+            if (!this.isEliminated) {
+                yoSeContainer.classList.remove('hidden');
+            }
+
+            // Ocultar confirmación
+            confirmationContainer.classList.add('hidden');
+
+            // OCULTAR herramientas de dibujo
+            if (drawingTools) {
+                drawingTools.style.display = 'none';
+            }
+
+            // Deshabilitar dibujo
+            this.canvas.style.cursor = 'default';
+        }
+    }
+
+    /**
+     * Pulsar botón "YO SÉ"
+     */
+    pressYoSe() {
+        console.log('Player pressed YO SÉ button');
+
+        // Ocultar botón "YO SÉ"
+        document.getElementById('yo-se-container').classList.add('hidden');
+
+        // Mostrar mensaje de espera
+        document.getElementById('waiting-confirmation').classList.remove('hidden');
+
+        // TODO Task 6.0: Enviar al servidor que pulsó "YO SÉ"
+        // Esta llamada pausará el juego para todos
+        // fetch('/api/pictionary/answer', {
+        //     method: 'POST',
+        //     headers: {
+        //         'Content-Type': 'application/json',
+        //         'X-CSRF-TOKEN': window.gameData.csrfToken
+        //     },
+        //     body: JSON.stringify({
+        //         match_id: window.gameData.matchId,
+        //     })
+        // });
+
+        // TEMPORAL: Simular pausa local
+        this.isPaused = true;
+        this.addEventToList('Dijiste "YO SÉ". Di la palabra EN VOZ ALTA.', 'pending');
+    }
+
+    /**
+     * Refrescar estado del juego (simula WebSocket hasta Task 7.0)
+     */
+    refreshGameState() {
+        console.log('Refreshing game state...');
+
+        const btnRefresh = document.getElementById('btn-refresh');
+        btnRefresh.disabled = true;
+        btnRefresh.innerHTML = '<span>Actualizando...</span>';
+
+        // TODO Task 6.0: Obtener estado actualizado del servidor
+        // Esto debería traer:
+        // - El canvas actualizado (imagen base64 o array de trazos)
+        // - Estado del juego (is_paused, pending_answer, etc.)
+        // - Lista de jugadores y puntuaciones
+
+        // fetch(`/api/pictionary/state/${window.gameData.matchId}`)
+        //     .then(res => res.json())
+        //     .then(data => {
+        //         // Restaurar canvas desde el servidor
+        //         if (data.canvas_image) {
+        //             this.loadCanvasFromBase64(data.canvas_image);
+        //         }
+        //
+        //         // Actualizar estado del juego
+        //         if (data.is_paused) {
+        //             this.isPaused = true;
+        //         }
+        //
+        //         // Si hay respuesta pendiente y soy el dibujante
+        //         if (data.pending_answer && this.isDrawer) {
+        //             this.showConfirmation(data.pending_answer.player_name);
+        //         }
+        //
+        //         btnRefresh.disabled = false;
+        //         btnRefresh.innerHTML = '<svg>...</svg><span>Actualizar</span>';
+        //     });
+
+        // TEMPORAL: Simular sincronización del canvas
+        // En demo mode, guardamos y restauramos desde localStorage
+        console.log('🔄 Refreshing... isDrawer:', this.isDrawer);
+
+        const savedCanvas = localStorage.getItem('pictionary_canvas_demo');
+        console.log('📦 localStorage has data:', savedCanvas ? 'YES (' + savedCanvas.substring(0, 50) + '...)' : 'NO');
+
+        if (!this.isDrawer) {
+            // Adivinador: cargar el canvas guardado
+            if (savedCanvas) {
+                console.log('⬇️ Loading canvas from localStorage...');
+                this.loadCanvasFromBase64(savedCanvas);
+                this.addEventToList('Canvas actualizado desde el servidor', 'info');
+            } else {
+                console.log('⚠️ No canvas data in localStorage');
+                this.addEventToList('No hay dibujo disponible aún. El dibujante no ha dibujado nada.', 'info');
+            }
+
+            // TEMPORAL: Verificar si fue eliminado
+            const wasEliminated = localStorage.getItem('pictionary_player_eliminated');
+            if (wasEliminated === 'true' && !this.isEliminated) {
+                const reason = localStorage.getItem('pictionary_eliminated_reason') || 'Respuesta incorrecta';
+                console.log('❌ Player was eliminated:', reason);
+                this.addEventToList('El dibujante confirmó que tu respuesta fue incorrecta', 'incorrect');
+                this.markAsEliminated(reason);
+            }
+        } else {
+            // Dibujante: solo confirmar que está guardado
+            if (savedCanvas) {
+                console.log('✅ Dibujante - Canvas ya está guardado');
+                this.addEventToList('Tu dibujo está guardado', 'info');
+            }
+        }
+
+        setTimeout(() => {
+            btnRefresh.disabled = false;
+            btnRefresh.innerHTML = `
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="23 4 23 10 17 10"></polyline>
+                    <polyline points="1 20 1 14 7 14"></polyline>
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                </svg>
+                <span>Actualizar</span>
+            `;
+        }, 500);
+    }
+
+    /**
+     * Cargar canvas desde imagen base64
+     */
+    loadCanvasFromBase64(base64Image) {
+        const img = new Image();
+        img.onload = () => {
+            // Limpiar canvas primero
+            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+            // Dibujar imagen
+            this.ctx.drawImage(img, 0, 0);
+            console.log('✅ Canvas loaded from base64 successfully');
+        };
+        img.onerror = (error) => {
+            console.error('❌ Error loading canvas image:', error);
+        };
+        img.src = base64Image;
+    }
+
+    /**
+     * Guardar canvas a base64 (para demo mode)
+     */
+    saveCanvasToBase64() {
+        try {
+            const base64 = this.canvas.toDataURL('image/png');
+            localStorage.setItem('pictionary_canvas_demo', base64);
+            console.log('✅ Canvas saved to localStorage:', base64.substring(0, 50) + '...');
+        } catch (error) {
+            console.error('❌ Error saving canvas:', error);
+        }
+    }
+
+    /**
+     * Mostrar confirmación al dibujante
+     */
+    showConfirmation(playerName) {
+        document.getElementById('pending-player-name').textContent = playerName;
+        document.getElementById('confirmation-container').classList.remove('hidden');
+
+        // Pausar el canvas
+        this.isPaused = true;
+
+        this.addEventToList(`${playerName} pulso YO SÉ y está diciendo la respuesta...`, 'pending');
+    }
+
+    /**
+     * Añadir evento a la lista de actividad
+     */
+    addEventToList(message, type = 'info') {
+        const answersList = document.getElementById('answers-list');
+        const eventElement = document.createElement('div');
+        eventElement.className = `answer-item answer-${type}`;
+
+        const icon = type === 'correct' ? '✓' : type === 'incorrect' ? '✗' : type === 'pending' ? '⏳' : 'ℹ️';
+
+        eventElement.innerHTML = `
+            <span class="answer-text">${message}</span>
+            <span class="answer-status">${icon}</span>
+        `;
+        answersList.appendChild(eventElement);
+
+        // Scroll al final
+        answersList.scrollTop = answersList.scrollHeight;
+    }
+
+    /**
+     * Enviar respuesta (adivinadores)
+     */
+    submitAnswer() {
+        const input = document.getElementById('answer-input');
+        const answer = input.value.trim();
+
+        if (!answer) return;
+
+        console.log('Submitting answer:', answer);
+
+        // TODO Task 6.0: Enviar al servidor vía AJAX
+        // fetch('/api/pictionary/answer', {
+        //     method: 'POST',
+        //     headers: {
+        //         'Content-Type': 'application/json',
+        //         'X-CSRF-TOKEN': window.gameData.csrfToken
+        //     },
+        //     body: JSON.stringify({
+        //         match_id: window.gameData.matchId,
+        //         answer: answer
+        //     })
+        // });
+
+        // Limpiar input
+        input.value = '';
+
+        // Mostrar en UI (temporal)
+        this.addAnswerToList(window.gameData.playerId, answer, 'pending');
+    }
+
+    /**
+     * Confirmar respuesta (dibujante)
+     */
+    confirmAnswer(isCorrect) {
+        console.log('Answer confirmed as:', isCorrect ? 'correct' : 'incorrect');
+
+        const playerName = document.getElementById('pending-player-name').textContent;
+
+        // Ocultar panel de confirmación
+        document.getElementById('confirmation-container').classList.add('hidden');
+
+        if (isCorrect) {
+            // CORRECTA: Termina la ronda
+            this.addEventToList(`¡RESPUESTA CORRECTA de ${playerName}! Fin de la ronda`, 'correct');
+
+            // TODO Task 6.0: Enviar confirmación al servidor
+            // El servidor calculará puntos y avanzará a fase scoring
+
+            // TEMPORAL: Simular fin de ronda
+            this.isPaused = true; // Mantener pausado hasta siguiente ronda
+        } else {
+            // INCORRECTA: Continúa el juego
+            this.addEventToList(`❌ ${playerName} falló. Eliminado de esta ronda.`, 'incorrect');
+
+            // Reanudar el dibujo
+            this.isPaused = false;
+
+            // TODO Task 6.0: Enviar confirmación al servidor
+            // fetch('/api/pictionary/confirm', {
+            //     method: 'POST',
+            //     body: JSON.stringify({
+            //         match_id: window.gameData.matchId,
+            //         player_id: pendingPlayerId,
+            //         is_correct: false
+            //     })
+            // });
+
+            // TEMPORAL: En modo demo, guardar en localStorage que el jugador fue eliminado
+            // (En producción esto se sincroniza vía WebSocket)
+            if (!this.isDrawer) {
+                // Si soy el adivinador, me marco como eliminado inmediatamente
+                this.markAsEliminated(playerName);
+            } else {
+                // Si soy el dibujante, guardo en localStorage para que el adivinador lo vea
+                localStorage.setItem('pictionary_player_eliminated', 'true');
+                localStorage.setItem('pictionary_eliminated_reason', playerName + ' falló');
+            }
+        }
+    }
+
+    /**
+     * Marcar jugador como eliminado de la ronda
+     */
+    markAsEliminated(reason = 'Respuesta incorrecta') {
+        console.log('Player marked as eliminated:', reason);
+
+        // Marcar estado
+        this.isEliminated = true;
+
+        // Ocultar botón "YO SÉ" permanentemente
+        const yoSeContainer = document.getElementById('yo-se-container');
+        yoSeContainer.classList.add('hidden');
+
+        // Ocultar mensaje de espera si estaba visible
+        const waitingConfirmation = document.getElementById('waiting-confirmation');
+        waitingConfirmation.classList.add('hidden');
+
+        // Mostrar mensaje de eliminación
+        const eliminatedContainer = document.getElementById('eliminated-message');
+        if (eliminatedContainer) {
+            eliminatedContainer.classList.remove('hidden');
+        } else {
+            // Si no existe el contenedor, crearlo dinámicamente
+            const answersPanel = document.querySelector('.answers-panel');
+            const messageDiv = document.createElement('div');
+            messageDiv.id = 'eliminated-message';
+            messageDiv.className = 'eliminated-message';
+            messageDiv.innerHTML = `
+                <div style="background: #fee; border: 2px solid #f44; border-radius: 8px; padding: 16px; text-align: center; margin: 16px 0;">
+                    <span style="font-size: 24px;">❌</span>
+                    <p style="margin: 8px 0; font-weight: bold; color: #c33;">ELIMINADO</p>
+                    <p style="margin: 0; font-size: 14px; color: #666;">Fallaste esta ronda. Espera a la siguiente para volver a jugar.</p>
+                </div>
+            `;
+
+            // Insertar antes del formulario de respuesta
+            const answerForm = document.querySelector('.answer-form');
+            if (answerForm) {
+                answersPanel.insertBefore(messageDiv, answerForm);
+            } else {
+                answersPanel.appendChild(messageDiv);
+            }
+        }
+
+        // Deshabilitar input de respuestas (por si acaso)
+        const answerInput = document.getElementById('answer-input');
+        const answerButton = document.querySelector('.answer-form button');
+        if (answerInput) {
+            answerInput.disabled = true;
+            answerInput.placeholder = 'Eliminado de esta ronda';
+        }
+        if (answerButton) {
+            answerButton.disabled = true;
+        }
+
+        // Añadir mensaje al log
+        this.addEventToList('❌ Has sido ELIMINADO de esta ronda. Espera a la siguiente.', 'incorrect');
+    }
+
+    /**
+     * Añadir respuesta a la lista
+     */
+    addAnswerToList(playerId, answer, status) {
+        const answersList = document.getElementById('answers-list');
+        const answerElement = document.createElement('div');
+        answerElement.className = `answer-item answer-${status}`;
+        answerElement.innerHTML = `
+            <span class="player-name">Jugador ${playerId}</span>
+            <span class="answer-text">${answer}</span>
+            <span class="answer-status">${this.getStatusIcon(status)}</span>
+        `;
+        answersList.appendChild(answerElement);
+
+        // Scroll al final
+        answersList.scrollTop = answersList.scrollHeight;
+    }
+
+    /**
+     * Obtener icono de estado
+     */
+    getStatusIcon(status) {
+        switch (status) {
+            case 'correct':
+                return '✓';
+            case 'incorrect':
+                return '✗';
+            case 'pending':
+                return '⏳';
+            default:
+                return '';
+        }
+    }
+
+    /**
+     * Actualizar lista de jugadores
+     */
+    updatePlayersList(players) {
+        const playersList = document.getElementById('players-list');
+        playersList.innerHTML = '';
+
+        players.forEach(player => {
+            const playerElement = document.createElement('div');
+            playerElement.className = 'player-item';
+            if (player.isDrawer) {
+                playerElement.classList.add('is-drawer');
+            }
+            if (player.isEliminated) {
+                playerElement.classList.add('is-eliminated');
+            }
+
+            playerElement.innerHTML = `
+                <span class="player-name">${player.name}</span>
+                <span class="player-score">${player.score || 0} pts</span>
+                ${player.isDrawer ? '<span class="drawer-badge">🎨</span>' : ''}
+            `;
+
+            playersList.appendChild(playerElement);
+        });
+    }
+
+    /**
+     * Actualizar temporizador
+     */
+    updateTimer(seconds) {
+        const timerElement = document.getElementById('time-remaining');
+        timerElement.textContent = seconds;
+
+        // Cambiar color si quedan menos de 10 segundos
+        if (seconds <= 10) {
+            timerElement.parentElement.classList.add('timer-warning');
+        } else {
+            timerElement.parentElement.classList.remove('timer-warning');
+        }
+    }
+
+    /**
+     * Actualizar información de ronda
+     */
+    updateRoundInfo(currentRound, totalRounds) {
+        document.getElementById('current-round').textContent = currentRound;
+        document.getElementById('total-rounds').textContent = totalRounds;
+    }
+
+    /**
+     * Mostrar resultados de ronda
+     */
+    showRoundResults(results) {
+        const modal = document.getElementById('round-results-modal');
+        const resultsContainer = document.getElementById('round-results');
+
+        resultsContainer.innerHTML = `
+            <p><strong>Palabra:</strong> ${results.word}</p>
+            <p><strong>Ganador:</strong> ${results.winner || 'Nadie'}</p>
+            <div class="scores">
+                <h3>Puntuaciones:</h3>
+                <ul>
+                    ${results.scores.map(s => `
+                        <li>${s.playerName}: ${s.score} pts</li>
+                    `).join('')}
+                </ul>
+            </div>
+        `;
+
+        modal.classList.remove('hidden');
+    }
+
+    /**
+     * Mostrar resultados finales
+     */
+    showFinalResults(results) {
+        const modal = document.getElementById('final-results-modal');
+        const resultsContainer = document.getElementById('final-results');
+
+        resultsContainer.innerHTML = `
+            <h3>🏆 Ganador: ${results.winner}</h3>
+            <div class="final-ranking">
+                <h4>Ranking final:</h4>
+                <ol>
+                    ${results.ranking.map(p => `
+                        <li>${p.playerName}: ${p.score} pts</li>
+                    `).join('')}
+                </ol>
+            </div>
+        `;
+
+        modal.classList.remove('hidden');
+    }
+}
+
+// Inicializar cuando el DOM esté listo
+document.addEventListener('DOMContentLoaded', () => {
+    window.pictionaryCanvas = new PictionaryCanvas();
+
+    // DEMO MODE: Simular roles para testing
+    if (window.location.pathname.includes('/demo')) {
+        // Pregunta: ¿Eres el dibujante o un adivinador?
+        const params = new URLSearchParams(window.location.search);
+        const role = params.get('role');
+
+        if (role === 'guesser') {
+            // Modo Adivinador
+            window.pictionaryCanvas.setRole(false);
+            console.log('Demo mode: Guesser (Adivinador)');
+        } else {
+            // Modo Dibujante (por defecto)
+            window.pictionaryCanvas.setRole(true, 'CASA');
+            console.log('Demo mode: Drawer (Dibujante)');
+
+            // Simular que un jugador pulsó "YO SÉ" después de 5 segundos
+            setTimeout(() => {
+                window.pictionaryCanvas.showConfirmation('Jugador 2');
+            }, 5000);
+        }
+    }
+
+    // TODO Task 7.0: Conectar WebSocket
+    // window.pictionaryCanvas.connectWebSocket();
+});

@@ -1,0 +1,857 @@
+/**
+ * Pictionary Canvas - Estilos
+ *
+ * Estilos para el canvas de dibujo, herramientas, y UI del juego.
+ */
+
+/* ==========================================================================
+   Variables CSS
+   ========================================================================== */
+
+:root {
+    --primary-color: #3b82f6;
+    --secondary-color: #8b5cf6;
+    --success-color: #10b981;
+    --danger-color: #ef4444;
+    --warning-color: #f59e0b;
+    --bg-color: #f3f4f6;
+    --surface-color: #ffffff;
+    --text-color: #1f2937;
+    --text-muted: #6b7280;
+    --border-color: #e5e7eb;
+    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+}
+
+/* ==========================================================================
+   Layout Principal
+   ========================================================================== */
+
+.pictionary-container {
+    min-height: 100vh;
+    background: var(--bg-color);
+    padding: 1rem;
+}
+
+.game-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--surface-color);
+    padding: 1rem 1.5rem;
+    border-radius: 0.5rem;
+    box-shadow: var(--shadow-sm);
+    margin-bottom: 1rem;
+}
+
+.room-info h1 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--text-color);
+    margin: 0 0 0.25rem 0;
+}
+
+.room-code {
+    font-size: 0.875rem;
+    color: var(--text-muted);
+    margin: 0;
+}
+
+.game-status {
+    display: flex;
+    gap: 2rem;
+    align-items: center;
+}
+
+.round-info {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-color);
+}
+
+.timer {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--primary-color);
+    padding: 0.5rem 1rem;
+    background: #eff6ff;
+    border-radius: 0.5rem;
+}
+
+.timer-warning {
+    color: var(--danger-color);
+    background: #fef2f2;
+    animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+.timer-icon {
+    width: 24px;
+    height: 24px;
+}
+
+/* ==========================================================================
+   Contenido del Juego
+   ========================================================================== */
+
+.game-content {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: 1rem;
+    max-width: 1600px;
+    margin: 0 auto;
+}
+
+/* ==========================================================================
+   Panel del Canvas
+   ========================================================================== */
+
+.canvas-panel {
+    background: var(--surface-color);
+    border-radius: 0.5rem;
+    padding: 1.5rem;
+    box-shadow: var(--shadow-md);
+}
+
+.word-display {
+    text-align: center;
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+    color: white;
+    padding: 1.5rem;
+    border-radius: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.word-display.hidden {
+    display: none;
+}
+
+.word-display p {
+    margin: 0 0 0.5rem 0;
+    font-size: 0.875rem;
+    opacity: 0.9;
+}
+
+.word-display h2 {
+    margin: 0;
+    font-size: 2rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+}
+
+.canvas-container {
+    position: relative;
+    background: white;
+    border: 2px solid var(--border-color);
+    border-radius: 0.5rem;
+    overflow: hidden;
+    margin-bottom: 1rem;
+}
+
+#drawing-canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+    cursor: crosshair;
+}
+
+/* ==========================================================================
+   Herramientas de Dibujo
+   ========================================================================== */
+
+.drawing-tools {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    align-items: center;
+    padding: 1rem;
+    background: var(--bg-color);
+    border-radius: 0.5rem;
+}
+
+.tool-group {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.tool-label {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-color);
+    margin-right: 0.5rem;
+}
+
+/* Botones de herramientas */
+.tool-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: var(--surface-color);
+    border: 2px solid var(--border-color);
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--text-color);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.tool-btn:hover {
+    background: var(--bg-color);
+    border-color: var(--primary-color);
+}
+
+.tool-btn.active {
+    background: var(--primary-color);
+    color: white;
+    border-color: var(--primary-color);
+}
+
+.tool-btn svg {
+    stroke: currentColor;
+}
+
+/* Paleta de colores */
+.color-palette {
+    display: flex;
+    gap: 0.25rem;
+    flex-wrap: wrap;
+}
+
+.color-btn {
+    width: 32px;
+    height: 32px;
+    border: 2px solid var(--border-color);
+    border-radius: 0.25rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.color-btn:hover {
+    transform: scale(1.1);
+    box-shadow: var(--shadow-md);
+}
+
+.color-btn.active {
+    border-color: var(--text-color);
+    box-shadow: 0 0 0 2px var(--surface-color), 0 0 0 4px var(--text-color);
+}
+
+/* Tamaños de pincel */
+.brush-sizes {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.size-btn {
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface-color);
+    border: 2px solid var(--border-color);
+    border-radius: 0.375rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.size-btn:hover {
+    background: var(--bg-color);
+    border-color: var(--primary-color);
+}
+
+.size-btn.active {
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+}
+
+.size-indicator {
+    display: block;
+    background: var(--text-color);
+    border-radius: 50%;
+}
+
+.size-btn.active .size-indicator {
+    background: white;
+}
+
+/* Botón limpiar */
+.btn-clear {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: var(--danger-color);
+    color: white;
+    border: none;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-clear:hover {
+    background: #dc2626;
+    box-shadow: var(--shadow-md);
+}
+
+.btn-clear svg {
+    stroke: currentColor;
+}
+
+/* ==========================================================================
+   Sidebar
+   ========================================================================== */
+
+.sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.players-panel,
+.answers-panel {
+    background: var(--surface-color);
+    border-radius: 0.5rem;
+    padding: 1rem;
+    box-shadow: var(--shadow-sm);
+}
+
+.players-panel h3,
+.answers-panel h3 {
+    margin: 0 0 1rem 0;
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-color);
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid var(--border-color);
+}
+
+/* Lista de jugadores */
+.players-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.player-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem;
+    background: var(--bg-color);
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+}
+
+.player-item.is-drawer {
+    background: linear-gradient(135deg, #eff6ff, #dbeafe);
+    border: 2px solid var(--primary-color);
+    font-weight: 600;
+}
+
+.player-item.is-eliminated {
+    opacity: 0.5;
+    text-decoration: line-through;
+}
+
+.player-name {
+    font-weight: 500;
+}
+
+.player-score {
+    color: var(--text-muted);
+    font-weight: 600;
+}
+
+.drawer-badge {
+    margin-left: 0.5rem;
+}
+
+/* Lista de respuestas */
+.answers-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.answers-list {
+    flex: 1;
+    max-height: 300px;
+    overflow-y: auto;
+    margin-bottom: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.answer-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem;
+    background: var(--bg-color);
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+}
+
+.answer-item.answer-correct {
+    background: #d1fae5;
+    border: 1px solid var(--success-color);
+}
+
+.answer-item.answer-incorrect {
+    background: #fee2e2;
+    border: 1px solid var(--danger-color);
+}
+
+.answer-item.answer-pending {
+    background: #fef3c7;
+    border: 1px solid var(--warning-color);
+}
+
+.answer-text {
+    flex: 1;
+    margin: 0 0.5rem;
+    font-weight: 500;
+}
+
+.answer-status {
+    font-size: 1.25rem;
+}
+
+/* Input de respuesta */
+.answer-input-container.hidden,
+.confirmation-container.hidden {
+    display: none;
+}
+
+#answer-form {
+    display: flex;
+    gap: 0.5rem;
+}
+
+#answer-input {
+    flex: 1;
+    padding: 0.75rem;
+    border: 2px solid var(--border-color);
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    transition: all 0.2s;
+}
+
+#answer-input:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.btn-submit {
+    padding: 0.75rem 1.5rem;
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-submit:hover {
+    background: #2563eb;
+    box-shadow: var(--shadow-md);
+}
+
+/* Confirmación de respuesta */
+.confirmation-container {
+    padding: 1rem;
+    background: var(--bg-color);
+    border-radius: 0.5rem;
+    border: 2px solid var(--warning-color);
+}
+
+.pending-answer {
+    margin: 0 0 1rem 0;
+    font-size: 0.875rem;
+}
+
+.confirmation-buttons {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.btn-confirm {
+    flex: 1;
+    padding: 0.75rem;
+    border: none;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-correct {
+    background: var(--success-color);
+    color: white;
+}
+
+.btn-correct:hover {
+    background: #059669;
+}
+
+.btn-incorrect {
+    background: var(--danger-color);
+    color: white;
+}
+
+.btn-incorrect:hover {
+    background: #dc2626;
+}
+
+/* ==========================================================================
+   Modales
+   ========================================================================== */
+
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.modal.hidden {
+    display: none;
+}
+
+.modal-content {
+    background: var(--surface-color);
+    padding: 2rem;
+    border-radius: 0.5rem;
+    box-shadow: var(--shadow-lg);
+    max-width: 500px;
+    width: 90%;
+}
+
+.modal-content h2 {
+    margin: 0 0 1.5rem 0;
+    font-size: 1.5rem;
+    font-weight: 700;
+    text-align: center;
+}
+
+.btn-primary {
+    display: block;
+    width: 100%;
+    padding: 0.75rem;
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    border-radius: 0.375rem;
+    font-size: 1rem;
+    font-weight: 600;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-top: 1.5rem;
+    text-decoration: none;
+}
+
+.btn-primary:hover {
+    background: #2563eb;
+    box-shadow: var(--shadow-md);
+}
+
+.final-ranking ol {
+    list-style-position: inside;
+    padding: 0;
+}
+
+.final-ranking li {
+    padding: 0.5rem;
+    margin-bottom: 0.5rem;
+    background: var(--bg-color);
+    border-radius: 0.375rem;
+}
+
+/* ==========================================================================
+   Responsive
+   ========================================================================== */
+
+@media (max-width: 1024px) {
+    .game-content {
+        grid-template-columns: 1fr;
+    }
+
+    .sidebar {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+@media (max-width: 640px) {
+    .game-header {
+        flex-direction: column;
+        gap: 1rem;
+        align-items: flex-start;
+    }
+
+    .game-status {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .sidebar {
+        grid-template-columns: 1fr;
+    }
+
+    .drawing-tools {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .tool-group {
+        justify-content: center;
+    }
+}
+
+/* Botón refrescar */
+.btn-refresh {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: var(--surface-color);
+    border: 2px solid var(--primary-color);
+    color: var(--primary-color);
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-refresh:hover {
+    background: var(--primary-color);
+    color: white;
+}
+
+.btn-refresh svg {
+    stroke: currentColor;
+}
+
+/* Botón "YO SÉ" */
+.yo-se-container {
+    text-align: center;
+    padding: 1.5rem;
+}
+
+.yo-se-container.hidden,
+.waiting-confirmation.hidden,
+.eliminated-message.hidden {
+    display: none;
+}
+
+.btn-yo-se {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    width: 100%;
+    padding: 1rem 1.5rem;
+    background: linear-gradient(135deg, var(--success-color), #059669);
+    color: white;
+    border: none;
+    border-radius: 0.5rem;
+    font-size: 1.125rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    box-shadow: var(--shadow-md);
+}
+
+.btn-yo-se:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg);
+    background: linear-gradient(135deg, #059669, #047857);
+}
+
+.btn-yo-se:active {
+    transform: translateY(0);
+}
+
+.btn-yo-se svg {
+    stroke: currentColor;
+}
+
+.yo-se-hint {
+    margin-top: 0.5rem;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+/* Mensaje esperando confirmación */
+.waiting-confirmation {
+    text-align: center;
+    padding: 2rem 1rem;
+    background: linear-gradient(135deg, #fef3c7, #fde68a);
+    border-radius: 0.5rem;
+    border: 2px solid var(--warning-color);
+}
+
+.waiting-icon {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+    animation: pulse 1.5s infinite;
+}
+
+.waiting-text {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-color);
+    margin: 0 0 0.5rem 0;
+}
+
+.waiting-subtext {
+    font-size: 0.875rem;
+    color: var(--text-muted);
+    margin: 0;
+}
+
+/* Confirmación actualizada */
+.confirmation-container {
+    padding: 1.5rem;
+    background: linear-gradient(135deg, #eff6ff, #dbeafe);
+    border-radius: 0.5rem;
+    border: 3px solid var(--primary-color);
+    animation: fadeIn 0.3s;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.confirmation-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.confirmation-icon {
+    font-size: 2rem;
+}
+
+.confirmation-title {
+    margin: 0;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-color);
+}
+
+.confirmation-instruction {
+    margin: 0 0 1rem 0;
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--primary-color);
+    text-align: center;
+}
+
+.confirmation-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.btn-confirm {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 1rem;
+    border: none;
+    border-radius: 0.5rem;
+    font-size: 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-correct {
+    background: var(--success-color);
+    color: white;
+}
+
+.btn-correct:hover {
+    background: #059669;
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+.btn-incorrect {
+    background: var(--danger-color);
+    color: white;
+}
+
+.btn-incorrect:hover {
+    background: #dc2626;
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+.btn-confirm svg {
+    stroke: currentColor;
+}
+
+/* Mensaje de eliminado */
+.eliminated-message {
+    text-align: center;
+    padding: 2rem 1rem;
+    background: linear-gradient(135deg, #fee2e2, #fecaca);
+    border-radius: 0.5rem;
+    border: 2px solid var(--danger-color);
+}
+
+.eliminated-icon {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+}
+
+.eliminated-text {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-color);
+    margin: 0 0 0.5rem 0;
+}
+
+.eliminated-subtext {
+    font-size: 0.875rem;
+    color: var(--text-muted);
+    margin: 0;
+}

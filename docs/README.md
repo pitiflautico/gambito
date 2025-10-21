@@ -44,6 +44,7 @@ Cada juego declara en `capabilities.json` cuáles de estos módulos necesita:
 |--------|-----------|-------------|---------------|
 | **Guest System** | 🔥 MVP | Jugadores sin registro | [Ver docs](modules/optional/GUEST_SYSTEM.md) |
 | **Turn System** | 🔥 MVP | Turnos secuenciales/simultáneos | [Ver docs](modules/optional/TURN_SYSTEM.md) |
+| **Round System** | 🔥 MVP | Control de rondas (fijas o configurables) | [Ver docs](modules/optional/ROUND_SYSTEM.md) |
 | **Scoring System** | 🔥 MVP | Puntuación y ranking | [Ver docs](modules/optional/SCORING_SYSTEM.md) |
 | **Timer System** | 🔥 MVP | Temporizadores y límites de tiempo | [Ver docs](modules/optional/TIMER_SYSTEM.md) |
 | **Roles System** | 🔥 MVP | Asignación de roles | [Ver docs](modules/optional/ROLES_SYSTEM.md) |

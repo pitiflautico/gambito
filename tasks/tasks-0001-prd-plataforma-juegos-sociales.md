@@ -183,35 +183,41 @@ Ver: [`docs/decisions/ADR-002-ITERATIVE_DEVELOPMENT.md`](../docs/decisions/ADR-0
 
 **Estrategia:** Implementar Pictionary de forma monolítica (sin módulos opcionales). Toda la lógica en `PictionaryEngine.php`.
 
-- [ ] **4.0 Pictionary Game Structure**
-  - [ ] 4.1 Crear carpeta `games/pictionary/`
-  - [ ] 4.2 Crear `PictionaryEngine.php` (implementa GameEngineInterface)
-  - [ ] 4.3 Crear `config.json` (metadata del juego)
-  - [ ] 4.4 Crear `capabilities.json` (sin módulos opcionales aún)
-  - [ ] 4.5 Crear `assets/words.json` (lista de palabras)
-  - [ ] 4.6 Registrar juego con GameRegistry
-  - **Documentación:** `docs/games/PICTIONARY.md`
+- [x] **4.0 Pictionary Game Structure** - ✅ **COMPLETADO**
+  - [x] 4.1 Crear carpeta `games/pictionary/`
+  - [x] 4.2 Crear `PictionaryEngine.php` (implementa GameEngineInterface, métodos avanzados)
+  - [x] 4.3 Crear `config.json` (metadata completo del juego)
+  - [x] 4.4 Crear `capabilities.json` (versión monolítica vacía)
+  - [x] 4.5 Crear `assets/words.json` (120 palabras en español, 3 dificultades)
+  - [x] 4.6 Registrar juego con GameRegistry (automático al escanear)
+  - [x] 4.7 Añadir namespace `Games\` a composer autoload
+  - [x] **Documentación:** ✅ `docs/games/PICTIONARY.md` creado y actualizado
 
-- [ ] **5.0 Pictionary Canvas System**
-  - [ ] 5.1 Vista `games/pictionary/views/canvas.blade.php` (dibujante)
-  - [ ] 5.2 Vista `games/pictionary/views/spectator.blade.php` (adivinadores)
-  - [ ] 5.3 JavaScript `games/pictionary/js/canvas.js` (HTML5 Canvas)
-  - [ ] 5.4 CSS `games/pictionary/css/pictionary.css`
-  - [ ] 5.5 Herramientas: lápiz, borrador, colores, grosor
-  - [ ] 5.6 Eventos touch y mouse
-  - **Documentación:** Actualizar `docs/games/PICTIONARY.md`
+- [x] **5.0 Pictionary Canvas System** - ✅ **COMPLETADO**
+  - [x] 5.1 Vista `resources/views/games/pictionary/canvas.blade.php` (completa, responsive)
+  - [x] 5.2 Vista spectator (NO - misma vista con roles diferentes)
+  - [x] 5.3 JavaScript `public/games/pictionary/js/canvas.js` (Clase `PictionaryCanvas` completa)
+  - [x] 5.4 CSS `public/games/pictionary/css/canvas.css` (diseño moderno)
+  - [x] 5.5 Herramientas: lápiz, borrador, 12 colores, 4 grosores, botón limpiar
+  - [x] 5.6 Eventos touch y mouse (soporte móvil completo)
+  - [x] 5.7 Controlador `PictionaryController` con método `demo()`
+  - [x] 5.8 Ruta `/pictionary/demo` y `/pictionary/demo?role=guesser`
+  - [x] 5.9 Funcionalidades extra: botón "YO SÉ", confirmación, eliminación visual
+  - [x] **Documentación:** ✅ Actualizado `docs/games/PICTIONARY.md`
 
-- [ ] **6.0 Pictionary Game Logic (Monolítico en Engine)**
-  - [ ] 6.1 Selección aleatoria de palabras (WordService interno)
-  - [ ] 6.2 Sistema de turnos (lógica en PictionaryEngine)
-  - [ ] 6.3 Asignación de roles: drawer/guesser (en Engine)
-  - [ ] 6.4 Sistema de puntuación (hardcoded en Engine)
-  - [ ] 6.5 Timer de 60 segundos (lógica en Engine)
-  - [ ] 6.6 Botón "¡Ya lo sé!" y confirmación de respuesta
-  - [ ] 6.7 Eliminación de jugadores en ronda
-  - [ ] 6.8 Cálculo de puntos según tiempo
-  - [ ] 6.9 Condición de victoria (mayor puntuación)
-  - **Documentación:** Actualizar `docs/games/PICTIONARY.md`
+- [x] **6.0 Pictionary Game Logic (Monolítico en Engine)** - ✅ **COMPLETADO**
+  - [x] 6.1 Selección aleatoria de palabras (método `selectRandomWord()`)
+  - [x] 6.2 Sistema de turnos (método `nextTurn()`, rotación circular)
+  - [x] 6.3 Asignación de roles: drawer/guesser (campo `current_drawer_id`)
+  - [x] 6.4 Sistema de puntuación (inicialización de `scores`, `checkWinCondition()`)
+  - [x] 6.5 Timer de 90 segundos (campos en game_state, cálculo en `getGameStateForPlayer()`)
+  - [x] 6.6 Botón "¡Ya lo sé!" y confirmación de respuesta (Frontend + Backend completos)
+  - [x] 6.7 Eliminación de jugadores en ronda (Frontend + Backend completos)
+  - [x] 6.8 Cálculo de puntos según tiempo (método `calculatePointsByTime()`, 150/100/50 pts)
+  - [x] 6.9 Condición de victoria (método `checkWinCondition()`, mayor puntuación)
+  - [x] 6.10 Métodos completados: `processAction()`, `getGameStateForPlayer()`, `handlePlayerDisconnect()`
+  - [x] **Documentación:** ✅ Actualizado `docs/games/PICTIONARY.md`
+  - **Nota:** Timer automático con Jobs/Queue se implementará con WebSockets en Task 7.0
 
 - [ ] **7.0 Pictionary Real-time Sync (WebSockets)**
   - [ ] 7.1 Instalar Laravel Reverb: `composer require laravel/reverb`
@@ -345,6 +351,7 @@ Servicios **reutilizables** que los juegos pueden usar o no. Se declaran en `cap
 |--------|-----------|-------------|------|
 | **Guest System** | 🔥 MVP | Jugadores sin registro | [`docs/modules/optional/GUEST_SYSTEM.md`](../docs/modules/optional/GUEST_SYSTEM.md) |
 | **Turn System** | 🔥 MVP | Turnos secuenciales/simultáneos | [`docs/modules/optional/TURN_SYSTEM.md`](../docs/modules/optional/TURN_SYSTEM.md) |
+| **Round System** | 🔥 MVP | Control de rondas (fijas o configurables) | [`docs/modules/optional/ROUND_SYSTEM.md`](../docs/modules/optional/ROUND_SYSTEM.md) |
 | **Scoring System** | 🔥 MVP | Puntuación y ranking | [`docs/modules/optional/SCORING_SYSTEM.md`](../docs/modules/optional/SCORING_SYSTEM.md) |
 | **Timer System** | 🔥 MVP | Temporizadores | [`docs/modules/optional/TIMER_SYSTEM.md`](../docs/modules/optional/TIMER_SYSTEM.md) |
 | **Roles System** | 🔥 MVP | Asignación de roles | [`docs/modules/optional/ROLES_SYSTEM.md`](../docs/modules/optional/ROLES_SYSTEM.md) |

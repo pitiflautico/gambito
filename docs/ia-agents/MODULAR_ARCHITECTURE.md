@@ -154,7 +154,49 @@ Cada módulo es un microservicio que puede estar activo o no según el juego.
 
 ---
 
-#### 6. **Scoring System** 🏆
+#### 6. **Round System** 🔄
+- **Función**: Control de rondas del juego
+- **Configurable**: ✅ Sí
+- **Configuración**:
+```json
+{
+  "modules": {
+    "rounds": {
+      "enabled": true,
+      "mode": "configurable",  // fixed | configurable | unlimited
+      "default": 5,            // Rondas por defecto
+      "min": 3,                // Mínimo si es configurable
+      "max": 10                // Máximo si es configurable
+    }
+  }
+}
+```
+
+**Modos de rondas:**
+- `fixed`: Número fijo predefinido (ej: 10 rondas siempre)
+- `configurable`: Master elige al crear sala (ej: entre 3 y 10)
+- `unlimited`: Sin límite, termina por otra condición (puntos, tiempo)
+
+**Casos de uso:**
+- ✅ **Activado**: Juegos con rondas definidas (Pictionary, Trivia)
+- ❌ **Desactivado**: Juegos sin rondas o que terminan por puntos/tiempo
+
+**Integración con Turn System:**
+```
+Ronda 1: Turno 1 (JugadorA), Turno 2 (JugadorB), Turno 3 (JugadorC)
+Ronda 2: Turno 1 (JugadorA), Turno 2 (JugadorB), Turno 3 (JugadorC)
+...
+Fin: round >= rounds_total
+```
+
+**Si está desactivado:**
+- No se muestra "Ronda X de Y"
+- El juego termina por otra condición de victoria
+- `game_state.round` es opcional
+
+---
+
+#### 7. **Scoring System** 🏆
 - **Función**: Sistema de puntuación
 - **Configurable**: ✅ Sí
 - **Configuración**:
@@ -188,7 +230,7 @@ Cada módulo es un microservicio que puede estar activo o no según el juego.
 
 ---
 
-#### 7. **Teams System** 👥
+#### 8. **Teams System** 👥
 - **Función**: Agrupación de jugadores en equipos
 - **Configurable**: ✅ Sí
 - **Configuración**:
@@ -214,13 +256,13 @@ Cada módulo es un microservicio que puede estar activo o no según el juego.
 
 ---
 
-#### 8. **~~Chat System~~** ❌ **ELIMINADO**
+#### 9. **~~Chat System~~** ❌ **ELIMINADO**
 - **Razón**: Gambito es para juegos presenciales. Los jugadores hablan en persona.
 - **Alternativa**: Emojis/reacciones opcionales para feedback visual rápido (implementar solo si es necesario)
 
 ---
 
-#### 9. **Timer System** ⏱️
+#### 10. **Timer System** ⏱️
 - **Función**: Temporizadores y límites de tiempo
 - **Configurable**: ✅ Sí
 - **Configuración**:
@@ -246,7 +288,7 @@ Cada módulo es un microservicio que puede estar activo o no según el juego.
 
 ---
 
-#### 10. **Roles System** 🎭
+#### 11. **Roles System** 🎭
 - **Función**: Roles específicos dentro del juego
 - **Configurable**: ✅ Sí
 - **Configuración**:
@@ -279,7 +321,7 @@ Cada módulo es un microservicio que puede estar activo o no según el juego.
 
 ---
 
-#### 11. **Card/Deck System** 🎴
+#### 12. **Card/Deck System** 🎴
 - **Función**: Gestión de mazos de cartas
 - **Configurable**: ✅ Sí
 - **Configuración**:
@@ -304,7 +346,7 @@ Cada módulo es un microservicio que puede estar activo o no según el juego.
 
 ---
 
-#### 12. **Board/Grid System** 🎯
+#### 13. **Board/Grid System** 🎯
 - **Función**: Tablero o cuadrícula de juego
 - **Configurable**: ✅ Sí
 - **Configuración**:
@@ -330,7 +372,7 @@ Cada módulo es un microservicio que puede estar activo o no según el juego.
 
 ---
 
-#### 13. **Spectator Mode** 👁️
+#### 14. **Spectator Mode** 👁️
 - **Función**: Permitir espectadores sin jugar
 - **Configurable**: ✅ Sí
 - **Configuración**:
@@ -354,7 +396,7 @@ Cada módulo es un microservicio que puede estar activo o no según el juego.
 
 ---
 
-#### 14. **AI Players** 🤖
+#### 15. **AI Players** 🤖
 - **Función**: Bots/IA como jugadores
 - **Configurable**: ✅ Sí
 - **Configuración**:
@@ -378,7 +420,7 @@ Cada módulo es un microservicio que puede estar activo o no según el juego.
 
 ---
 
-#### 15. **Replay/History System** 📹
+#### 16. **Replay/History System** 📹
 - **Función**: Grabación y reproducción de partidas
 - **Configurable**: ✅ Sí
 - **Configuración**:

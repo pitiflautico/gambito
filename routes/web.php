@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\GameController;
+use App\Http\Controllers\PictionaryController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\RoomController;
 use Illuminate\Support\Facades\Route;
@@ -22,6 +23,9 @@ Route::middleware('auth')->group(function () {
 // Rutas de Juegos
 Route::get('/games', [GameController::class, 'index'])->name('games.index');
 Route::get('/games/{slug}', [GameController::class, 'show'])->name('games.show');
+
+// Ruta de demo de Pictionary (solo desarrollo)
+Route::get('/pictionary/demo', [PictionaryController::class, 'demo'])->name('pictionary.demo');
 
 // Rutas de Salas
 Route::prefix('rooms')->name('rooms.')->group(function () {
