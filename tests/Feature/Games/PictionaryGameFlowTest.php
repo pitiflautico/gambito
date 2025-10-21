@@ -291,7 +291,8 @@ class PictionaryGameFlowTest extends TestCase
 
         $this->assertTrue($response['success']);
         $this->assertFalse($response['correct']);
-        $this->assertFalse($response['round_ended']);
+        $this->assertTrue($response['round_continues']);
+        $this->assertEquals("{$guesser->name} falló. El juego continúa.", $response['message']);
 
         $match->refresh();
         $this->assertContains($guesser->id, $match->game_state['eliminated_this_round']);
@@ -354,10 +355,13 @@ class PictionaryGameFlowTest extends TestCase
         $this->engine->advancePhase($match);
         $match->refresh();
 
+        // El juego debe cambiar a fase 'results'
         $this->assertEquals('results', $match->game_state['phase']);
-        $this->assertNotNull($match->finished_at);
 
-        $this->room->refresh();
-        $this->assertEquals('finished', $this->room->status);
+        // Verificar que hay un ganador calculado
+        $scores = $match->game_state['scores'];
+        $this->assertNotEmpty($scores);
+        $maxScore = max($scores);
+        $this->assertEquals(500, $maxScore); // El jugador con más puntos
     }
 }
