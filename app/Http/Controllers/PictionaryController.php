@@ -96,14 +96,64 @@ class PictionaryController extends Controller
             'player_name' => 'required|string',
         ]);
 
-        $roomCode = $request->input('room_code');
-        $playerId = $request->input('player_id');
-        $playerName = $request->input('player_name');
+        try {
+            $matchId = $request->input('match_id');
+            $playerId = $request->input('player_id');
+            $playerName = $request->input('player_name');
+            $roomCode = $request->input('room_code');
 
-        // Emitir evento
-        event(new PlayerAnsweredEvent($roomCode, $playerId, $playerName));
+            \Log::info("Player answered request", [
+                'match_id' => $matchId,
+                'player_id' => $playerId,
+                'player_name' => $playerName,
+            ]);
 
-        return response()->json(['success' => true]);
+            // Buscar match con relaciones
+            $match = GameMatch::with(['room.game'])->findOrFail($matchId);
+            $player = \App\Models\Player::findOrFail($playerId);
+
+            // Cargar el engine del juego
+            $game = $match->room->game;
+            if (!$game) {
+                throw new \Exception('Game not found for this match');
+            }
+
+            $engineClass = $game->getEngineClass();
+            if (!$engineClass || !class_exists($engineClass)) {
+                throw new \Exception('Engine class not found: ' . $engineClass);
+            }
+
+            $engine = new $engineClass();
+
+            // Procesar la acción a través del engine
+            $result = $engine->processAction($match, $player, 'answer', [
+                'player_name' => $playerName,
+            ]);
+
+            if (!$result['success']) {
+                return response()->json([
+                    'success' => false,
+                    'error' => $result['error'] ?? 'Error al procesar respuesta'
+                ], 400);
+            }
+
+            // El engine ya emitió el PlayerAnsweredEvent
+            return response()->json([
+                'success' => true,
+                'data' => $result
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error("Error processing player answered", [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Error del servidor: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
     /**
@@ -114,19 +164,181 @@ class PictionaryController extends Controller
         $request->validate([
             'room_code' => 'required|string',
             'match_id' => 'required|integer',
-            'player_id' => 'required|integer',
-            'player_name' => 'required|string',
+            'drawer_id' => 'required|integer',
+            'guesser_id' => 'required|integer',
             'is_correct' => 'required|boolean',
         ]);
 
-        $roomCode = $request->input('room_code');
-        $playerId = $request->input('player_id');
-        $playerName = $request->input('player_name');
-        $isCorrect = $request->input('is_correct');
+        try {
+            $matchId = $request->input('match_id');
+            $drawerId = $request->input('drawer_id');
+            $guesserId = $request->input('guesser_id');
+            $isCorrect = $request->input('is_correct');
 
-        // Emitir evento
-        event(new AnswerConfirmedEvent($roomCode, $playerId, $playerName, $isCorrect));
+            \Log::info("Confirm answer request", [
+                'match_id' => $matchId,
+                'drawer_id' => $drawerId,
+                'guesser_id' => $guesserId,
+                'is_correct' => $isCorrect
+            ]);
 
-        return response()->json(['success' => true]);
+            // Buscar match con relaciones cargadas
+            $match = GameMatch::with(['room.game'])->findOrFail($matchId);
+            $drawer = \App\Models\Player::findOrFail($drawerId);
+            $guesser = \App\Models\Player::findOrFail($guesserId);
+
+            // Cargar el engine del juego
+            $game = $match->room->game;
+
+            if (!$game) {
+                throw new \Exception('Game not found for this match');
+            }
+
+            $engineClass = $game->getEngineClass();
+
+            if (!$engineClass) {
+                throw new \Exception('Engine class not found for game: ' . $game->slug);
+            }
+
+            if (!class_exists($engineClass)) {
+                throw new \Exception('Engine class does not exist: ' . $engineClass);
+            }
+
+            $engine = new $engineClass();
+
+            // Procesar la confirmación a través del engine
+            $result = $engine->processAction($match, $drawer, 'confirm_answer', [
+                'is_correct' => $isCorrect,
+                'guesser_id' => $guesserId,
+            ]);
+
+            if (!$result['success']) {
+                return response()->json([
+                    'success' => false,
+                    'error' => $result['error'] ?? 'Error al confirmar respuesta'
+                ], 400);
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => $result
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error("Error confirming answer", [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Error del servidor: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Avanzar a la siguiente fase del juego
+     */
+    public function advancePhase(Request $request)
+    {
+        try {
+            $request->validate([
+                'room_code' => 'required|string',
+                'match_id' => 'required|integer',
+            ]);
+
+            $roomCode = $request->input('room_code');
+            $matchId = $request->input('match_id');
+
+            \Log::info("Advance phase request", [
+                'match_id' => $matchId,
+                'room_code' => $roomCode,
+            ]);
+
+            // Obtener la partida con relaciones
+            $match = GameMatch::with(['room.game'])->findOrFail($matchId);
+
+            // Verificar que el room code coincide
+            if ($match->room->code !== $roomCode) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Room code mismatch'
+                ], 400);
+            }
+
+            // Obtener el engine del juego
+            $game = $match->room->game;
+            $engineClass = $game->getEngineClass();
+            $engine = new $engineClass();
+
+            // Avanzar de fase
+            $engine->advancePhase($match);
+
+            \Log::info("Phase advanced successfully", [
+                'match_id' => $matchId,
+                'new_phase' => $match->fresh()->game_state['phase'] ?? 'unknown'
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Phase advanced successfully'
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error("Error advancing phase", [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Error del servidor: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Obtener palabra secreta para el dibujante
+     */
+    public function getWord(Request $request)
+    {
+        try {
+            $request->validate([
+                'match_id' => 'required|integer',
+                'player_id' => 'required|integer',
+            ]);
+
+            $matchId = $request->input('match_id');
+            $playerId = $request->input('player_id');
+
+            // Obtener la partida
+            $match = GameMatch::findOrFail($matchId);
+            $gameState = $match->game_state;
+
+            // Verificar que el jugador es el dibujante actual
+            if ($gameState['current_drawer_id'] !== $playerId) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Solo el dibujante puede ver la palabra'
+                ], 403);
+            }
+
+            // Retornar la palabra
+            return response()->json([
+                'success' => true,
+                'word' => $gameState['current_word']
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error("Error getting word", [
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Error del servidor: ' . $e->getMessage()
+            ], 500);
+        }
     }
 }

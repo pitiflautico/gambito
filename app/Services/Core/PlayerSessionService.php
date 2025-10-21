@@ -376,6 +376,32 @@ class PlayerSessionService
     }
 
     /**
+     * Limpiar la sesión de invitado.
+     *
+     * @return void
+     */
+    public function clearGuestSession(): void
+    {
+        Session::forget('guest_player_name');
+        Session::forget('guest_session_id');
+
+        Log::info("Guest session cleared");
+    }
+
+    /**
+     * Limpiar todas las sesiones (jugador y guest).
+     *
+     * @return void
+     */
+    public function clearAllSessions(): void
+    {
+        $this->clearSession();
+        $this->clearGuestSession();
+
+        Log::info("All player sessions cleared");
+    }
+
+    /**
      * Asignar un rol a un jugador.
      *
      * @param Player $player El jugador

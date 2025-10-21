@@ -103,10 +103,20 @@
 
                             <!-- Código QR -->
                             <div class="mt-4 text-center">
+                                <div id="qr-container" class="mx-auto w-48 h-48 border-4 border-gray-200 rounded-lg flex items-center justify-center bg-gray-50">
+                                    <div class="text-gray-400 text-sm">
+                                        <svg class="w-8 h-8 mx-auto mb-2 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                                        </svg>
+                                        <span>Cargando QR...</span>
+                                    </div>
+                                </div>
                                 <img
-                                    src="{{ $qrCodeUrl }}"
+                                    id="qr-image"
+                                    data-src="{{ $qrCodeUrl }}"
                                     alt="QR Code"
-                                    class="mx-auto w-48 h-48 border-4 border-gray-200 rounded-lg"
+                                    class="hidden mx-auto w-48 h-48 border-4 border-gray-200 rounded-lg"
+                                    style="display: none;"
                                 >
                                 <p class="text-xs text-gray-500 mt-2">Escanea para unirte</p>
                             </div>
@@ -172,6 +182,59 @@
 
     @push('scripts')
     <script>
+        // Lazy load QR code con timeout para evitar bloquear la página
+        function loadQRCode() {
+            const qrImage = document.getElementById('qr-image');
+            const qrContainer = document.getElementById('qr-container');
+            const qrUrl = qrImage.getAttribute('data-src');
+
+            // Timeout de 5 segundos para cargar el QR
+            const timeout = setTimeout(() => {
+                console.error('QR code load timeout');
+                qrContainer.innerHTML = `
+                    <div class="text-red-500 text-sm p-4">
+                        <svg class="w-8 h-8 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        <span>QR no disponible</span>
+                        <p class="text-xs mt-1">Usa el código o la URL</p>
+                    </div>
+                `;
+            }, 5000);
+
+            // Intentar cargar la imagen
+            const img = new Image();
+            img.onload = function() {
+                clearTimeout(timeout);
+                qrImage.src = qrUrl;
+                qrImage.style.display = 'block';
+                qrImage.classList.remove('hidden');
+                qrContainer.style.display = 'none';
+                console.log('QR code loaded successfully');
+            };
+            img.onerror = function() {
+                clearTimeout(timeout);
+                console.error('QR code failed to load');
+                qrContainer.innerHTML = `
+                    <div class="text-gray-500 text-sm p-4">
+                        <svg class="w-8 h-8 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        <span>QR no disponible</span>
+                        <p class="text-xs mt-1">Usa el código o la URL</p>
+                    </div>
+                `;
+            };
+            img.src = qrUrl;
+        }
+
+        // Cargar QR cuando el DOM esté listo
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', loadQRCode);
+        } else {
+            loadQRCode();
+        }
+
         function copyToClipboard() {
             const input = document.getElementById('invite-url');
             input.select();
@@ -201,7 +264,7 @@
         function startGame() {
             if (!confirm('¿Iniciar la partida?')) return;
 
-            fetch('/api/rooms/{{ $room->code }}/start', {
+            fetch('/rooms/{{ $room->code }}/start', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -225,7 +288,7 @@
         function closeRoom() {
             if (!confirm('¿Cerrar la sala? Esto finalizará la partida.')) return;
 
-            fetch('/api/rooms/{{ $room->code }}/close', {
+            fetch('/rooms/{{ $room->code }}/close', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -246,7 +309,50 @@
             });
         }
 
-        // Auto-refresh cada 5 segundos para actualizar lista de jugadores
+        // WebSocket: Conectar al canal de la sala para actualizaciones en tiempo real
+        function initializeWebSocket() {
+            if (typeof window.Echo === 'undefined') {
+                console.log('Echo not ready yet, waiting...');
+                setTimeout(initializeWebSocket, 100);
+                return;
+            }
+
+            console.log('Connecting to room channel: room.{{ $room->code }}');
+
+            const channel = window.Echo.channel('room.{{ $room->code }}');
+
+            // Evento: Jugador se unió
+            channel.listen('.player.joined', (data) => {
+                console.log('Player joined:', data);
+                // Recargar página para mostrar nuevo jugador
+                location.reload();
+            });
+
+            // Evento: Jugador salió
+            channel.listen('.player.left', (data) => {
+                console.log('Player left:', data);
+                // Recargar página para actualizar lista
+                location.reload();
+            });
+
+            // Evento: Partida iniciada
+            channel.listen('.game.started', (data) => {
+                console.log('Game started:', data);
+                // Redirigir a la sala de juego
+                window.location.href = '/rooms/{{ $room->code }}';
+            });
+
+            console.log('WebSocket listeners registered for lobby');
+        }
+
+        // Iniciar WebSocket cuando DOM esté listo
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initializeWebSocket);
+        } else {
+            initializeWebSocket();
+        }
+
+        // Polling de respaldo cada 10 segundos (por si WebSocket falla)
         let refreshInterval = setInterval(() => {
             fetch('/api/rooms/{{ $room->code }}/stats')
                 .then(response => response.json())
@@ -255,6 +361,7 @@
                         // Si el número de jugadores cambió, recargar la página
                         const currentPlayers = {{ $stats['players'] }};
                         if (data.data.players !== currentPlayers) {
+                            console.log('Player count changed via polling, reloading...');
                             location.reload();
                         }
 
@@ -262,6 +369,7 @@
                         @if($room->status === App\Models\Room::STATUS_WAITING)
                             // Si la partida comenzó, redirigir a la sala activa
                             if (data.data.status === 'playing') {
+                                console.log('Game started via polling, redirecting...');
                                 window.location.href = '/rooms/{{ $room->code }}';
                             }
                         @endif
@@ -270,7 +378,7 @@
                 .catch(error => {
                     console.error('Error refreshing:', error);
                 });
-        }, 3000); // Cada 3 segundos
+        }, 10000); // Cada 10 segundos (menos frecuente ya que tenemos WebSockets)
     </script>
     @endpush
 </x-app-layout>

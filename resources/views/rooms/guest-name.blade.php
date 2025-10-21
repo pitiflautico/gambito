@@ -4,7 +4,11 @@
             Únete como Invitado
         </h2>
         <p class="mt-2 text-sm text-gray-600">
-            Ingresa tu nombre para unirte a la sala: <span class="font-mono font-bold text-blue-600">{{ $code }}</span>
+            @if($previousName)
+                Confirma o cambia tu nombre para unirte a la sala: <span class="font-mono font-bold text-blue-600">{{ $code }}</span>
+            @else
+                Ingresa tu nombre para unirte a la sala: <span class="font-mono font-bold text-blue-600">{{ $code }}</span>
+            @endif
         </p>
     </div>
 
@@ -21,16 +25,22 @@
                         type="text"
                         name="player_name"
                         id="player_name"
-                        value="{{ old('player_name') }}"
+                        value="{{ old('player_name', $previousName) }}"
                         maxlength="50"
                         class="w-full px-4 py-3 text-lg border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500"
                         placeholder="Ej: Juan Pérez"
                         required
                         autofocus
                     >
-                    <p class="mt-2 text-xs text-gray-500">
-                        Este nombre será visible para otros jugadores en la sala
-                    </p>
+                    @if($previousName)
+                        <p class="mt-2 text-xs text-blue-600">
+                            Nombre anterior: <strong>{{ $previousName }}</strong>. Puedes mantenerlo o cambiarlo.
+                        </p>
+                    @else
+                        <p class="mt-2 text-xs text-gray-500">
+                            Este nombre será visible para otros jugadores en la sala
+                        </p>
+                    @endif
                     @error('player_name')
                         <p class="mt-2 text-sm text-red-600">{{ $message }}</p>
                     @enderror

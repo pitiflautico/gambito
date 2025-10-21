@@ -13,6 +13,17 @@
         <div class="room-info">
             <h1>{{ $room->name }}</h1>
             <p class="room-code">Código: <strong>{{ $room->code }}</strong></p>
+            @if(isset($players) && isset($playerId))
+                @php
+                    $currentPlayer = collect($players)->firstWhere('id', $playerId);
+                @endphp
+                @if($currentPlayer)
+                    <p class="player-name-indicator">
+                        <span style="font-size: 0.9em; color: #666;">Jugando como:</span>
+                        <strong style="color: #4F46E5; font-size: 1.1em;">{{ $currentPlayer['name'] }}</strong>
+                    </p>
+                @endif
+            @endif
         </div>
 
         <div class="game-status">
@@ -45,6 +56,18 @@
             {{-- Canvas de dibujo --}}
             <div class="canvas-container">
                 <canvas id="drawing-canvas" width="800" height="600"></canvas>
+            </div>
+
+            {{-- Botón "¡YA LO SÉ!" para guessers --}}
+            <div id="yo-se-container" class="yo-se-container hidden">
+                <button id="btn-yo-se" class="btn-yo-se">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M9 11l3 3L22 4"></path>
+                        <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+                    </svg>
+                    <span>¡YA LO SÉ!</span>
+                </button>
+                <p class="yo-se-hint">Pulsa cuando sepas la respuesta</p>
             </div>
 
             {{-- Herramientas de dibujo --}}
@@ -124,46 +147,38 @@
             <div class="players-panel">
                 <h3>Jugadores</h3>
                 <div id="players-list" class="players-list">
-                    {{-- Ejemplo inicial para demo, se llenará dinámicamente con JavaScript --}}
-                    @if(isset($role))
-                    <div class="player-item {{ $role === 'drawer' ? 'is-drawer' : '' }}" data-player-id="{{ $playerId }}">
-                        <span class="player-name">{{ $role === 'drawer' ? 'Dibujante' : 'Adivinador' }}</span>
-                        <span class="player-score">0 pts</span>
-                        @if($role === 'drawer')
-                        <span class="drawer-badge">🎨</span>
-                        @endif
-                    </div>
+                    @if(isset($players))
+                        @foreach($players as $player)
+                        <div class="player-item {{ $player['is_drawer'] ? 'is-drawer' : '' }} {{ $player['is_eliminated'] ? 'is-eliminated' : '' }} {{ $player['id'] === $playerId ? 'is-current-player' : '' }}" data-player-id="{{ $player['id'] }}">
+                            <span class="player-name">
+                                {{ $player['name'] }}
+                                @if($player['id'] === $playerId)
+                                <span style="font-size: 0.8em; color: #4F46E5;"> (Tú)</span>
+                                @endif
+                            </span>
+                            <span class="player-score">{{ $player['score'] }} pts</span>
+                            @if($player['is_drawer'])
+                            <span class="drawer-badge">🎨</span>
+                            @endif
+                        </div>
+                        @endforeach
                     @endif
                 </div>
             </div>
 
             {{-- Panel de respuestas --}}
             <div class="answers-panel">
-                <h3>Respuestas</h3>
+                <h3>¿Quién responde?</h3>
                 <div id="answers-list" class="answers-list">
-                    {{-- Se mostrarán los intentos de respuesta aquí --}}
-                </div>
-
-                {{-- Input para responder (solo para adivinadores) --}}
-                <div id="answer-input-container" class="answer-input-container hidden">
-                    <form id="answer-form">
-                        <input
-                            type="text"
-                            id="answer-input"
-                            placeholder="Escribe tu respuesta..."
-                            maxlength="50"
-                            autocomplete="off"
-                        >
-                        <button type="submit" class="btn-submit">Enviar</button>
-                    </form>
+                    {{-- Lista de jugadores que presionaron "¡YA LO SÉ!" --}}
                 </div>
 
                 {{-- Botones de confirmación (solo para dibujante) --}}
                 <div id="confirmation-container" class="confirmation-container hidden">
                     <p class="pending-answer">
-                        <strong id="pending-player-name"></strong> responde:
-                        <span id="pending-answer-text"></span>
+                        <strong id="pending-player-name"></strong> quiere responder
                     </p>
+                    <p class="hint-text">Escucha su respuesta y confirma si es correcta o incorrecta</p>
                     <div class="confirmation-buttons">
                         <button id="btn-correct" class="btn-confirm btn-correct">✓ Correcta</button>
                         <button id="btn-incorrect" class="btn-confirm btn-incorrect">✗ Incorrecta</button>
@@ -188,7 +203,9 @@
     <div class="modal-content">
         <h2>¡Fin del juego!</h2>
         <div id="final-results"></div>
-        <a href="{{ route('lobby') }}" class="btn-primary">Volver al lobby</a>
+        <div id="final-results-actions">
+            {{-- Los botones se agregarán dinámicamente según el tipo de usuario --}}
+        </div>
     </div>
 </div>
 @endsection
@@ -201,10 +218,25 @@
             playerId: {{ $playerId ?? auth()->user()->id }},
             roomCode: '{{ $room->code }}',
             csrfToken: '{{ csrf_token() }}',
+            isMaster: {{ auth()->check() && $room->master_id === auth()->id() ? 'true' : 'false' }},
+            isGuest: {{ auth()->check() ? 'false' : 'true' }},
             @if(isset($role))
             role: '{{ $role }}',
             @endif
+            @if(isset($match->game_state['phase']))
+            phase: '{{ $match->game_state['phase'] }}',
+            @endif
+            @if(isset($match->game_state['phase']) && $match->game_state['phase'] === 'results')
+            gameResults: {
+                scores: @json($match->game_state['scores'] ?? []),
+                round: {{ $match->game_state['round'] ?? 1 }},
+                roundsTotal: {{ $match->game_state['rounds_total'] ?? 5 }}
+            }
+            @endif
         };
+
+        // El botón "YA LO SÉ" y su funcionalidad están manejados por pictionary-canvas.js
+        // que se compila con Vite y se carga automáticamente
     </script>
     {{-- El canvas.js se carga a través de Vite en app.js --}}
 @endpush

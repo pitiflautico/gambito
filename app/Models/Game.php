@@ -156,4 +156,34 @@ class Game extends Model
     {
         return is_dir(base_path($this->path));
     }
+
+    /**
+     * Obtener la clase del motor del juego (Engine).
+     * Convierte el slug en el namespace del engine.
+     * Ejemplo: "pictionary" -> "Games\Pictionary\PictionaryEngine"
+     */
+    public function getEngineClass(): ?string
+    {
+        // Capitalizar el slug para el nombre de la clase
+        $className = ucfirst($this->slug);
+
+        // Construir el namespace completo
+        $engineClass = "Games\\{$className}\\{$className}Engine";
+
+        return $engineClass;
+    }
+
+    /**
+     * Obtener una instancia del motor del juego.
+     */
+    public function getEngine()
+    {
+        $engineClass = $this->getEngineClass();
+
+        if (!$engineClass || !class_exists($engineClass)) {
+            throw new \RuntimeException("Game engine not found for game: {$this->slug}");
+        }
+
+        return app($engineClass);
+    }
 }

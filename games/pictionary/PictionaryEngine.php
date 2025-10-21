@@ -39,7 +39,7 @@ class PictionaryEngine implements GameEngineInterface
         Log::info("Initializing Pictionary game", ['match_id' => $match->id]);
 
         // Obtener todos los jugadores de la partida
-        $players = $match->room->players()->where('is_active', true)->get();
+        $players = $match->players()->where('is_connected', true)->get();
 
         if ($players->count() < 3) {
             Log::error("Not enough players to start Pictionary", [
@@ -62,24 +62,27 @@ class PictionaryEngine implements GameEngineInterface
             $scores[$playerId] = 0;
         }
 
-        // Estado inicial del juego
+        // Seleccionar primera palabra
+        $firstWord = $this->selectRandomWordFromArray($words, 'random');
+
+        // Estado inicial del juego - comienza en ronda 1
         $match->game_state = [
-            'phase' => 'lobby',
-            'round' => 0,
+            'phase' => 'playing',
+            'round' => 1,
             'current_turn' => 0,
-            'current_drawer_id' => null,
-            'current_word' => null,
-            'current_word_difficulty' => null,
+            'current_drawer_id' => $playerIds[0], // Primer jugador es el dibujante
+            'current_word' => $firstWord,
+            'current_word_difficulty' => 'random',
             'is_paused' => false, // Se pausa cuando alguien pulsa "YO SÉ"
             'turn_order' => $playerIds,
             'scores' => $scores,
             'words_available' => $words, // Palabras disponibles por dificultad
-            'words_used' => [],
+            'words_used' => [$firstWord], // Ya usamos la primera palabra
             'eliminated_this_round' => [],
             'pending_answer' => null, // {player_id, player_name, timestamp}
             'rounds_total' => 5,
             'turn_duration' => 90, // 90 segundos por turno
-            'turn_started_at' => null,
+            'turn_started_at' => now()->toIso8601String(),
         ];
 
         $match->save();
@@ -179,7 +182,7 @@ class PictionaryEngine implements GameEngineInterface
 
         // Calcular tiempo restante
         $timeRemaining = null;
-        if ($gameState['turn_started_at'] && $gameState['phase'] === 'drawing') {
+        if ($gameState['turn_started_at'] && $gameState['phase'] === 'playing') {
             $turnStartedAt = new \DateTime($gameState['turn_started_at']);
             $now = new \DateTime();
             $secondsElapsed = $now->getTimestamp() - $turnStartedAt->getTimestamp();
@@ -239,7 +242,7 @@ class PictionaryEngine implements GameEngineInterface
         switch ($currentPhase) {
             case 'lobby':
                 // Iniciar el juego
-                $gameState['phase'] = 'drawing';
+                $gameState['phase'] = 'playing';
                 $gameState['round'] = 1;
                 $gameState['current_turn'] = 0;
                 $gameState['current_drawer_id'] = $gameState['turn_order'][0];
@@ -252,20 +255,66 @@ class PictionaryEngine implements GameEngineInterface
                 }
                 break;
 
-            case 'drawing':
+            case 'playing':
                 // Terminar turno, ir a scoring
                 $gameState['phase'] = 'scoring';
                 break;
 
             case 'scoring':
-                // Verificar si el juego terminó
-                if ($gameState['round'] >= $gameState['rounds_total']) {
+                // Verificar primero si ya completamos todas las rondas y todos los turnos
+                $currentRound = $gameState['round'];
+                $currentTurn = $gameState['current_turn'];
+                $totalPlayers = count($gameState['turn_order']);
+                $totalRounds = $gameState['rounds_total'];
+
+                // Calcular si es el último turno de la última ronda
+                // El último turno es cuando current_turn == totalPlayers - 1 (índice base 0)
+                $isLastTurnOfLastRound = ($currentRound >= $totalRounds && $currentTurn >= ($totalPlayers - 1));
+
+                if ($isLastTurnOfLastRound) {
+                    // Juego terminado - NO avanzar más turnos
                     $gameState['phase'] = 'results';
+
+                    Log::info("Game finished - last turn of last round", [
+                        'match_id' => $match->id,
+                        'final_round' => $currentRound,
+                        'final_turn' => $currentTurn,
+                        'total_rounds' => $totalRounds,
+                        'total_players' => $totalPlayers
+                    ]);
+
+                    // Encontrar ganador
+                    $scores = $gameState['scores'];
+                    arsort($scores); // Ordenar por puntuación descendente
+                    $winnerId = array_key_first($scores);
+                    $winner = Player::find($winnerId);
+                    $winnerName = $winner ? $winner->name : "Player {$winnerId}";
+
+                    // Crear ranking
+                    $ranking = [];
+                    foreach ($scores as $playerId => $score) {
+                        $player = Player::find($playerId);
+                        $ranking[] = [
+                            'player_id' => $playerId,
+                            'player_name' => $player ? $player->name : "Player {$playerId}",
+                            'score' => $score
+                        ];
+                    }
+
+                    // Emitir evento de juego terminado
+                    $roomCode = $match->room->code ?? 'UNKNOWN';
+                    event(new \Games\Pictionary\Events\GameFinishedEvent(
+                        $roomCode,
+                        $winnerId,
+                        $winnerName,
+                        $scores,
+                        $ranking
+                    ));
                 } else {
-                    // Siguiente turno
+                    // Continuar jugando - avanzar al siguiente turno
                     $this->nextTurn($match);
                     $gameState = $match->game_state; // Recargar después de nextTurn
-                    $gameState['phase'] = 'drawing';
+                    $gameState['phase'] = 'playing';
                 }
                 break;
 
@@ -438,7 +487,7 @@ class PictionaryEngine implements GameEngineInterface
             return ['success' => false, 'error' => 'Ya fuiste eliminado en esta ronda'];
         }
 
-        if ($gameState['phase'] !== 'drawing') {
+        if ($gameState['phase'] !== 'playing') {
             return ['success' => false, 'error' => 'No puedes responder en esta fase'];
         }
 
@@ -635,6 +684,36 @@ class PictionaryEngine implements GameEngineInterface
         if (empty($availableWords)) {
             // Si se acabaron las palabras de esa dificultad, intentar con otra
             Log::warning("No more words available for difficulty: {$difficulty}");
+            return null;
+        }
+
+        // Seleccionar palabra aleatoria
+        $word = $availableWords[array_rand($availableWords)];
+
+        return $word;
+    }
+
+    /**
+     * Seleccionar una palabra aleatoria de un array de palabras (sin GameMatch).
+     * Útil para inicialización.
+     *
+     * @param array $words Array de palabras por dificultad
+     * @param string $difficulty 'easy', 'medium', 'hard', o 'random'
+     * @return string|null
+     */
+    private function selectRandomWordFromArray(array $words, string $difficulty = 'random'): ?string
+    {
+        // Si es random, elegir dificultad aleatoria
+        if ($difficulty === 'random') {
+            $difficulties = ['easy', 'medium', 'hard'];
+            $difficulty = $difficulties[array_rand($difficulties)];
+        }
+
+        // Obtener palabras de esa dificultad
+        $availableWords = $words[$difficulty] ?? [];
+
+        if (empty($availableWords)) {
+            Log::warning("No words available for difficulty: {$difficulty}");
             return null;
         }
 

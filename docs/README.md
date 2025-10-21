@@ -15,6 +15,8 @@
 - 🛠️ [**Guía de Desarrollo**](DEVELOPMENT_GUIDE.md) - Setup, workflow y convenciones
 - 📦 [**Instalación y Deployment**](INSTALLATION.md) - Instalación desde cero y despliegue a producción ✅
 - 🔌 [**Configuración de WebSockets**](WEBSOCKET_SETUP.md) - Laravel Reverb setup y troubleshooting ✅
+- 📡 [**WebSockets y Broadcasting**](WEBSOCKETS_BROADCASTING.md) - Guía completa de eventos en tiempo real ✅
+- 🎮 [**Convención de Estructura de Juegos**](GAMES_CONVENTION.md) - **Ubicación de archivos JS, CSS, PHP** ✅
 
 ---
 
@@ -68,7 +70,7 @@ Cada juego declara en `capabilities.json` cuáles de estos módulos necesita:
 
 | Juego | Estado | Jugadores | Módulos Usados | Documentación |
 |-------|--------|-----------|----------------|---------------|
-| **Pictionary** | 🚧 En desarrollo | 3-10 | Guest, Turn, Scoring, Timer, Roles, Realtime | [Ver docs](games/PICTIONARY.md) |
+| **Pictionary** | ✅ Completado (MVP) | 2-10 | Guest, Turn, Scoring, Timer, Roles, Realtime | [Ver docs](games/PICTIONARY.md) |
 | **UNO** | ⏳ Futuro | 2-10 | Guest, Turn, Scoring, Timer, Card | [Ver docs](games/UNO.md) |
 | **Trivia** | ⏳ Futuro | 2-∞ | Guest, Turn, Scoring, Timer, Teams | [Ver docs](games/TRIVIA.md) |
 
@@ -186,7 +188,7 @@ Ver detalles en: [`INSTRUCTIONS_FOR_AGENTS.md`](INSTRUCTIONS_FOR_AGENTS.md#-work
 ## 📊 Estado Actual del Proyecto
 
 **Última actualización:** 2025-10-21
-**Versión:** MVP 1.0 (En desarrollo)
+**Versión:** MVP 1.0
 
 ### ✅ Completado
 
@@ -195,17 +197,22 @@ Ver detalles en: [`INSTRUCTIONS_FOR_AGENTS.md`](INSTRUCTIONS_FOR_AGENTS.md#-work
 - [x] Game Registry System (descubrimiento de juegos)
 - [x] Room Manager (crear salas, códigos, QR, lobby)
 - [x] Player Session (jugadores invitados, heartbeat)
-
-### 🚧 En Desarrollo
-
-- [ ] Pictionary MVP (iterativo - Opción C)
-- [ ] Módulos opcionales para Pictionary (Turn, Scoring, Timer, Roles, Realtime)
+- [x] **Pictionary MVP Completo** (primer juego funcional)
+  - [x] Canvas de dibujo con sincronización en tiempo real
+  - [x] Sistema de turnos y rondas
+  - [x] Sistema de puntuación
+  - [x] Sistema de roles (dibujante/adivinador)
+  - [x] WebSocket broadcasting con Laravel Reverb
+  - [x] Interfaz adaptativa según rol
+  - [x] Finalización de partida con ranking
+  - [x] Flujo diferenciado para master/invitados/usuarios
 
 ### ⏳ Pendiente
 
 - [ ] Admin Panel (Filament Resources)
 - [ ] Segundo juego (validación de módulos)
-- [ ] Módulos opcionales post-MVP
+- [ ] Modularización de sistemas (extraer Turn, Scoring, Timer, Roles como módulos)
+- [ ] Módulos opcionales post-MVP (Teams, Card, Board, Spectator, AI, Replay)
 
 ---
 

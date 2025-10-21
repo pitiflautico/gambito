@@ -10,6 +10,10 @@ Route::get('/', function () {
     return view('home');
 })->name('home');
 
+Route::get('/thanks', function () {
+    return view('thanks');
+})->name('thanks');
+
 Route::get('/dashboard', function () {
     return view('dashboard');
 })->middleware(['auth', 'verified'])->name('dashboard');
@@ -50,6 +54,10 @@ Route::prefix('rooms')->name('rooms.')->group(function () {
     Route::get('/{code}/lobby', [RoomController::class, 'lobby'])->name('lobby');
     Route::get('/{code}', [RoomController::class, 'show'])->name('show');
     Route::get('/{code}/results', [RoomController::class, 'results'])->name('results');
+
+    // Acciones de sala (requieren autenticación para master)
+    Route::post('/{code}/start', [RoomController::class, 'apiStart'])->name('start')->middleware('auth');
+    Route::post('/{code}/close', [RoomController::class, 'apiClose'])->name('close')->middleware('auth');
 });
 
 require __DIR__.'/auth.php';

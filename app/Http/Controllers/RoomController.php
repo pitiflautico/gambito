@@ -2,6 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\GameStartedEvent;
+use App\Events\PlayerJoinedEvent;
+use App\Events\PlayerLeftEvent;
 use App\Models\Game;
 use App\Models\GameMatch;
 use App\Models\Player;
@@ -68,6 +71,19 @@ class RoomController extends Controller
         }
 
         try {
+            // IMPORTANTE: Limpiar sesiones anteriores (guest y jugador)
+            // Esto evita conflictos cuando el usuario crea una nueva sala
+            // después de haber estado en otra sala
+            $this->playerSessionService->clearAllSessions();
+
+            // Desconectar al usuario de otras partidas activas
+            Player::where('user_id', Auth::id())
+                ->where('is_connected', true)
+                ->whereHas('match', function ($query) {
+                    $query->whereNull('finished_at');
+                })
+                ->update(['is_connected' => false]);
+
             // Crear sala
             $room = $this->roomService->createRoom($game, Auth::user(), $settings);
 
@@ -150,6 +166,14 @@ class RoomController extends Controller
             abort(404, 'Sala no encontrada');
         }
 
+        \Log::info("Lobby accessed", [
+            'code' => $code,
+            'room_status' => $room->status,
+            'user_id' => Auth::id(),
+            'has_guest_session' => $this->playerSessionService->hasGuestSession(),
+            'url' => request()->fullUrl(),
+        ]);
+
         // Cargar relaciones necesarias
         $room->load(['game', 'master']);
         if ($room->match) {
@@ -158,12 +182,14 @@ class RoomController extends Controller
 
         // Verificar que la sala no haya terminado
         if ($room->status === Room::STATUS_FINISHED) {
+            \Log::warning("Lobby redirecting to home - room finished", ['code' => $code]);
             return redirect()->route('home')
                 ->with('error', 'Esta sala ya ha terminado.');
         }
 
         // Si la sala ya está jugando, redirigir a la sala activa
         if ($room->status === Room::STATUS_PLAYING) {
+            \Log::info("Lobby redirecting to show - room playing", ['code' => $code]);
             return redirect()->route('rooms.show', ['code' => $code]);
         }
 
@@ -175,7 +201,16 @@ class RoomController extends Controller
 
             // Si no existe como jugador, agregarlo
             if (!$existingPlayer) {
-                Player::create([
+                // Desconectar al usuario de otras partidas activas
+                Player::where('user_id', Auth::id())
+                    ->where('is_connected', true)
+                    ->whereHas('match', function ($query) use ($room) {
+                        $query->where('id', '!=', $room->match->id)
+                              ->whereNull('finished_at');
+                    })
+                    ->update(['is_connected' => false]);
+
+                $newPlayer = Player::create([
                     'match_id' => $room->match->id,
                     'user_id' => Auth::id(),
                     'name' => Auth::user()->name,
@@ -185,32 +220,82 @@ class RoomController extends Controller
                 ]);
                 // Recargar jugadores
                 $room->match->load('players');
+
+                // Emitir evento de jugador unido
+                $totalPlayers = $room->match->players()->count();
+                event(new PlayerJoinedEvent($room, $newPlayer, $totalPlayers));
             }
         }
 
-        // Si no está autenticado y no tiene sesión de invitado, pedir nombre
-        if (!Auth::check() && !$this->playerSessionService->hasGuestSession()) {
-            return redirect()->route('rooms.guestName', ['code' => $code]);
-        }
+        // Si no está autenticado, verificar si ya está en esta partida
+        if (!Auth::check()) {
+            // Si no tiene sesión de invitado, pedir nombre
+            if (!$this->playerSessionService->hasGuestSession()) {
+                \Log::info("Lobby redirecting to guestName - no guest session", ['code' => $code]);
+                return redirect()->route('rooms.guestName', ['code' => $code]);
+            }
 
-        // Si es invitado, intentar unirse automáticamente
-        if (!Auth::check() && $this->playerSessionService->hasGuestSession()) {
             $guestData = $this->playerSessionService->getGuestData();
 
-            // Verificar si el jugador ya existe en esta partida
-            $existingPlayer = $room->match->players()
+            \Log::info("Lobby - guest session found", [
+                'code' => $code,
+                'session_id' => $guestData['session_id'] ?? null,
+                'name' => $guestData['name'] ?? null,
+            ]);
+
+            // Verificar si ya existe como jugador en esta partida
+            $existingPlayerInThisMatch = $room->match->players()
                 ->where('session_id', $guestData['session_id'])
                 ->first();
 
-            // Si no existe, crear el jugador
-            if (!$existingPlayer) {
+            // Si no está en esta partida, crear el jugador
+            if (!$existingPlayerInThisMatch) {
+                \Log::info("Lobby - creating guest player", [
+                    'code' => $code,
+                    'session_id' => $guestData['session_id'],
+                    'name' => $guestData['name'],
+                ]);
+
                 try {
-                    $this->playerSessionService->createGuestPlayer($room->match, $guestData['name']);
+                    // Desconectar al jugador de otras partidas activas
+                    Player::where('session_id', $guestData['session_id'])
+                        ->where('is_connected', true)
+                        ->whereHas('match', function ($query) use ($room) {
+                            $query->where('id', '!=', $room->match->id)
+                                  ->whereNull('finished_at');
+                        })
+                        ->update(['is_connected' => false]);
+
+                    $newPlayer = $this->playerSessionService->createGuestPlayer($room->match, $guestData['name']);
+
                     // Recargar jugadores
                     $room->match->load('players');
+
+                    // Emitir evento de jugador unido
+                    $totalPlayers = $room->match->players()->count();
+                    event(new PlayerJoinedEvent($room, $newPlayer, $totalPlayers));
+
+                    \Log::info("Lobby - guest player created successfully", [
+                        'code' => $code,
+                        'player_id' => $newPlayer->id,
+                    ]);
                 } catch (\Exception $e) {
-                    return back()->withErrors(['error' => $e->getMessage()]);
+                    \Log::error("Lobby - error creating guest player", [
+                        'code' => $code,
+                        'error' => $e->getMessage(),
+                    ]);
+
+                    // Limpiar sesión de invitado corrupta
+                    $this->playerSessionService->clearGuestSession();
+
+                    return redirect()->route('rooms.guestName', ['code' => $code])
+                        ->withErrors(['error' => 'Hubo un problema. Por favor, ingresa tu nombre nuevamente.']);
                 }
+            } else {
+                \Log::info("Lobby - guest player already exists", [
+                    'code' => $code,
+                    'player_id' => $existingPlayerInThisMatch->id,
+                ]);
             }
         }
 
@@ -239,24 +324,38 @@ class RoomController extends Controller
     {
         $code = strtoupper($code);
 
+        \Log::info("GuestName accessed", [
+            'code' => $code,
+            'url' => request()->fullUrl(),
+        ]);
+
         // Verificar que la sala existe
         $room = $this->roomService->findRoomByCode($code);
 
         if (!$room) {
+            \Log::error("GuestName - room not found", ['code' => $code]);
             abort(404, 'Sala no encontrada');
         }
 
+        \Log::info("GuestName - room found", [
+            'code' => $code,
+            'room_status' => $room->status,
+        ]);
+
         // Si el usuario está autenticado, redirigir al lobby directamente
         if (Auth::check()) {
+            \Log::info("GuestName - user authenticated, redirecting to lobby");
             return redirect()->route('rooms.lobby', ['code' => $code]);
         }
 
-        // Si ya tiene sesión de invitado, redirigir al lobby
+        // Obtener nombre anterior si existe
+        $previousName = null;
         if ($this->playerSessionService->hasGuestSession()) {
-            return redirect()->route('rooms.lobby', ['code' => $code]);
+            $guestData = $this->playerSessionService->getGuestData();
+            $previousName = $guestData['name'] ?? null;
         }
 
-        return view('rooms.guest-name', compact('code'));
+        return view('rooms.guest-name', compact('code', 'previousName'));
     }
 
     /**
@@ -279,11 +378,41 @@ class RoomController extends Controller
 
         // Crear sesión de invitado
         try {
+            // IMPORTANTE: SIEMPRE limpiar sesión de invitado anterior antes de crear nueva
+            // Esto evita conflictos de session_id duplicados
+            if ($this->playerSessionService->hasGuestSession()) {
+                $oldGuestData = $this->playerSessionService->getGuestData();
+                \Log::info("Clearing old guest session before creating new one", [
+                    'old_session_id' => $oldGuestData['session_id'] ?? null,
+                    'old_name' => $oldGuestData['name'] ?? null,
+                    'new_name' => $validated['player_name'],
+                    'new_room' => $code,
+                ]);
+
+                // Desconectar sesión anterior de TODAS las partidas
+                Player::where('session_id', $oldGuestData['session_id'])
+                    ->where('is_connected', true)
+                    ->update(['is_connected' => false]);
+
+                // Limpiar la sesión anterior ANTES de crear la nueva
+                $this->playerSessionService->clearGuestSession();
+            }
+
+            // Ahora sí, crear la nueva sesión limpia
             $this->playerSessionService->createGuestSession($validated['player_name']);
+
+            \Log::info("New guest session created", [
+                'name' => $validated['player_name'],
+                'room' => $code,
+            ]);
 
             return redirect()->route('rooms.lobby', ['code' => $code])
                 ->with('success', '¡Bienvenido ' . $validated['player_name'] . '!');
         } catch (\Exception $e) {
+            \Log::error("Error creating guest session", [
+                'error' => $e->getMessage(),
+                'code' => $code,
+            ]);
             return back()->withErrors(['error' => $e->getMessage()]);
         }
     }
@@ -315,8 +444,43 @@ class RoomController extends Controller
             return redirect()->route('rooms.results', ['code' => $code]);
         }
 
+        // Obtener el jugador actual (guest o autenticado)
+        $player = null;
+        if (Auth::check()) {
+            // Usuario autenticado
+            $player = $room->match->players()->where('user_id', Auth::id())->first();
+        } elseif ($this->playerSessionService->hasGuestSession()) {
+            // Invitado
+            $guestData = $this->playerSessionService->getGuestData();
+            $player = $room->match->players()->where('session_id', $guestData['session_id'])->first();
+        }
+
+        // Si no se encontró jugador, redirigir al lobby
+        if (!$player) {
+            return redirect()->route('rooms.lobby', ['code' => $code])
+                ->with('error', 'Debes unirte a la partida primero');
+        }
+
+        $playerId = $player->id;
+
+        // Obtener el rol del jugador desde el motor del juego
+        $gameState = $room->match->game_state ?? [];
+        $currentDrawerId = $gameState['current_drawer_id'] ?? null;
+        $role = ($player->id === $currentDrawerId) ? 'drawer' : 'guesser';
+
+        // Obtener lista de jugadores con sus datos
+        $players = $room->match->players->map(function ($p) use ($currentDrawerId, $gameState) {
+            return [
+                'id' => $p->id,
+                'name' => $p->name,
+                'score' => $gameState['scores'][$p->id] ?? 0,
+                'is_drawer' => ($p->id === $currentDrawerId),
+                'is_eliminated' => in_array($p->id, $gameState['eliminated_this_round'] ?? [])
+            ];
+        });
+
         // Cargar vista específica del juego
-        return view('rooms.show', compact('room'));
+        return view('rooms.show', compact('room', 'playerId', 'role', 'players'));
     }
 
     /**
@@ -372,11 +536,19 @@ class RoomController extends Controller
         try {
             $this->roomService->startGame($room);
 
+            // Refrescar sala para obtener último estado
+            $room = $room->fresh();
+            $room->load('match.players');
+
+            // Emitir evento de partida iniciada
+            $totalPlayers = $room->match->players()->count();
+            event(new GameStartedEvent($room, $totalPlayers));
+
             return response()->json([
                 'success' => true,
                 'message' => 'Partida iniciada',
                 'data' => [
-                    'status' => $room->fresh()->status,
+                    'status' => $room->status,
                 ],
             ]);
         } catch (\Exception $e) {
@@ -441,9 +613,84 @@ class RoomController extends Controller
         try {
             $this->roomService->closeRoom($room);
 
+            // IMPORTANTE: Limpiar todas las sesiones cuando se cierra la sala
+            // Esto asegura que los usuarios no tengan sesiones colgadas
+            $this->playerSessionService->clearAllSessions();
+
+            // Desconectar todos los jugadores de esta sala
+            if ($room->match) {
+                $room->match->players()->update([
+                    'is_connected' => false,
+                    'last_ping' => now(),
+                ]);
+            }
+
+            \Log::info("Room closed and sessions cleared", [
+                'code' => $code,
+                'master_id' => Auth::id(),
+            ]);
+
             return response()->json([
                 'success' => true,
                 'message' => 'Sala cerrada',
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 400);
+        }
+    }
+
+    /**
+     * API: Abandonar sala (jugador sale de la sala).
+     */
+    public function apiLeave(string $code)
+    {
+        $code = strtoupper($code);
+        $room = $this->roomService->findRoomByCode($code);
+
+        if (!$room) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Sala no encontrada',
+            ], 404);
+        }
+
+        try {
+            // Buscar al jugador actual
+            $player = null;
+            if (Auth::check()) {
+                $player = $room->match->players()->where('user_id', Auth::id())->first();
+            } elseif ($this->playerSessionService->hasGuestSession()) {
+                $guestData = $this->playerSessionService->getGuestData();
+                $player = $room->match->players()->where('session_id', $guestData['session_id'])->first();
+            }
+
+            if ($player) {
+                // Marcar como desconectado
+                $player->update([
+                    'is_connected' => false,
+                    'last_ping' => now(),
+                ]);
+
+                // Emitir evento de jugador que salió
+                $totalPlayers = $room->match->players()->where('is_connected', true)->count();
+                event(new PlayerLeftEvent($room, $player, $totalPlayers));
+
+                \Log::info("Player left room", [
+                    'code' => $code,
+                    'player_id' => $player->id,
+                    'player_name' => $player->name,
+                ]);
+            }
+
+            // Limpiar sesiones
+            $this->playerSessionService->clearAllSessions();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Has salido de la sala',
             ]);
         } catch (\Exception $e) {
             return response()->json([

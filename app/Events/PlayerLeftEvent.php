@@ -1,39 +1,32 @@
 <?php
 
-namespace Games\Pictionary\Events;
+namespace App\Events;
 
-use App\Models\GameMatch;
 use App\Models\Player;
+use App\Models\Room;
 use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
-/**
- * Evento que se dispara cuando un jugador pulsa "¡YO SÉ!"
- */
-class PlayerAnsweredEvent implements ShouldBroadcast
+class PlayerLeftEvent implements ShouldBroadcast
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
     public string $roomCode;
     public int $playerId;
     public string $playerName;
+    public int $totalPlayers;
 
-    /**
-     * Create a new event instance.
-     */
-    public function __construct(GameMatch $match, Player $player)
+    public function __construct(Room $room, Player $player, int $totalPlayers)
     {
-        $this->roomCode = $match->room->code;
+        $this->roomCode = $room->code;
         $this->playerId = $player->id;
         $this->playerName = $player->name;
+        $this->totalPlayers = $totalPlayers;
     }
 
-    /**
-     * Get the channels the event should broadcast on.
-     */
     public function broadcastOn(): array
     {
         return [
@@ -41,23 +34,17 @@ class PlayerAnsweredEvent implements ShouldBroadcast
         ];
     }
 
-    /**
-     * The event's broadcast name.
-     */
     public function broadcastAs(): string
     {
-        return 'player.answered';
+        return 'player.left';
     }
 
-    /**
-     * Get the data to broadcast.
-     */
     public function broadcastWith(): array
     {
         return [
             'player_id' => $this->playerId,
             'player_name' => $this->playerName,
-            'message' => "🙋 {$this->playerName} dice: ¡YA LO SÉ!",
+            'total_players' => $this->totalPlayers,
             'timestamp' => now()->toIso8601String(),
         ];
     }

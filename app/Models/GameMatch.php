@@ -106,12 +106,33 @@ class GameMatch extends Model
 
     /**
      * Iniciar la partida.
+     * Llama al motor del juego para inicializar el estado.
      */
     public function start(): void
     {
+        // Obtener el motor del juego
+        $game = $this->room->game;
+        $engineClass = $game->getEngineClass();
+
+        if (!$engineClass || !class_exists($engineClass)) {
+            throw new \RuntimeException("Game engine not found for game: {$game->slug}");
+        }
+
+        $engine = app($engineClass);
+
+        // Inicializar el juego (crea estado inicial)
+        $engine->initialize($this);
+
+        // Marcar partida como iniciada
         $this->update([
             'started_at' => now(),
-            'game_state' => $this->game_state ?? [], // Inicializar estado si está vacío
+        ]);
+
+        \Log::info("Match initialized with game engine", [
+            'match_id' => $this->id,
+            'game' => $game->slug,
+            'engine' => $engineClass,
+            'initial_state' => $this->fresh()->game_state,
         ]);
     }
 
