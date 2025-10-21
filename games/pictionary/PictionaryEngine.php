@@ -9,6 +9,8 @@ use Illuminate\Support\Facades\Log;
 use Games\Pictionary\Events\PlayerAnsweredEvent;
 use Games\Pictionary\Events\PlayerEliminatedEvent;
 use Games\Pictionary\Events\GameStateUpdatedEvent;
+use Games\Pictionary\Events\RoundEndedEvent;
+use Games\Pictionary\Events\TurnChangedEvent;
 
 /**
  * Motor del juego Pictionary.
@@ -534,6 +536,21 @@ class PictionaryEngine implements GameEngineInterface
                 'seconds_elapsed' => $secondsElapsed
             ]);
 
+            // Obtener room code para el evento
+            $roomCode = $match->room->code ?? 'UNKNOWN';
+
+            // Broadcast fin de ronda con detalles de puntos
+            event(new RoundEndedEvent(
+                $roomCode,
+                $gameState['round'],
+                $gameState['current_word'],
+                $guesserPlayerId,
+                $guesserPlayerName,
+                $guesserPoints,
+                $drawerPoints,
+                $gameState['scores']
+            ));
+
             // Broadcast actualización de estado (fase scoring, puntos actualizados)
             event(new GameStateUpdatedEvent($match, 'round_ended'));
 
@@ -668,6 +685,21 @@ class PictionaryEngine implements GameEngineInterface
 
         $match->game_state = $gameState;
         $match->save();
+
+        // Get room code and new drawer info for the event
+        $roomCode = $match->room->code ?? 'UNKNOWN';
+        $newDrawer = Player::find($nextDrawerId);
+        $newDrawerName = $newDrawer ? $newDrawer->name : "Player {$nextDrawerId}";
+
+        // Broadcast turn change event
+        event(new TurnChangedEvent(
+            $roomCode,
+            $nextDrawerId,
+            $newDrawerName,
+            $gameState['round'],
+            $nextTurn,
+            $gameState['scores']
+        ));
 
         Log::info("Advanced to next turn", [
             'match_id' => $match->id,

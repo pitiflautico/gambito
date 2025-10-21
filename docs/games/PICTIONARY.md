@@ -777,10 +777,21 @@ En Fase 4 se crearán servicios específicos cuando se extraigan módulos:
 
 ### 🧪 URLs de Prueba
 
+**Entorno de Desarrollo:**
+- **Dominio:** `http://gambito.test` (Laravel Herd)
+- **WebSocket:** `ws://127.0.0.1:8086` (Laravel Reverb)
+
+**URLs de Demo:**
 ```
-Dibujante:  https://gambito.test/pictionary/demo
-Adivinador: https://gambito.test/pictionary/demo?role=guesser
+Dibujante:  http://gambito.test/pictionary/demo
+Adivinador: http://gambito.test/pictionary/demo?role=guesser
 ```
+
+**Configuración del Entorno:**
+- **Servidor Web:** Laravel Herd (reemplaza Valet)
+- **WebSocket Server:** Laravel Reverb en puerto 8086
+- **Asset Compilation:** Vite (requiere Node.js 20.19+ o 22.12+)
+- **Broadcasting:** QUEUE_CONNECTION=sync para desarrollo
 
 ### 📈 Progreso General
 

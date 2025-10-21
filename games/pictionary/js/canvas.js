@@ -91,6 +91,18 @@ class PictionaryCanvas {
             }
         });
 
+        // Evento: Ronda terminada (mostrar ganador y puntos)
+        channel.listen('.round.ended', (data) => {
+            console.log('Round ended:', data);
+            this.handleRoundEnded(data);
+        });
+
+        // Evento: Turno cambiado (nuevo dibujante)
+        channel.listen('.turn.changed', (data) => {
+            console.log('Turn changed:', data);
+            this.handleTurnChanged(data);
+        });
+
         console.log(`Connected to WebSocket channel: room.${this.roomCode}`);
     }
 
@@ -160,6 +172,68 @@ class PictionaryCanvas {
         // Si hay cambio de dibujante
         if (data.update_type === 'turn_change' && data.current_drawer_id) {
             this.handleDrawerChange(data.current_drawer_id);
+        }
+    }
+
+    /**
+     * Manejar evento de ronda terminada
+     */
+    handleRoundEnded(data) {
+        console.log('Round ended event:', data);
+
+        // Actualizar puntuaciones primero
+        if (data.scores) {
+            this.updateScores(data.scores);
+        }
+
+        // Mostrar modal con detalles de la ronda
+        this.showRoundEndedModal({
+            round: data.round,
+            word: data.word,
+            winnerName: data.winner_name,
+            guesserPoints: data.guesser_points,
+            drawerPoints: data.drawer_points,
+            scores: data.scores
+        });
+
+        // Ocultar panel de confirmación si estaba visible
+        const confirmationContainer = document.getElementById('confirmation-container');
+        if (confirmationContainer) {
+            confirmationContainer.classList.add('hidden');
+        }
+    }
+
+    /**
+     * Manejar evento de cambio de turno
+     */
+    handleTurnChanged(data) {
+        console.log('Turn changed event:', data);
+
+        // Actualizar puntuaciones
+        if (data.scores) {
+            this.updateScores(data.scores);
+        }
+
+        // Actualizar información de ronda
+        this.updateRoundInfo(data.round, window.gameData?.totalRounds || 5);
+
+        // Cambiar dibujante
+        this.handleDrawerChange(data.new_drawer_id);
+
+        // Mostrar mensaje de nuevo turno
+        this.showGameMessage(`🎨 Nuevo turno: ${data.new_drawer_name} es el dibujante`);
+
+        // Limpiar canvas para el nuevo turno
+        this.clearCanvasRemote();
+
+        // Si es el nuevo dibujante, obtener la palabra del servidor
+        const currentPlayerId = window.gameData?.playerId;
+        if (currentPlayerId === data.new_drawer_id) {
+            // TODO: Fetch la nueva palabra desde el servidor
+            // Por ahora usamos un placeholder
+            this.setRole(true, '??? (obtener del servidor)');
+        } else {
+            this.setRole(false);
         }
     }
 
@@ -633,22 +707,34 @@ class PictionaryCanvas {
     confirmAnswer(isCorrect) {
         console.log('Answer confirmed as:', isCorrect ? 'correct' : 'incorrect');
 
-        // TODO Task 6.0: Enviar confirmación al servidor
-        // fetch('/api/pictionary/confirm-answer', {
-        //     method: 'POST',
-        //     headers: {
-        //         'Content-Type': 'application/json',
-        //         'X-CSRF-TOKEN': window.gameData.csrfToken
-        //     },
-        //     body: JSON.stringify({
-        //         match_id: window.gameData.matchId,
-        //         player_id: pendingPlayerId,
-        //         is_correct: isCorrect
-        //     })
-        // });
+        // Obtener el player_id pendiente del data attribute
+        const confirmationContainer = document.getElementById('confirmation-container');
+        const pendingPlayerId = confirmationContainer.dataset.pendingPlayerId;
+
+        // Enviar confirmación al servidor
+        fetch('/api/pictionary/confirm-answer', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': window.gameData.csrfToken
+            },
+            body: JSON.stringify({
+                room_code: this.roomCode,
+                match_id: window.gameData.matchId,
+                player_id: parseInt(pendingPlayerId),
+                is_correct: isCorrect
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            console.log('Confirm answer response:', data);
+        })
+        .catch(error => {
+            console.error('Error confirming answer:', error);
+        });
 
         // Ocultar panel de confirmación
-        document.getElementById('confirmation-container').classList.add('hidden');
+        confirmationContainer.classList.add('hidden');
     }
 
     /**
@@ -756,6 +842,64 @@ class PictionaryCanvas {
         `;
 
         modal.classList.remove('hidden');
+    }
+
+    /**
+     * Mostrar modal de fin de ronda con puntos ganados
+     */
+    showRoundEndedModal(data) {
+        const modal = document.getElementById('round-results-modal');
+        const resultsContainer = document.getElementById('round-results');
+
+        // Convertir scores object a array ordenado
+        const scoresArray = Object.entries(data.scores).map(([playerId, score]) => ({
+            playerId: parseInt(playerId),
+            score: score
+        })).sort((a, b) => b.score - a.score);
+
+        resultsContainer.innerHTML = `
+            <div class="round-results-content">
+                <div class="round-winner">
+                    <h3>🎉 ¡${data.winnerName} adivinó la palabra!</h3>
+                    <p class="revealed-word">La palabra era: <strong>${data.word}</strong></p>
+                </div>
+
+                <div class="round-points">
+                    <h4>Puntos obtenidos esta ronda:</h4>
+                    <div class="points-earned">
+                        <div class="point-item winner-points">
+                            <span class="point-label">${data.winnerName} (adivinador):</span>
+                            <span class="point-value">+${data.guesserPoints} pts</span>
+                        </div>
+                        <div class="point-item drawer-points">
+                            <span class="point-label">Dibujante:</span>
+                            <span class="point-value">+${data.drawerPoints} pts</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="total-scores">
+                    <h4>Puntuación total:</h4>
+                    <div class="scores-list">
+                        ${scoresArray.map((s, index) => `
+                            <div class="score-item ${index === 0 ? 'first-place' : ''}">
+                                <span class="score-position">${index + 1}.</span>
+                                <span class="score-name">Jugador ${s.playerId}</span>
+                                <span class="score-points">${s.score} pts</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Mostrar el modal
+        modal.classList.remove('hidden');
+
+        // Auto-cerrar después de 5 segundos y continuar con el siguiente turno
+        setTimeout(() => {
+            modal.classList.add('hidden');
+        }, 5000);
     }
 
     /**
