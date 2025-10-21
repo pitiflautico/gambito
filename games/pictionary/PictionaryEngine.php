@@ -13,6 +13,7 @@ use Games\Pictionary\Events\RoundEndedEvent;
 use Games\Pictionary\Events\TurnChangedEvent;
 use App\Services\Modules\TurnSystem\TurnManager;
 use App\Services\Modules\ScoringSystem\ScoreManager;
+use App\Services\Modules\TimerSystem\TimerService;
 use Games\Pictionary\PictionaryScoreCalculator;
 
 /**
@@ -24,7 +25,7 @@ use Games\Pictionary\PictionaryScoreCalculator;
  * Módulos utilizados:
  * - Turn System: Gestión de turnos y rondas ✅
  * - Scoring System: Puntuación basada en tiempo ✅
- * - Timer System: Temporizadores (TODO - Fase 4)
+ * - Timer System: Temporizadores por turno ✅
  * - Roles System: Roles drawer/guesser (TODO - Fase 4)
  */
 class PictionaryEngine implements GameEngineInterface
@@ -114,6 +115,12 @@ class PictionaryEngine implements GameEngineInterface
             trackHistory: false // No necesitamos historial en Pictionary
         );
 
+        // ========================================================================
+        // TIMER SYSTEM MODULE: Inicializar timer del turno
+        // ========================================================================
+        $timerService = new TimerService();
+        $timerService->startTimer('turn_timer', $turnDuration);
+
         // Seleccionar primera palabra
         $firstWord = $this->selectRandomWordFromArray($words, $wordDifficulty);
 
@@ -128,9 +135,8 @@ class PictionaryEngine implements GameEngineInterface
             'words_used' => [$firstWord], // Ya usamos la primera palabra
             'eliminated_this_round' => [],
             'pending_answer' => null, // {player_id, player_name, timestamp}
-            'turn_duration' => $turnDuration, // Desde configuración
-            'turn_started_at' => now()->toIso8601String(),
-        ], $turnManager->toArray(), $scoreManager->toArray()); // Merge con TurnManager y ScoreManager
+            'turn_duration' => $turnDuration, // Guardamos duración para referencia (usado en cálculos de puntos)
+        ], $turnManager->toArray(), $scoreManager->toArray(), $timerService->toArray()); // Merge con módulos
 
         $match->save();
 
@@ -231,14 +237,13 @@ class PictionaryEngine implements GameEngineInterface
         $isDrawer = ($gameState['current_drawer_id'] === $player->id);
         $isEliminated = in_array($player->id, $gameState['eliminated_this_round']);
 
-        // Calcular tiempo restante
+        // ========================================================================
+        // TIMER SYSTEM MODULE: Obtener tiempo restante del turno
+        // ========================================================================
+        $timerService = TimerService::fromArray($gameState);
         $timeRemaining = null;
-        if ($gameState['turn_started_at'] && $gameState['phase'] === 'playing') {
-            $turnStartedAt = new \DateTime($gameState['turn_started_at']);
-            $now = new \DateTime();
-            $secondsElapsed = $now->getTimestamp() - $turnStartedAt->getTimestamp();
-            $maxTime = $gameState['turn_duration'] ?? 90;
-            $timeRemaining = max(0, $maxTime - $secondsElapsed);
+        if ($timerService->hasTimer('turn_timer') && $gameState['phase'] === 'playing') {
+            $timeRemaining = $timerService->getRemainingTime('turn_timer');
         }
 
         // ========================================================================
@@ -302,15 +307,23 @@ class PictionaryEngine implements GameEngineInterface
                 // ========================================================================
                 $turnManager = TurnManager::fromArray($gameState);
 
+                // ========================================================================
+                // TIMER SYSTEM MODULE: Reiniciar timer del turno
+                // ========================================================================
+                $timerService = TimerService::fromArray($gameState);
+                $timerService->restartTimer('turn_timer');
+
                 $gameState['phase'] = 'playing';
                 $gameState['current_drawer_id'] = $turnManager->getCurrentPlayer();
                 $gameState['current_word'] = $this->selectRandomWord($match, 'easy');
-                $gameState['turn_started_at'] = now()->toDateTimeString();
                 $gameState['eliminated_this_round'] = []; // Resetear eliminados al iniciar
 
                 if ($gameState['current_word']) {
                     $gameState['words_used'][] = $gameState['current_word'];
                 }
+
+                // Actualizar estado del Timer System en game_state
+                $gameState = array_merge($gameState, $timerService->toArray());
                 break;
 
             case 'playing':
@@ -635,10 +648,11 @@ class PictionaryEngine implements GameEngineInterface
         if ($isCorrect) {
             // ✅ RESPUESTA CORRECTA: Termina la ronda
 
-            // Calcular segundos transcurridos
-            $turnStartedAt = new \DateTime($gameState['turn_started_at']);
-            $now = new \DateTime();
-            $secondsElapsed = $now->getTimestamp() - $turnStartedAt->getTimestamp();
+            // ========================================================================
+            // TIMER SYSTEM MODULE: Obtener tiempo transcurrido del timer
+            // ========================================================================
+            $timerService = TimerService::fromArray($gameState);
+            $secondsElapsed = $timerService->getElapsedTime('turn_timer');
 
             // ========================================================================
             // SCORING SYSTEM MODULE: Otorgar puntos usando ScoreManager
@@ -845,6 +859,12 @@ class PictionaryEngine implements GameEngineInterface
         $turnManager = TurnManager::fromArray($gameState);
         $turnInfo = $turnManager->nextTurn();
 
+        // ========================================================================
+        // TIMER SYSTEM MODULE: Reiniciar timer para el nuevo turno
+        // ========================================================================
+        $timerService = TimerService::fromArray($gameState);
+        $timerService->restartTimer('turn_timer');
+
         // Seleccionar nueva palabra
         $newWord = $this->selectRandomWord($match, 'random');
 
@@ -853,15 +873,14 @@ class PictionaryEngine implements GameEngineInterface
         $gameState['current_word'] = $newWord;
         $gameState['eliminated_this_round'] = [];
         $gameState['pending_answer'] = null;
-        $gameState['turn_started_at'] = now()->toDateTimeString();
 
         // Marcar palabra como usada
         if ($newWord) {
             $gameState['words_used'][] = $newWord;
         }
 
-        // Actualizar estado del Turn System en game_state
-        $gameState = array_merge($gameState, $turnManager->toArray());
+        // Actualizar estado de los módulos en game_state
+        $gameState = array_merge($gameState, $turnManager->toArray(), $timerService->toArray());
 
         $match->game_state = $gameState;
         $match->save();
