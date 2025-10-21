@@ -190,9 +190,9 @@ class PictionaryGameFlowTest extends TestCase
 
         // Verificar estado inicial
         $this->assertEquals('playing', $gameState['phase']);
-        $this->assertEquals(1, $gameState['round']);
-        $this->assertEquals(5, $gameState['rounds_total']);
-        $this->assertEquals(0, $gameState['current_turn']);
+        $this->assertEquals(1, $gameState['current_round']); // Desde TurnManager
+        $this->assertEquals(3, $gameState['total_rounds']); // Desde TurnManager: 3 jugadores = 3 rondas (modo auto)
+        $this->assertEquals(0, $gameState['current_turn_index']); // Desde TurnManager
         $this->assertNotNull($gameState['current_drawer_id']);
         $this->assertNotNull($gameState['current_word']);
         $this->assertIsArray($gameState['turn_order']);
@@ -341,9 +341,12 @@ class PictionaryGameFlowTest extends TestCase
         $match->refresh();
 
         // Forzar última ronda, último turno
+        // Con 3 jugadores, modo auto = 3 rondas
+        // Última ronda = 3, último turno = índice 2 (0-based)
+        // Cuando avanza, va a ronda 4, que excede total_rounds (3)
         $gameState = $match->game_state;
-        $gameState['round'] = 5;
-        $gameState['current_turn'] = 2; // Último turno (hay 3 jugadores, 0-based)
+        $gameState['current_round'] = 3; // Última ronda (3 jugadores = 3 rondas)
+        $gameState['current_turn_index'] = 2; // Último turno (0-based)
         $gameState['phase'] = 'scoring';
         $gameState['scores'][$player1->id] = 500;
         $gameState['scores'][$player2->id] = 300;

@@ -1,10 +1,34 @@
 {
   "slug": "pictionary",
-  "version": "1.0",
-  "requires": {},
+  "version": "1.1",
+  "requires": {
+    "modules": {
+      "turn_system": "^1.0",
+      "guest_system": "^1.0",
+      "scoring_system": "^1.0"
+    }
+  },
   "provides": {
-    "events": [],
-    "routes": [],
-    "views": []
+    "events": [
+      "PlayerAnsweredEvent",
+      "PlayerEliminatedEvent",
+      "RoundEndedEvent",
+      "TurnChangedEvent",
+      "GameFinishedEvent",
+      "GameStateUpdatedEvent",
+      "CanvasDrawEvent",
+      "AnswerConfirmedEvent"
+    ],
+    "routes": [
+      "/api/pictionary/player-answered",
+      "/api/pictionary/confirm-answer",
+      "/api/pictionary/advance-phase",
+      "/api/pictionary/get-word",
+      "/api/pictionary/draw",
+      "/api/pictionary/clear"
+    ],
+    "views": [
+      "games/pictionary/canvas"
+    ]
   }
 }

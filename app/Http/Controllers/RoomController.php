@@ -11,6 +11,7 @@ use App\Models\Player;
 use App\Models\Room;
 use App\Services\Core\PlayerSessionService;
 use App\Services\Core\RoomService;
+use App\Services\Core\GameConfigService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
@@ -26,21 +27,44 @@ class RoomController extends Controller
      */
     protected PlayerSessionService $playerSessionService;
 
-    public function __construct(RoomService $roomService, PlayerSessionService $playerSessionService)
-    {
+    /**
+     * Game config service.
+     */
+    protected GameConfigService $gameConfigService;
+
+    public function __construct(
+        RoomService $roomService,
+        PlayerSessionService $playerSessionService,
+        GameConfigService $gameConfigService
+    ) {
         $this->roomService = $roomService;
         $this->playerSessionService = $playerSessionService;
+        $this->gameConfigService = $gameConfigService;
     }
 
     /**
      * Mostrar formulario para crear una sala.
      */
-    public function create()
+    public function create(Request $request)
     {
         // Obtener juegos activos
         $games = Game::active()->get();
 
-        return view('rooms.create', compact('games'));
+        // Si se seleccionó un juego, obtener sus configuraciones
+        $selectedGame = null;
+        $gameConfig = null;
+        $customizableSettings = [];
+
+        if ($request->has('game_id')) {
+            $selectedGame = Game::find($request->game_id);
+
+            if ($selectedGame) {
+                $gameConfig = $this->gameConfigService->getConfig($selectedGame->slug);
+                $customizableSettings = $this->gameConfigService->getCustomizableSettings($selectedGame->slug);
+            }
+        }
+
+        return view('rooms.create', compact('games', 'selectedGame', 'gameConfig', 'customizableSettings'));
     }
 
     /**
@@ -48,26 +72,47 @@ class RoomController extends Controller
      */
     public function store(Request $request)
     {
-        $validated = $request->validate([
+        // Validación básica
+        $basicValidation = [
             'game_id' => 'required|exists:games,id',
             'max_players' => 'nullable|integer|min:1|max:100',
             'private' => 'nullable|boolean',
-        ]);
+        ];
 
-        $game = Game::findOrFail($validated['game_id']);
+        $game = Game::findOrFail($request->game_id);
 
         // Validar que el juego esté activo
         if (!$game->is_active) {
             return back()->withErrors(['game_id' => 'Este juego no está disponible actualmente.']);
         }
 
-        // Preparar settings
+        // ========================================================================
+        // VALIDACIÓN DINÁMICA: Agregar reglas de validación del juego
+        // ========================================================================
+        $gameValidationRules = $this->gameConfigService->getValidationRules($game->slug);
+        $allRules = array_merge($basicValidation, $gameValidationRules);
+
+        $validated = $request->validate($allRules);
+
+        // ========================================================================
+        // PREPARAR SETTINGS: Combinar settings básicos + configuraciones del juego
+        // ========================================================================
         $settings = [];
+
+        // Settings básicos
         if (isset($validated['max_players'])) {
             $settings['max_players'] = $validated['max_players'];
         }
         if (isset($validated['private'])) {
             $settings['private'] = $validated['private'];
+        }
+
+        // Settings específicos del juego (configuraciones customizables)
+        $customizableSettings = $this->gameConfigService->getCustomizableSettings($game->slug);
+        foreach (array_keys($customizableSettings) as $key) {
+            if (isset($validated[$key])) {
+                $settings[$key] = $validated[$key];
+            }
         }
 
         try {

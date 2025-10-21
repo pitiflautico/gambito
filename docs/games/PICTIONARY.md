@@ -5,7 +5,7 @@
 **Autor:** Gambito
 **Tipo:** Drawing
 **Jugadores:** 2-10
-**Duración:** 15-30 minutos (5 rondas por defecto)
+**Duración:** 15-30 minutos (configurable)
 
 ---
 
@@ -34,7 +34,7 @@ Dibuja y adivina palabras antes que los demás. Un jugador dibuja mientras el re
    - Si es correcta: Se otorgan puntos y termina el turno
    - Si es incorrecta: El jugador queda eliminado de esta ronda
 5. **Siguiente Turno**: Siguiente jugador en el orden se convierte en dibujante
-6. **Final**: Después de 5 rondas (configurable), el jugador con más puntos gana
+6. **Final**: Después de completar todas las rondas, el jugador con más puntos gana (por defecto: 1 ronda por jugador)
 
 ### Roles
 
@@ -55,11 +55,13 @@ Dibuja y adivina palabras antes que los demás. Un jugador dibuja mientras el re
 
 ## Características Implementadas
 
-### ✅ Sistema de Turnos
-- Orden aleatorio generado al inicio
+### ✅ Sistema de Turnos (TurnManager Module)
+- **Módulo:** `TurnSystem` (ver `docs/modules/optional/TURN_SYSTEM.md`)
+- Modo secuencial (cada jugador dibuja en orden)
 - Rotación automática entre jugadores
-- Gestión de rondas (5 por defecto)
+- Rondas dinámicas basadas en número de jugadores (1 ronda por jugador)
 - Detección automática de fin de partida
+- Configurable: rondas automáticas o personalizadas (1-10)
 
 ### ✅ Sistema de Puntuación
 - Puntos basados en velocidad de respuesta:
@@ -103,7 +105,8 @@ Dibuja y adivina palabras antes que los demás. Un jugador dibuja mientras el re
 ```
 games/pictionary/
 ├── PictionaryEngine.php          # Motor principal del juego
-├── capabilities.json             # Configuración del juego
+├── config.json                   # Configuración y settings customizables
+├── capabilities.json             # Capacidades del juego
 ├── words.json                    # Lista de palabras por dificultad
 ├── Events/                       # Eventos de broadcasting
 │   ├── PlayerAnsweredEvent.php
@@ -133,16 +136,20 @@ resources/js/
 ```json
 {
   "phase": "playing",              // lobby | playing | scoring | results
-  "round": 1,                      // Ronda actual
-  "rounds_total": 5,               // Total de rondas
-  "current_turn": 0,               // Índice del turno actual (0-based)
+
+  // ===== TURN SYSTEM FIELDS (from TurnManager) =====
+  "current_round": 1,              // Ronda actual (1-based)
+  "total_rounds": 3,               // Total de rondas (dinámico: 1 por jugador)
+  "current_turn_index": 0,         // Índice del turno actual (0-based)
+  "turn_order": [48, 49, 47],      // Orden de turnos (IDs de jugadores)
+
+  // ===== PICTIONARY-SPECIFIC FIELDS =====
   "current_drawer_id": 48,         // ID del dibujante actual
   "current_word": "montaña",       // Palabra secreta
   "current_word_difficulty": "medium",
-  "is_paused": false,              // Si el juego está pausado (esperando confirmación)
-  "turn_order": [48, 49, 47],      // Orden de turnos (IDs de jugadores)
+  "game_is_paused": false,         // Si el juego está pausado (esperando confirmación)
   "turn_started_at": "2025-10-21 13:00:00",
-  "turn_duration": 90,             // Segundos por turno
+  "turn_duration": 90,             // Segundos por turno (configurable: 60/90/120)
   "scores": {                      // Puntuaciones acumuladas
     "47": 125,
     "48": 225,
@@ -162,6 +169,8 @@ resources/js/
   }
 }
 ```
+
+**Nota:** Los campos `current_round`, `total_rounds`, `current_turn_index`, `turn_order` son gestionados por el módulo `TurnManager`. Ver `docs/modules/optional/TURN_SYSTEM.md`.
 
 ---
 
@@ -407,11 +416,13 @@ Limpiar canvas
 
 ### Cuando termina la última ronda:
 
-1. **Backend** detecta que `round >= rounds_total && current_turn >= (total_players - 1)`
+1. **Backend** detecta que `current_round >= total_rounds && current_turn_index >= (player_count - 1)`
 2. Cambia `phase` a `'results'`
 3. Calcula ganador y ranking
 4. Emite evento `game.finished` con resultados completos
 5. **Frontend** escucha el evento y muestra modal de resultados finales
+
+**Nota:** La detección de fin de partida se realiza en la fase `'scoring'`, verificando que estamos en la última ronda Y el último turno.
 
 ### Resultados según tipo de usuario:
 
@@ -427,15 +438,56 @@ Limpiar canvas
 
 ---
 
+## Configuración del Juego
+
+Pictionary utiliza el sistema de configuración declarativa. Ver `games/pictionary/config.json` y `docs/conventions/GAME_CONFIGURATION_CONVENTION.md`.
+
+### Settings Customizables (al crear sala):
+
+1. **Número de rondas:**
+   - Automático (1 ronda por jugador) - Recomendado
+   - Personalizado (1-10 rondas)
+
+2. **Duración por turno:**
+   - 60 segundos (rápido)
+   - 90 segundos (normal) - Default
+   - 120 segundos (relajado)
+
+3. **Dificultad de palabras:**
+   - Fácil
+   - Media
+   - Difícil
+   - Mixta (todas) - Default
+
+4. **Permitir pistas:** Checkbox (default: false, no implementado aún)
+
+---
+
+## Módulos Utilizados
+
+### Core Modules (Siempre activos):
+- `GameEngine` - Motor base del juego
+- `RoomManager` - Gestión de salas y matches
+
+### Optional Modules (Activados para Pictionary):
+- ✅ `TurnSystem` - Gestión de turnos y rondas (ver `docs/modules/optional/TURN_SYSTEM.md`)
+- ✅ `GuestSystem` - Invitados sin registro
+- ✅ `ScoringSystem` - Puntuación basada en velocidad
+- ⚠️ `TimerSystem` - Temporizadores (implementación parcial)
+- 🚧 `RolesSystem` - Roles (dibujante/adivinador) - implementado ad-hoc, pendiente extracción
+
+---
+
 ## Mejoras Futuras (Fase 4 - Modularización)
 
-- [ ] Extraer Turn System como módulo
+- [x] ✅ Extraer Turn System como módulo
+- [x] ✅ Sistema de configuración declarativa
+- [x] ✅ Dificultades de palabras seleccionables
 - [ ] Extraer Scoring System como módulo
-- [ ] Extraer Timer System como módulo
+- [ ] Extraer Timer System como módulo completo
 - [ ] Extraer Roles System como módulo
-- [ ] Implementar dificultades de palabras seleccionables
+- [ ] Implementar sistema de hints (revelar letras)
 - [ ] Añadir categorías de palabras
-- [ ] Sistema de hints (revelar letras)
 - [ ] Modo equipos
 - [ ] Replay de partidas
 - [ ] Espectadores
@@ -471,4 +523,4 @@ Este juego está diseñado para **jugarse en persona**:
 ---
 
 **Última actualización:** 21 de octubre de 2025
-**Versión documentación:** 1.0
+**Versión documentación:** 1.1 - Integración Turn System Module

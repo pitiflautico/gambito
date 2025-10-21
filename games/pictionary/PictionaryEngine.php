@@ -11,17 +11,33 @@ use Games\Pictionary\Events\PlayerEliminatedEvent;
 use Games\Pictionary\Events\GameStateUpdatedEvent;
 use Games\Pictionary\Events\RoundEndedEvent;
 use Games\Pictionary\Events\TurnChangedEvent;
+use App\Services\Modules\TurnSystem\TurnManager;
 
 /**
  * Motor del juego Pictionary.
  *
- * Implementación monolítica del juego Pictionary donde un jugador dibuja
+ * Implementación MODULAR del juego Pictionary donde un jugador dibuja
  * una palabra mientras los demás intentan adivinarla.
  *
- * En Fase 4 se refactorizará para usar módulos opcionales (Turn, Scoring, Timer, Roles).
+ * Módulos utilizados:
+ * - Turn System: Gestión de turnos y rondas
+ * - Scoring System: Puntuación (TODO - Fase 4)
+ * - Timer System: Temporizadores (TODO - Fase 4)
+ * - Roles System: Roles drawer/guesser (TODO - Fase 4)
  */
 class PictionaryEngine implements GameEngineInterface
 {
+    /**
+     * Obtener la configuración del juego desde config.json.
+     *
+     * @return array Configuración del juego
+     */
+    private function getGameConfig(): array
+    {
+        $configPath = base_path('games/pictionary/config.json');
+        return json_decode(file_get_contents($configPath), true);
+    }
+
     /**
      * Inicializar el juego cuando comienza una partida.
      *
@@ -53,37 +69,63 @@ class PictionaryEngine implements GameEngineInterface
         $wordsPath = base_path('games/pictionary/assets/words.json');
         $words = json_decode(file_get_contents($wordsPath), true);
 
-        // Crear orden de turnos aleatorio
-        $playerIds = $players->pluck('id')->shuffle()->toArray();
+        // Obtener IDs de jugadores
+        $playerIds = $players->pluck('id')->toArray();
+
+        // ========================================================================
+        // CONFIGURACIÓN CUSTOMIZABLE: Leer settings de la sala o usar defaults
+        // ========================================================================
+        $roomSettings = $match->room->settings ?? [];
+        $gameConfig = $this->getGameConfig();
+
+        // Determinar número de rondas
+        $roundsMode = $roomSettings['rounds_mode'] ?? $gameConfig['customizableSettings']['rounds_mode']['default'];
+        if ($roundsMode === 'auto') {
+            $totalRounds = count($playerIds); // 1 ronda por jugador
+        } else {
+            $totalRounds = $roomSettings['rounds_total'] ?? $gameConfig['customizableSettings']['rounds_total']['default'];
+        }
+
+        // Obtener duración del turno
+        $turnDuration = $roomSettings['turn_duration'] ?? $gameConfig['customizableSettings']['turn_duration']['default'];
+
+        // Obtener dificultad de palabras
+        $wordDifficulty = $roomSettings['word_difficulty'] ?? $gameConfig['customizableSettings']['word_difficulty']['default'];
+
+        // ========================================================================
+        // TURN SYSTEM MODULE: Inicializar gestión de turnos
+        // ========================================================================
+        $turnManager = new TurnManager(
+            playerIds: $playerIds,
+            mode: $gameConfig['turnSystemConfig']['mode'], // Siempre 'sequential' para Pictionary
+            totalRounds: $totalRounds,
+            startingRound: 1
+        );
 
         // Inicializar puntuaciones en 0
         $scores = [];
-        foreach ($playerIds as $playerId) {
+        foreach ($turnManager->getTurnOrder() as $playerId) {
             $scores[$playerId] = 0;
         }
 
         // Seleccionar primera palabra
-        $firstWord = $this->selectRandomWordFromArray($words, 'random');
+        $firstWord = $this->selectRandomWordFromArray($words, $wordDifficulty);
 
         // Estado inicial del juego - comienza en ronda 1
-        $match->game_state = [
+        $match->game_state = array_merge([
             'phase' => 'playing',
-            'round' => 1,
-            'current_turn' => 0,
-            'current_drawer_id' => $playerIds[0], // Primer jugador es el dibujante
+            'current_drawer_id' => $turnManager->getCurrentPlayer(), // Primer jugador es el dibujante
             'current_word' => $firstWord,
-            'current_word_difficulty' => 'random',
-            'is_paused' => false, // Se pausa cuando alguien pulsa "YO SÉ"
-            'turn_order' => $playerIds,
+            'current_word_difficulty' => $wordDifficulty,
+            'game_is_paused' => false, // Se pausa cuando alguien pulsa "YO SÉ" (diferente de turn_system paused)
             'scores' => $scores,
             'words_available' => $words, // Palabras disponibles por dificultad
             'words_used' => [$firstWord], // Ya usamos la primera palabra
             'eliminated_this_round' => [],
             'pending_answer' => null, // {player_id, player_name, timestamp}
-            'rounds_total' => 5,
-            'turn_duration' => 90, // 90 segundos por turno
+            'turn_duration' => $turnDuration, // Desde configuración
             'turn_started_at' => now()->toIso8601String(),
-        ];
+        ], $turnManager->toArray()); // Merge con estado del TurnManager
 
         $match->save();
 
@@ -140,9 +182,13 @@ class PictionaryEngine implements GameEngineInterface
     {
         $gameState = $match->game_state;
 
-        // Si no se han completado todas las rondas, no hay ganador aún
-        if ($gameState['round'] < $gameState['rounds_total']) {
-            return null;
+        // ========================================================================
+        // TURN SYSTEM MODULE: Verificar si el juego ha terminado
+        // ========================================================================
+        $turnManager = TurnManager::fromArray($gameState);
+
+        if (!$turnManager->isGameComplete()) {
+            return null; // Aún no terminan todas las rondas
         }
 
         // Encontrar jugador con mayor puntuación
@@ -190,18 +236,23 @@ class PictionaryEngine implements GameEngineInterface
             $timeRemaining = max(0, $maxTime - $secondsElapsed);
         }
 
+        // ========================================================================
+        // TURN SYSTEM MODULE: Obtener info del turno actual
+        // ========================================================================
+        $turnManager = TurnManager::fromArray($gameState);
+
         // Estado base para todos
         $state = [
             'phase' => $gameState['phase'],
-            'round' => $gameState['round'],
-            'rounds_total' => $gameState['rounds_total'],
+            'round' => $turnManager->getCurrentRound(),
+            'rounds_total' => $gameState['total_rounds'],
             'is_drawer' => $isDrawer,
             'is_eliminated' => $isEliminated,
             'current_drawer_id' => $gameState['current_drawer_id'],
-            'is_paused' => $gameState['is_paused'] ?? false,
+            'is_paused' => $gameState['game_is_paused'] ?? false,
             'time_remaining' => $timeRemaining,
             'scores' => $gameState['scores'],
-            'turn_order' => $gameState['turn_order'],
+            'turn_order' => $turnManager->getTurnOrder(),
         ];
 
         // Solo el dibujante ve la palabra y las respuestas pendientes
@@ -241,11 +292,13 @@ class PictionaryEngine implements GameEngineInterface
 
         switch ($currentPhase) {
             case 'lobby':
-                // Iniciar el juego
+                // ========================================================================
+                // TURN SYSTEM MODULE: Iniciar el juego (primera vez)
+                // ========================================================================
+                $turnManager = TurnManager::fromArray($gameState);
+
                 $gameState['phase'] = 'playing';
-                $gameState['round'] = 1;
-                $gameState['current_turn'] = 0;
-                $gameState['current_drawer_id'] = $gameState['turn_order'][0];
+                $gameState['current_drawer_id'] = $turnManager->getCurrentPlayer();
                 $gameState['current_word'] = $this->selectRandomWord($match, 'easy');
                 $gameState['turn_started_at'] = now()->toDateTimeString();
                 $gameState['eliminated_this_round'] = []; // Resetear eliminados al iniciar
@@ -261,26 +314,26 @@ class PictionaryEngine implements GameEngineInterface
                 break;
 
             case 'scoring':
-                // Verificar primero si ya completamos todas las rondas y todos los turnos
-                $currentRound = $gameState['round'];
-                $currentTurn = $gameState['current_turn'];
-                $totalPlayers = count($gameState['turn_order']);
-                $totalRounds = $gameState['rounds_total'];
+                // ========================================================================
+                // TURN SYSTEM MODULE: Verificar si el juego terminó
+                // ========================================================================
+                $turnManager = TurnManager::fromArray($gameState);
 
-                // Calcular si es el último turno de la última ronda
-                // El último turno es cuando current_turn == totalPlayers - 1 (índice base 0)
-                $isLastTurnOfLastRound = ($currentRound >= $totalRounds && $currentTurn >= ($totalPlayers - 1));
+                // Verificar si estamos en la última ronda Y es el último turno
+                $isLastRound = ($turnManager->getCurrentRound() >= $gameState['total_rounds']);
+                $isLastTurn = ($turnManager->getCurrentTurnIndex() >= ($turnManager->getPlayerCount() - 1));
+                $gameEnded = $isLastRound && $isLastTurn;
 
-                if ($isLastTurnOfLastRound) {
+                if ($gameEnded) {
                     // Juego terminado - NO avanzar más turnos
                     $gameState['phase'] = 'results';
 
-                    Log::info("Game finished - last turn of last round", [
+                    Log::info("Game finished - all rounds completed", [
                         'match_id' => $match->id,
-                        'final_round' => $currentRound,
-                        'final_turn' => $currentTurn,
-                        'total_rounds' => $totalRounds,
-                        'total_players' => $totalPlayers
+                        'final_round' => $turnManager->getCurrentRound(),
+                        'final_turn' => $turnManager->getCurrentTurnIndex(),
+                        'total_rounds' => $gameState['total_rounds'],
+                        'total_players' => $turnManager->getPlayerCount()
                     ]);
 
                     // Encontrar ganador
@@ -357,7 +410,7 @@ class PictionaryEngine implements GameEngineInterface
         // Si es el dibujante quien se desconectó
         if ($gameState['current_drawer_id'] === $player->id) {
             // Pausar el juego
-            $gameState['is_paused'] = true;
+            $gameState['game_is_paused'] = true;
             $gameState['disconnect_pause_started_at'] = now()->toDateTimeString();
 
             $match->game_state = $gameState;
@@ -429,9 +482,14 @@ class PictionaryEngine implements GameEngineInterface
         // Determinar ganador
         $winner = !empty($ranking) ? $ranking[0] : null;
 
+        // ========================================================================
+        // TURN SYSTEM MODULE: Obtener info final del juego
+        // ========================================================================
+        $turnManager = TurnManager::fromArray($gameState);
+
         // Generar estadísticas
         $statistics = [
-            'total_rounds' => $gameState['round'],
+            'total_rounds' => $turnManager->getCurrentRound(),
             'total_words_used' => count($gameState['words_used']),
             'players_count' => count($scores),
             'highest_score' => $winner ? $winner['score'] : 0,
@@ -491,12 +549,12 @@ class PictionaryEngine implements GameEngineInterface
             return ['success' => false, 'error' => 'No puedes responder en esta fase'];
         }
 
-        if ($gameState['is_paused'] ?? false) {
+        if ($gameState['game_is_paused'] ?? false) {
             return ['success' => false, 'error' => 'El juego está pausado esperando confirmación'];
         }
 
         // PAUSAR el dibujo para todos
-        $gameState['is_paused'] = true;
+        $gameState['game_is_paused'] = true;
 
         // Guardar quién pulsó "YO SÉ" para que el dibujante confirme
         $gameState['pending_answer'] = [
@@ -568,13 +626,18 @@ class PictionaryEngine implements GameEngineInterface
 
             // Limpiar estado
             $gameState['pending_answer'] = null;
-            $gameState['is_paused'] = false;
+            $gameState['game_is_paused'] = false;
 
-            // Cambiar a fase de scoring (fin de ronda)
+            // Cambiar a fase de scoring (fin de turno)
             $gameState['phase'] = 'scoring';
 
             $match->game_state = $gameState;
             $match->save();
+
+            // ========================================================================
+            // TURN SYSTEM MODULE: Obtener ronda actual para el evento
+            // ========================================================================
+            $turnManager = TurnManager::fromArray($gameState);
 
             Log::info("Answer confirmed as CORRECT - Round ended", [
                 'match_id' => $match->id,
@@ -591,7 +654,7 @@ class PictionaryEngine implements GameEngineInterface
             // Broadcast fin de ronda con detalles de puntos
             event(new RoundEndedEvent(
                 $roomCode,
-                $gameState['round'],
+                $turnManager->getCurrentRound(),
                 $gameState['current_word'],
                 $guesserPlayerId,
                 $guesserPlayerName,
@@ -623,7 +686,7 @@ class PictionaryEngine implements GameEngineInterface
             $gameState['pending_answer'] = null;
 
             // REANUDAR el dibujo
-            $gameState['is_paused'] = false;
+            $gameState['game_is_paused'] = false;
 
             $match->game_state = $gameState;
             $match->save();
@@ -701,10 +764,10 @@ class PictionaryEngine implements GameEngineInterface
      * @param string $difficulty 'easy', 'medium', 'hard', o 'random'
      * @return string|null
      */
-    private function selectRandomWordFromArray(array $words, string $difficulty = 'random'): ?string
+    private function selectRandomWordFromArray(array $words, string $difficulty = 'mixed'): ?string
     {
-        // Si es random, elegir dificultad aleatoria
-        if ($difficulty === 'random') {
+        // Si es random o mixed, elegir dificultad aleatoria
+        if ($difficulty === 'random' || $difficulty === 'mixed') {
             $difficulties = ['easy', 'medium', 'hard'];
             $difficulty = $difficulties[array_rand($difficulties)];
         }
@@ -726,6 +789,8 @@ class PictionaryEngine implements GameEngineInterface
     /**
      * Avanzar al siguiente turno.
      *
+     * Usa el módulo Turn System para gestionar el avance de turnos.
+     *
      * @param GameMatch $match
      * @return void
      */
@@ -733,25 +798,17 @@ class PictionaryEngine implements GameEngineInterface
     {
         $gameState = $match->game_state;
 
-        // Incrementar turno
-        $currentTurn = $gameState['current_turn'];
-        $turnOrder = $gameState['turn_order'];
-        $nextTurn = ($currentTurn + 1) % count($turnOrder);
-
-        // Si volvemos al primer jugador, incrementar ronda
-        if ($nextTurn === 0) {
-            $gameState['round']++;
-        }
-
-        // Seleccionar siguiente dibujante
-        $nextDrawerId = $turnOrder[$nextTurn];
+        // ========================================================================
+        // TURN SYSTEM MODULE: Restaurar y avanzar turno
+        // ========================================================================
+        $turnManager = TurnManager::fromArray($gameState);
+        $turnInfo = $turnManager->nextTurn();
 
         // Seleccionar nueva palabra
         $newWord = $this->selectRandomWord($match, 'random');
 
-        // Actualizar estado
-        $gameState['current_turn'] = $nextTurn;
-        $gameState['current_drawer_id'] = $nextDrawerId;
+        // Actualizar estado específico de Pictionary
+        $gameState['current_drawer_id'] = $turnInfo['player_id'];
         $gameState['current_word'] = $newWord;
         $gameState['eliminated_this_round'] = [];
         $gameState['pending_answer'] = null;
@@ -762,30 +819,34 @@ class PictionaryEngine implements GameEngineInterface
             $gameState['words_used'][] = $newWord;
         }
 
+        // Actualizar estado del Turn System en game_state
+        $gameState = array_merge($gameState, $turnManager->toArray());
+
         $match->game_state = $gameState;
         $match->save();
 
         // Get room code and new drawer info for the event
         $roomCode = $match->room->code ?? 'UNKNOWN';
-        $newDrawer = Player::find($nextDrawerId);
-        $newDrawerName = $newDrawer ? $newDrawer->name : "Player {$nextDrawerId}";
+        $newDrawer = Player::find($turnInfo['player_id']);
+        $newDrawerName = $newDrawer ? $newDrawer->name : "Player {$turnInfo['player_id']}";
 
         // Broadcast turn change event
         event(new TurnChangedEvent(
             $roomCode,
-            $nextDrawerId,
+            $turnInfo['player_id'],
             $newDrawerName,
-            $gameState['round'],
-            $nextTurn,
+            $turnInfo['round'],
+            $turnInfo['turn_index'],
             $gameState['scores']
         ));
 
         Log::info("Advanced to next turn", [
             'match_id' => $match->id,
-            'round' => $gameState['round'],
-            'turn' => $nextTurn,
-            'drawer_id' => $nextDrawerId,
-            'word' => $newWord
+            'round' => $turnInfo['round'],
+            'turn_index' => $turnInfo['turn_index'],
+            'drawer_id' => $turnInfo['player_id'],
+            'word' => $newWord,
+            'round_completed' => $turnInfo['round_completed']
         ]);
     }
 
