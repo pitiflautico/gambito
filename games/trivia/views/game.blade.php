@@ -163,6 +163,7 @@
             players: @json($players ?? []),
             scores: @json($match->game_state['scores'] ?? []),
             gameState: @json($match->game_state ?? null),
+            eventConfig: @json($eventConfig ?? null),
         };
 
         // Inicializar el juego cuando el DOM esté listo

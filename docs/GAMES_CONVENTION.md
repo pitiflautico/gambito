@@ -23,6 +23,11 @@
 5. ✅ **Pasar los tests de convención**
    - Ejecutar: `php artisan test tests/Unit/ConventionTests/GameConventionsTest.php`
 
+6. ✅ **Usar EventManager para WebSockets** (si requiere real-time sync)
+   - Declarar `event_manager` en `capabilities.json`
+   - Configurar eventos en `event_config`
+   - NO duplicar lógica de WebSockets en cada juego
+
 ## 📁 Estructura de Carpetas para Juegos
 
 Cada juego debe seguir esta estructura estándar:
@@ -305,6 +310,141 @@ games/pictionary/js/               ❌ BORRAR
 public/games/pictionary/js/        ❌ BORRAR
 ```
 
+## 📡 Event Manager (WebSockets)
+
+**Módulo:** `event_manager`
+
+**Cuando usarlo:** Juegos que requieren comunicación en tiempo real (real_time_sync)
+
+### Declarar en capabilities.json
+
+```json
+{
+  "slug": "trivia",
+  "requires": {
+    "modules": {
+      "event_manager": "^1.0",
+      "turn_system": "^1.0",
+      "scoring_system": "^1.0"
+    }
+  },
+  "provides": {
+    "events": [
+      "QuestionStartedEvent",
+      "PlayerAnsweredEvent",
+      "QuestionEndedEvent"
+    ]
+  },
+  "event_config": {
+    "channel": "room.{roomCode}",
+    "events": {
+      "QuestionStartedEvent": {
+        "name": "trivia.question.started",
+        "handler": "handleQuestionStarted"
+      },
+      "PlayerAnsweredEvent": {
+        "name": "trivia.player.answered",
+        "handler": "handlePlayerAnswered"
+      },
+      "QuestionEndedEvent": {
+        "name": "trivia.question.ended",
+        "handler": "handleQuestionEnded"
+      }
+    }
+  }
+}
+```
+
+### Usar en JavaScript
+
+```javascript
+import EventManager from './modules/EventManager.js';
+
+class TriviaGame {
+    constructor(config) {
+        // Inicializar EventManager
+        this.eventManager = new EventManager({
+            roomCode: config.roomCode,
+            gameSlug: config.gameSlug,
+            eventConfig: config.eventConfig,
+            handlers: {
+                handleQuestionStarted: (e) => this.onQuestionStarted(e),
+                handlePlayerAnswered: (e) => this.onPlayerAnswered(e),
+                handleQuestionEnded: (e) => this.onQuestionEnded(e),
+            }
+        });
+        // EventManager se conecta automáticamente
+    }
+
+    onQuestionStarted(event) {
+        // Actualizar UI con nueva pregunta
+        console.log('Nueva pregunta:', event.question);
+    }
+}
+```
+
+### Pasar configuración desde el Controller
+
+```php
+// games/trivia/TriviaController.php
+public function game(string $roomCode)
+{
+    $room = Room::where('code', $roomCode)->firstOrFail();
+
+    // Cargar event_config desde capabilities.json
+    $capabilitiesPath = base_path("games/{$room->game->slug}/capabilities.json");
+    $capabilities = json_decode(file_get_contents($capabilitiesPath), true);
+    $eventConfig = $capabilities['event_config'] ?? null;
+
+    return view('trivia::game', [
+        'room' => $room,
+        'match' => $match,
+        'eventConfig' => $eventConfig, // Pasar a la vista
+    ]);
+}
+```
+
+### Cargar en la vista
+
+```blade
+@push('scripts')
+    @vite(['resources/js/trivia-game.js'])
+
+    <script>
+        window.gameData = {
+            roomCode: '{{ $room->code }}',
+            gameSlug: 'trivia',
+            eventConfig: @json($eventConfig ?? null),
+        };
+
+        document.addEventListener('DOMContentLoaded', function() {
+            window.triviaGame = new window.TriviaGame(window.gameData);
+        });
+    </script>
+@endpush
+```
+
+### ✅ Ventajas del EventManager
+
+1. **DRY**: Lógica de WebSockets escrita una vez
+2. **Declarativo**: Eventos configurados en JSON
+3. **Debugging**: Logs centralizados
+4. **Robusto**: Manejo de errores unificado
+5. **Testeable**: Mock fácil del EventManager
+
+### ❌ NO hacer
+
+```javascript
+// ❌ NO duplicar lógica de WebSockets en cada juego
+setupWebSocket() {
+    const channel = window.Echo.channel(`room.${this.roomCode}`);
+    channel.listen('trivia.question.started', ...);
+    // Esto es código duplicado que debe estar en EventManager
+}
+```
+
+**Documentación completa:** Ver [EventManager.md](../app/Services/Modules/EventManager/EventManager.md)
+
 ---
 
-**Última actualización:** 2025-10-21
+**Última actualización:** 2025-10-22

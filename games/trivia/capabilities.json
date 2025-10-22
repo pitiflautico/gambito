@@ -3,6 +3,7 @@
   "version": "1.0",
   "requires": {
     "modules": {
+      "event_manager": "^1.0",
       "turn_system": "^1.0",
       "scoring_system": "^1.0",
       "timer_system": "^1.0",
@@ -22,5 +23,22 @@
     "views": [
       "games/trivia/game"
     ]
+  },
+  "event_config": {
+    "channel": "room.{roomCode}",
+    "events": {
+      "QuestionStartedEvent": {
+        "name": "trivia.question.started",
+        "handler": "handleQuestionStarted"
+      },
+      "PlayerAnsweredEvent": {
+        "name": "trivia.player.answered",
+        "handler": "handlePlayerAnswered"
+      },
+      "QuestionEndedEvent": {
+        "name": "trivia.question.ended",
+        "handler": "handleQuestionEnded"
+      }
+    }
   }
 }

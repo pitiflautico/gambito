@@ -45,11 +45,17 @@ class TriviaController extends Controller
         // Obtener player ID de la sesión
         $playerId = session('player_id');
 
+        // Cargar configuración de eventos desde capabilities.json
+        $capabilitiesPath = base_path("games/trivia/capabilities.json");
+        $capabilities = json_decode(file_get_contents($capabilitiesPath), true);
+        $eventConfig = $capabilities['event_config'] ?? null;
+
         return view('trivia::game', [
             'room' => $room,
             'match' => $match,
             'players' => $players,
             'playerId' => $playerId,
+            'eventConfig' => $eventConfig,
         ]);
     }
 
