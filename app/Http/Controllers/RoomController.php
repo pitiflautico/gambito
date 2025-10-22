@@ -77,6 +77,7 @@ class RoomController extends Controller
             'game_id' => 'required|exists:games,id',
             'max_players' => 'nullable|integer|min:1|max:100',
             'private' => 'nullable|boolean',
+            'play_with_teams' => 'nullable|boolean',
         ];
 
         $game = Game::findOrFail($request->game_id);
@@ -105,6 +106,9 @@ class RoomController extends Controller
         }
         if (isset($validated['private'])) {
             $settings['private'] = $validated['private'];
+        }
+        if (isset($validated['play_with_teams']) && $validated['play_with_teams']) {
+            $settings['play_with_teams'] = true;
         }
 
         // Settings específicos del juego (configuraciones customizables)

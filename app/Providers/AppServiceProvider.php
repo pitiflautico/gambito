@@ -11,7 +11,9 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // Registrar repositorios como singletons
+        $this->app->singleton(\App\Repositories\RoomRepository::class);
+        $this->app->singleton(\App\Repositories\GameRepository::class);
     }
 
     /**

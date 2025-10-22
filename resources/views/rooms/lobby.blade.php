@@ -16,6 +16,135 @@
                 </div>
             </div>
 
+            <!-- Panel de Configuración de Equipos (Solo si está activado) -->
+            @if(isset($room->game_settings['play_with_teams']) && $room->game_settings['play_with_teams'])
+            <div class="bg-gradient-to-r from-purple-50 to-blue-50 border-2 border-purple-200 overflow-hidden shadow-lg sm:rounded-lg">
+                <div class="p-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <div class="flex items-center space-x-3">
+                            <span class="text-3xl">🏆</span>
+                            <div>
+                                <h3 class="text-xl font-bold text-purple-900">Modo Equipos</h3>
+                                <p class="text-sm text-purple-700">Configura los equipos antes de iniciar</p>
+                            </div>
+                        </div>
+                        @if($isMaster)
+                        <span class="px-3 py-1 bg-purple-600 text-white text-xs font-bold rounded-full">
+                            MASTER
+                        </span>
+                        @endif
+                    </div>
+
+                    @if($isMaster)
+                    <!-- Controles del Master -->
+                    <div class="space-y-4">
+                        <!-- Número de Equipos -->
+                        <div class="bg-white rounded-lg p-4">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">
+                                Número de Equipos
+                            </label>
+                            <div class="flex items-center space-x-2">
+                                <button
+                                    onclick="changeTeamCount(-1)"
+                                    class="px-3 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg font-bold"
+                                >
+                                    −
+                                </button>
+                                <input
+                                    type="number"
+                                    id="team-count"
+                                    value="2"
+                                    min="2"
+                                    max="4"
+                                    readonly
+                                    class="w-16 text-center text-lg font-bold border-2 border-purple-300 rounded-lg"
+                                >
+                                <button
+                                    onclick="changeTeamCount(1)"
+                                    class="px-3 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg font-bold"
+                                >
+                                    +
+                                </button>
+                                <button
+                                    onclick="initializeTeams()"
+                                    class="ml-auto px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium"
+                                >
+                                    Crear Equipos
+                                </button>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-2">Crea los equipos para empezar a asignar jugadores</p>
+                        </div>
+
+                        <!-- Modo de Asignación -->
+                        <div class="bg-white rounded-lg p-4">
+                            <label class="block text-sm font-medium text-gray-700 mb-3">
+                                Método de Asignación
+                            </label>
+                            <div class="space-y-2">
+                                <label class="flex items-start p-3 border-2 border-gray-200 rounded-lg cursor-pointer hover:border-purple-400">
+                                    <input
+                                        type="radio"
+                                        name="assignment_mode"
+                                        value="manual"
+                                        checked
+                                        class="mt-1 mr-3 text-purple-600"
+                                    >
+                                    <div>
+                                        <div class="font-medium">Manual</div>
+                                        <div class="text-xs text-gray-500">Arrastra jugadores a los equipos</div>
+                                    </div>
+                                </label>
+                                <label class="flex items-start p-3 border-2 border-gray-200 rounded-lg cursor-pointer hover:border-purple-400">
+                                    <input
+                                        type="radio"
+                                        name="assignment_mode"
+                                        value="random"
+                                        class="mt-1 mr-3 text-purple-600"
+                                    >
+                                    <div>
+                                        <div class="font-medium">Aleatorio Balanceado</div>
+                                        <div class="text-xs text-gray-500">Distribución automática equitativa</div>
+                                    </div>
+                                </label>
+                                <label class="flex items-start p-3 border-2 border-gray-200 rounded-lg cursor-pointer hover:border-purple-400">
+                                    <input
+                                        type="radio"
+                                        name="assignment_mode"
+                                        value="self"
+                                        class="mt-1 mr-3 text-purple-600"
+                                        onchange="toggleSelfSelection(this.checked)"
+                                    >
+                                    <div>
+                                        <div class="font-medium">Auto-selección</div>
+                                        <div class="text-xs text-gray-500">Cada jugador elige su equipo</div>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    @else
+                    <!-- Vista para Jugadores -->
+                    <div class="bg-white rounded-lg p-4 text-center">
+                        <p class="text-gray-600">
+                            <span class="font-semibold">{{ $room->master->name }}</span> está configurando los equipos...
+                        </p>
+                        <p class="text-sm text-gray-500 mt-2">
+                            Espera a que termine la configuración para ver los equipos
+                        </p>
+                    </div>
+                    @endif
+
+                    <!-- Área de Equipos (se mostrará cuando se inicialicen) -->
+                    <div id="teams-area" class="mt-6 hidden">
+                        <h4 class="text-lg font-semibold mb-4">Equipos</h4>
+                        <div id="teams-container" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <!-- Los equipos se generarán dinámicamente aquí -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+            @endif
+
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <!-- Jugadores -->
                 <div class="lg:col-span-2">
@@ -28,7 +157,7 @@
                             @if($room->match && $room->match->players->count() > 0)
                                 <div class="space-y-2">
                                     @foreach($room->match->players as $player)
-                                        <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                                        <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg" data-player-id="{{ $player->id }}">
                                             <div class="flex items-center space-x-3">
                                                 <div class="w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold">
                                                     {{ strtoupper(substr($player->name, 0, 1)) }}
@@ -38,9 +167,12 @@
                                                     @if($player->role)
                                                         <p class="text-xs text-gray-500">{{ $player->role }}</p>
                                                     @endif
+                                                    <p class="text-xs text-purple-600 font-medium player-team-badge" data-player-id="{{ $player->id }}">
+                                                        <!-- El equipo se mostrará aquí vía JS -->
+                                                    </p>
                                                 </div>
                                             </div>
-                                            <div>
+                                            <div class="flex items-center space-x-2">
                                                 @if($player->is_connected)
                                                     <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
                                                         ● Conectado
@@ -379,6 +511,137 @@
                     console.error('Error refreshing:', error);
                 });
         }, 10000); // Cada 10 segundos (menos frecuente ya que tenemos WebSockets)
+
+        // ========================================================================
+        // FUNCIONES PARA GESTIÓN DE EQUIPOS
+        // ========================================================================
+
+        function changeTeamCount(delta) {
+            const input = document.getElementById('team-count');
+            let value = parseInt(input.value) + delta;
+            if (value >= 2 && value <= 4) {
+                input.value = value;
+            }
+        }
+
+        function initializeTeams() {
+            const count = parseInt(document.getElementById('team-count').value);
+
+            // Llamar a API para crear equipos
+            fetch('/api/rooms/{{ $room->code }}/teams/enable', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                },
+                body: JSON.stringify({
+                    num_teams: count
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Mostrar área de equipos
+                    document.getElementById('teams-area').classList.remove('hidden');
+                    renderTeams(data.teams);
+                } else {
+                    alert('Error al crear equipos: ' + (data.message || 'Error desconocido'));
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error al crear equipos');
+            });
+        }
+
+        function renderTeams(teams) {
+            const container = document.getElementById('teams-container');
+            const colors = ['bg-red-100 border-red-300', 'bg-blue-100 border-blue-300', 'bg-green-100 border-green-300', 'bg-yellow-100 border-yellow-300'];
+
+            container.innerHTML = teams.map((team, index) => `
+                <div class="border-2 rounded-lg p-4 ${colors[index % colors.length]}">
+                    <div class="flex items-center justify-between mb-3">
+                        <h5 class="font-bold text-lg">${team.name}</h5>
+                        <span class="text-sm font-medium px-2 py-1 bg-white rounded-full">${team.members.length} jugadores</span>
+                    </div>
+                    <div id="team-${team.id}" class="space-y-2 min-h-[100px]">
+                        ${team.members.length === 0 ? '<p class="text-sm text-gray-500 text-center py-4">Sin jugadores</p>' : ''}
+                        ${team.members.map(memberId => renderPlayerInTeam(memberId)).join('')}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function renderPlayerInTeam(playerId) {
+            // Buscar el jugador en la lista
+            const playerElements = document.querySelectorAll('[data-player-id]');
+            for (let elem of playerElements) {
+                if (elem.dataset.playerId == playerId) {
+                    const name = elem.querySelector('.font-medium')?.textContent || 'Jugador';
+                    return `
+                        <div class="bg-white p-2 rounded flex items-center justify-between">
+                            <span class="text-sm font-medium">${name}</span>
+                            <button onclick="removeFromTeam(${playerId})" class="text-red-500 hover:text-red-700 text-xs">✕</button>
+                        </div>
+                    `;
+                }
+            }
+            return '';
+        }
+
+        function removeFromTeam(playerId) {
+            // Implementar lógica de remover jugador del equipo
+            console.log('Remover jugador:', playerId);
+        }
+
+        function toggleSelfSelection(enabled) {
+            // Implementar lógica para habilitar/deshabilitar auto-selección
+            console.log('Auto-selección:', enabled);
+        }
+
+        // Actualizar badges de equipo en la lista de jugadores
+        function updatePlayerTeamBadges() {
+            @if(isset($room->game_settings['play_with_teams']) && $room->game_settings['play_with_teams'])
+                fetch('/api/rooms/{{ $room->code }}/teams')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success && data.teams) {
+                            const teamColors = {
+                                'team_1': 'bg-red-100 text-red-800',
+                                'team_2': 'bg-blue-100 text-blue-800',
+                                'team_3': 'bg-green-100 text-green-800',
+                                'team_4': 'bg-yellow-100 text-yellow-800'
+                            };
+
+                            // Limpiar badges anteriores
+                            document.querySelectorAll('.player-team-badge').forEach(badge => {
+                                badge.textContent = '';
+                                badge.className = 'text-xs text-purple-600 font-medium player-team-badge';
+                            });
+
+                            // Asignar badges según equipos
+                            data.teams.forEach(team => {
+                                team.members.forEach(playerId => {
+                                    const badge = document.querySelector(`.player-team-badge[data-player-id="${playerId}"]`);
+                                    if (badge) {
+                                        badge.textContent = `🏆 ${team.name}`;
+                                        badge.className = `text-xs font-medium px-2 py-0.5 rounded-full ${teamColors[team.id] || 'bg-purple-100 text-purple-800'} player-team-badge`;
+                                    }
+                                });
+                            });
+                        }
+                    })
+                    .catch(error => console.error('Error al actualizar badges:', error));
+            @endif
+        }
+
+        // Actualizar badges al cargar
+        document.addEventListener('DOMContentLoaded', function() {
+            updatePlayerTeamBadges();
+
+            // Actualizar cada 5 segundos
+            setInterval(updatePlayerTeamBadges, 5000);
+        });
     </script>
     @endpush
 </x-app-layout>

@@ -58,6 +58,13 @@ class RoomService
         // Generar código único
         $code = $this->generateUniqueCode();
 
+        // Separar game_settings de settings generales
+        $gameSettings = [];
+        if (isset($settings['play_with_teams'])) {
+            $gameSettings['play_with_teams'] = $settings['play_with_teams'];
+            unset($settings['play_with_teams']);
+        }
+
         // Crear sala
         $room = Room::create([
             'code' => $code,
@@ -65,6 +72,7 @@ class RoomService
             'master_id' => $master->id,
             'status' => Room::STATUS_WAITING,
             'settings' => $settings,
+            'game_settings' => !empty($gameSettings) ? $gameSettings : null,
         ]);
 
         Log::info("Room created", [
@@ -216,6 +224,54 @@ class RoomService
                 return [
                     'can_start' => false,
                     'reason' => "Demasiados jugadores. Máximo permitido: {$maxPlayers}.",
+                ];
+            }
+        }
+
+        // Verificar configuración de equipos si está activado
+        if (isset($room->game_settings['play_with_teams']) && $room->game_settings['play_with_teams']) {
+            // Obtener estado de equipos desde Redis/BD
+            try {
+                $teamsManager = new \App\Services\Modules\TeamsSystem\TeamsManager($room->match);
+
+                if (!$teamsManager->isEnabled()) {
+                    return [
+                        'can_start' => false,
+                        'reason' => 'Los equipos no han sido inicializados. El master debe crear los equipos primero.',
+                    ];
+                }
+
+                // Verificar que todos los jugadores estén asignados a un equipo
+                $teams = $teamsManager->getTeams();
+                $playersInTeams = [];
+                foreach ($teams as $team) {
+                    $playersInTeams = array_merge($playersInTeams, $team['members']);
+                }
+
+                $allPlayerIds = $room->match->players()->where('is_connected', true)->pluck('id')->toArray();
+                $unassignedPlayers = array_diff($allPlayerIds, $playersInTeams);
+
+                if (!empty($unassignedPlayers)) {
+                    $count = count($unassignedPlayers);
+                    return [
+                        'can_start' => false,
+                        'reason' => "Hay {$count} jugador(es) sin equipo asignado. Todos deben estar en un equipo.",
+                    ];
+                }
+
+                // Verificar que cada equipo tenga al menos 1 jugador
+                foreach ($teams as $team) {
+                    if (empty($team['members'])) {
+                        return [
+                            'can_start' => false,
+                            'reason' => "El equipo '{$team['name']}' no tiene jugadores. Elimínalo o asigna jugadores.",
+                        ];
+                    }
+                }
+            } catch (\Exception $e) {
+                return [
+                    'can_start' => false,
+                    'reason' => 'Error al verificar equipos: ' . $e->getMessage(),
                 ];
             }
         }

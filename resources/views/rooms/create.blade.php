@@ -246,6 +246,33 @@
                                     <p class="mt-1 text-xs text-gray-500 ml-6">Solo se puede unir con el código</p>
                                 </div>
                             </div>
+
+                            <!-- Jugar por Equipos (solo si el juego lo soporta) -->
+                            @if($selectedGame && isset($gameConfig['modules']['teams_system']) && $gameConfig['modules']['teams_system']['allow_toggle'])
+                            <div class="mt-4 bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-lg p-4">
+                                <label class="flex items-start space-x-3 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        name="play_with_teams"
+                                        id="play_with_teams"
+                                        value="1"
+                                        class="mt-1 rounded border-gray-300 text-purple-600 shadow-sm focus:border-purple-500 focus:ring-purple-500"
+                                    >
+                                    <div class="flex-1">
+                                        <div class="flex items-center">
+                                            <span class="text-sm font-bold text-purple-900">🏆 Jugar por equipos</span>
+                                            <span class="ml-2 px-2 py-0.5 text-xs font-medium bg-purple-100 text-purple-800 rounded-full">Nuevo</span>
+                                        </div>
+                                        <p class="mt-1 text-xs text-purple-700">
+                                            {{ $gameConfig['modules']['teams_system']['description'] ?? 'Los jugadores se organizan en equipos y compiten entre sí' }}
+                                        </p>
+                                        <p class="mt-1 text-xs text-purple-600">
+                                            📊 Podrás configurar los equipos en el lobby antes de iniciar la partida
+                                        </p>
+                                    </div>
+                                </label>
+                            </div>
+                            @endif
                         </div>
 
                         <!-- Errores Generales -->

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\GameMatch;
 use App\Models\Room;
+use App\Repositories\RoomRepository;
 use App\Services\Modules\TeamsSystem\TeamsManager;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -16,6 +17,12 @@ use Illuminate\Support\Facades\Log;
  */
 class TeamController extends Controller
 {
+    protected RoomRepository $roomRepository;
+
+    public function __construct(RoomRepository $roomRepository)
+    {
+        $this->roomRepository = $roomRepository;
+    }
     /**
      * Habilitar modo equipos
      */
@@ -27,7 +34,7 @@ class TeamController extends Controller
         ]);
 
         try {
-            $room = Room::where('code', $roomCode)->firstOrFail();
+            $room = $this->roomRepository->findByCodeOrFail($roomCode);
 
             // Solo el master puede configurar equipos
             if (!$this->isMaster($request, $room)) {
@@ -66,7 +73,7 @@ class TeamController extends Controller
     public function disable(Request $request, string $roomCode): JsonResponse
     {
         try {
-            $room = Room::where('code', $roomCode)->firstOrFail();
+            $room = $this->roomRepository->findByCodeOrFail($roomCode);
 
             if (!$this->isMaster($request, $room)) {
                 return response()->json(['error' => 'Solo el organizador puede configurar equipos'], 403);
@@ -97,16 +104,21 @@ class TeamController extends Controller
     public function index(string $roomCode): JsonResponse
     {
         try {
-            $room = Room::where('code', $roomCode)->firstOrFail();
-            $match = $room->matches()->whereNull('finished_at')->latest()->first();
+            $room = $this->roomRepository->findByCodeOrFail($roomCode);
+            $match = $room->match; // Cambio: match es singular, no plural
 
             if (!$match) {
-                return response()->json(['error' => 'No hay partida activa'], 404);
+                return response()->json([
+                    'success' => true,
+                    'enabled' => false,
+                    'teams' => []
+                ]);
             }
 
             $teamsManager = new TeamsManager($match);
 
             return response()->json([
+                'success' => true,
                 'enabled' => $teamsManager->isEnabled(),
                 'mode' => $teamsManager->getMode(),
                 'allow_self_selection' => $teamsManager->getAllowSelfSelection(),
@@ -114,7 +126,10 @@ class TeamController extends Controller
             ]);
         } catch (\Exception $e) {
             Log::error("[TeamController] Error obteniendo equipos: {$e->getMessage()}");
-            return response()->json(['error' => 'Error al obtener equipos'], 500);
+            return response()->json([
+                'success' => false,
+                'error' => 'Error al obtener equipos'
+            ], 500);
         }
     }
 
@@ -129,7 +144,7 @@ class TeamController extends Controller
         ]);
 
         try {
-            $room = Room::where('code', $roomCode)->firstOrFail();
+            $room = $this->roomRepository->findByCodeOrFail($roomCode);
 
             if (!$this->isMaster($request, $room)) {
                 return response()->json(['error' => 'Solo el organizador puede crear equipos'], 403);
@@ -168,7 +183,7 @@ class TeamController extends Controller
     public function destroy(Request $request, string $roomCode, string $teamId): JsonResponse
     {
         try {
-            $room = Room::where('code', $roomCode)->firstOrFail();
+            $room = $this->roomRepository->findByCodeOrFail($roomCode);
 
             if (!$this->isMaster($request, $room)) {
                 return response()->json(['error' => 'Solo el organizador puede eliminar equipos'], 403);
@@ -208,7 +223,7 @@ class TeamController extends Controller
         ]);
 
         try {
-            $room = Room::where('code', $roomCode)->firstOrFail();
+            $room = $this->roomRepository->findByCodeOrFail($roomCode);
             $match = $room->matches()->whereNull('finished_at')->latest()->first();
 
             if (!$match) {
@@ -255,7 +270,7 @@ class TeamController extends Controller
     public function removePlayer(Request $request, string $roomCode, int $playerId): JsonResponse
     {
         try {
-            $room = Room::where('code', $roomCode)->firstOrFail();
+            $room = $this->roomRepository->findByCodeOrFail($roomCode);
 
             if (!$this->isMaster($request, $room)) {
                 return response()->json(['error' => 'Solo el organizador puede remover jugadores'], 403);
@@ -293,7 +308,7 @@ class TeamController extends Controller
     public function balance(Request $request, string $roomCode): JsonResponse
     {
         try {
-            $room = Room::where('code', $roomCode)->firstOrFail();
+            $room = $this->roomRepository->findByCodeOrFail($roomCode);
 
             if (!$this->isMaster($request, $room)) {
                 return response()->json(['error' => 'Solo el organizador puede balancear equipos'], 403);
@@ -339,7 +354,7 @@ class TeamController extends Controller
         ]);
 
         try {
-            $room = Room::where('code', $roomCode)->firstOrFail();
+            $room = $this->roomRepository->findByCodeOrFail($roomCode);
 
             if (!$this->isMaster($request, $room)) {
                 return response()->json(['error' => 'Solo el organizador puede cambiar esta configuración'], 403);
@@ -370,7 +385,7 @@ class TeamController extends Controller
     public function validate(string $roomCode): JsonResponse
     {
         try {
-            $room = Room::where('code', $roomCode)->firstOrFail();
+            $room = $this->roomRepository->findByCodeOrFail($roomCode);
             $match = $room->matches()->whereNull('finished_at')->latest()->first();
 
             if (!$match) {

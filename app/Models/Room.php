@@ -20,6 +20,7 @@ class Room extends Model
         'master_id',
         'status',
         'settings',
+        'game_settings',
     ];
 
     /**
@@ -29,6 +30,7 @@ class Room extends Model
      */
     protected $casts = [
         'settings' => 'array', // JSON a array asociativo
+        'game_settings' => 'array', // JSON a array asociativo
     ];
 
     /**
