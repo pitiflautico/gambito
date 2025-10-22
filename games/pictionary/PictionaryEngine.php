@@ -12,8 +12,10 @@ use Games\Pictionary\Events\GameStateUpdatedEvent;
 use Games\Pictionary\Events\RoundEndedEvent;
 use Games\Pictionary\Events\TurnChangedEvent;
 use App\Services\Modules\TurnSystem\TurnManager;
+use App\Services\Modules\RoundSystem\RoundManager;
 use App\Services\Modules\ScoringSystem\ScoreManager;
 use App\Services\Modules\TimerSystem\TimerService;
+use App\Services\Modules\RolesSystem\RoleManager;
 use Games\Pictionary\PictionaryScoreCalculator;
 
 /**
@@ -26,7 +28,7 @@ use Games\Pictionary\PictionaryScoreCalculator;
  * - Turn System: Gestión de turnos y rondas ✅
  * - Scoring System: Puntuación basada en tiempo ✅
  * - Timer System: Temporizadores por turno ✅
- * - Roles System: Roles drawer/guesser (TODO - Fase 4)
+ * - Roles System: Roles drawer/guesser ✅
  */
 class PictionaryEngine implements GameEngineInterface
 {
@@ -96,13 +98,17 @@ class PictionaryEngine implements GameEngineInterface
         $wordDifficulty = $roomSettings['word_difficulty'] ?? $gameConfig['customizableSettings']['word_difficulty']['default'];
 
         // ========================================================================
-        // TURN SYSTEM MODULE: Inicializar gestión de turnos
+        // ROUND/TURN SYSTEM MODULES: Inicializar gestión de rondas y turnos
         // ========================================================================
         $turnManager = new TurnManager(
             playerIds: $playerIds,
-            mode: $gameConfig['turnSystemConfig']['mode'], // Siempre 'sequential' para Pictionary
+            mode: $gameConfig['turnSystemConfig']['mode'] // Siempre 'sequential' para Pictionary
+        );
+
+        $roundManager = new RoundManager(
+            turnManager: $turnManager,
             totalRounds: $totalRounds,
-            startingRound: 1
+            currentRound: 1
         );
 
         // ========================================================================
@@ -121,22 +127,40 @@ class PictionaryEngine implements GameEngineInterface
         $timerService = new TimerService();
         $timerService->startTimer('turn_timer', $turnDuration);
 
+        // ========================================================================
+        // ROLES SYSTEM MODULE: Inicializar roles (drawer/guesser)
+        // ========================================================================
+        $roleManager = new RoleManager(
+            availableRoles: ['drawer', 'guesser'],
+            allowMultipleRoles: false
+        );
+
+        // Asignar primer drawer (según turnos)
+        $firstDrawerId = $turnManager->getCurrentPlayer();
+        $roleManager->assignRole($firstDrawerId, 'drawer');
+
+        // Asignar guessers (todos los demás)
+        foreach ($playerIds as $playerId) {
+            if ($playerId !== $firstDrawerId) {
+                $roleManager->assignRole($playerId, 'guesser');
+            }
+        }
+
         // Seleccionar primera palabra
         $firstWord = $this->selectRandomWordFromArray($words, $wordDifficulty);
 
         // Estado inicial del juego - comienza en ronda 1
         $match->game_state = array_merge([
             'phase' => 'playing',
-            'current_drawer_id' => $turnManager->getCurrentPlayer(), // Primer jugador es el dibujante
+            'current_drawer_id' => $firstDrawerId, // Mantener para compatibilidad (computed desde RoleManager)
             'current_word' => $firstWord,
             'current_word_difficulty' => $wordDifficulty,
             'game_is_paused' => false, // Se pausa cuando alguien pulsa "YO SÉ" (diferente de turn_system paused)
             'words_available' => $words, // Palabras disponibles por dificultad
             'words_used' => [$firstWord], // Ya usamos la primera palabra
-            'eliminated_this_round' => [],
             'pending_answer' => null, // {player_id, player_name, timestamp}
             'turn_duration' => $turnDuration, // Guardamos duración para referencia (usado en cálculos de puntos)
-        ], $turnManager->toArray(), $scoreManager->toArray(), $timerService->toArray()); // Merge con módulos
+        ], $roundManager->toArray(), $scoreManager->toArray(), $timerService->toArray(), $roleManager->toArray()); // Merge con módulos
 
         $match->save();
 
@@ -196,7 +220,7 @@ class PictionaryEngine implements GameEngineInterface
         // ========================================================================
         // TURN SYSTEM MODULE: Verificar si el juego ha terminado
         // ========================================================================
-        $turnManager = TurnManager::fromArray($gameState);
+        $turnManager = RoundManager::fromArray($gameState);
 
         if (!$turnManager->isGameComplete()) {
             return null; // Aún no terminan todas las rondas
@@ -234,8 +258,20 @@ class PictionaryEngine implements GameEngineInterface
     public function getGameStateForPlayer(GameMatch $match, Player $player): array
     {
         $gameState = $match->game_state;
-        $isDrawer = ($gameState['current_drawer_id'] === $player->id);
-        $isEliminated = in_array($player->id, $gameState['eliminated_this_round']);
+
+        // ========================================================================
+        // TURN SYSTEM MODULE: Verificar si jugador está eliminado temporalmente
+        // ========================================================================
+        $turnManager = RoundManager::fromArray($gameState);
+        $isEliminated = $turnManager->isTemporarilyEliminated($player->id);
+
+        // ========================================================================
+        // ROLES SYSTEM MODULE: Verificar rol del jugador
+        // ========================================================================
+        $roleManager = RoleManager::fromArray($gameState);
+        $isDrawer = $roleManager->hasRole($player->id, 'drawer');
+        $currentDrawers = $roleManager->getPlayersWithRole('drawer');
+        $currentDrawerId = !empty($currentDrawers) ? $currentDrawers[0] : null;
 
         // ========================================================================
         // TIMER SYSTEM MODULE: Obtener tiempo restante del turno
@@ -249,7 +285,7 @@ class PictionaryEngine implements GameEngineInterface
         // ========================================================================
         // TURN SYSTEM MODULE: Obtener info del turno actual
         // ========================================================================
-        $turnManager = TurnManager::fromArray($gameState);
+        $turnManager = RoundManager::fromArray($gameState);
 
         // Estado base para todos
         $state = [
@@ -258,7 +294,7 @@ class PictionaryEngine implements GameEngineInterface
             'rounds_total' => $gameState['total_rounds'],
             'is_drawer' => $isDrawer,
             'is_eliminated' => $isEliminated,
-            'current_drawer_id' => $gameState['current_drawer_id'],
+            'current_drawer_id' => $currentDrawerId,
             'is_paused' => $gameState['game_is_paused'] ?? false,
             'time_remaining' => $timeRemaining,
             'scores' => $gameState['scores'],
@@ -305,7 +341,7 @@ class PictionaryEngine implements GameEngineInterface
                 // ========================================================================
                 // TURN SYSTEM MODULE: Iniciar el juego (primera vez)
                 // ========================================================================
-                $turnManager = TurnManager::fromArray($gameState);
+                $turnManager = RoundManager::fromArray($gameState);
 
                 // ========================================================================
                 // TIMER SYSTEM MODULE: Reiniciar timer del turno
@@ -313,17 +349,25 @@ class PictionaryEngine implements GameEngineInterface
                 $timerService = TimerService::fromArray($gameState);
                 $timerService->restartTimer('turn_timer');
 
+                // ========================================================================
+                // ROLES SYSTEM MODULE: No es necesario rotar (ya se asignó en initialize)
+                // ========================================================================
+                $roleManager = RoleManager::fromArray($gameState);
+
+                // ========================================================================
+                // TURN SYSTEM MODULE: Auto-limpieza de temporales al iniciar ronda
+                // ========================================================================
+                // Nota: TurnManager ya limpió temporarilyEliminated cuando nextTurn() completó ronda
+
                 $gameState['phase'] = 'playing';
-                $gameState['current_drawer_id'] = $turnManager->getCurrentPlayer();
                 $gameState['current_word'] = $this->selectRandomWord($match, 'easy');
-                $gameState['eliminated_this_round'] = []; // Resetear eliminados al iniciar
 
                 if ($gameState['current_word']) {
                     $gameState['words_used'][] = $gameState['current_word'];
                 }
 
-                // Actualizar estado del Timer System en game_state
-                $gameState = array_merge($gameState, $timerService->toArray());
+                // Actualizar estado de los módulos en game_state
+                $gameState = array_merge($gameState, $timerService->toArray(), $roleManager->toArray());
                 break;
 
             case 'playing':
@@ -335,7 +379,7 @@ class PictionaryEngine implements GameEngineInterface
                 // ========================================================================
                 // TURN SYSTEM MODULE: Verificar si el juego terminó
                 // ========================================================================
-                $turnManager = TurnManager::fromArray($gameState);
+                $turnManager = RoundManager::fromArray($gameState);
 
                 // Verificar si estamos en la última ronda Y es el último turno
                 $isLastRound = ($turnManager->getCurrentRound() >= $gameState['total_rounds']);
@@ -431,14 +475,20 @@ class PictionaryEngine implements GameEngineInterface
     {
         $gameState = $match->game_state;
 
+        // ========================================================================
+        // ROLES SYSTEM MODULE: Verificar si es el drawer
+        // ========================================================================
+        $roleManager = RoleManager::fromArray($gameState);
+        $isDrawer = $roleManager->hasRole($player->id, 'drawer');
+
         Log::warning("Player disconnected", [
             'match_id' => $match->id,
             'player_id' => $player->id,
-            'is_drawer' => ($gameState['current_drawer_id'] === $player->id)
+            'is_drawer' => $isDrawer
         ]);
 
         // Si es el dibujante quien se desconectó
-        if ($gameState['current_drawer_id'] === $player->id) {
+        if ($isDrawer) {
             // Pausar el juego
             $gameState['game_is_paused'] = true;
             $gameState['disconnect_pause_started_at'] = now()->toDateTimeString();
@@ -522,7 +572,7 @@ class PictionaryEngine implements GameEngineInterface
         // ========================================================================
         // TURN SYSTEM MODULE: Obtener info final del juego
         // ========================================================================
-        $turnManager = TurnManager::fromArray($gameState);
+        $turnManager = RoundManager::fromArray($gameState);
 
         // Generar estadísticas
         $statistics = [
@@ -573,12 +623,21 @@ class PictionaryEngine implements GameEngineInterface
     {
         $gameState = $match->game_state;
 
+        // ========================================================================
+        // ROLES SYSTEM MODULE: Verificar que no sea el drawer
+        // ========================================================================
+        $roleManager = RoleManager::fromArray($gameState);
+        $isDrawer = $roleManager->hasRole($player->id, 'drawer');
+
+        // TURN SYSTEM MODULE: Verificar eliminación temporal
+        $turnManager = RoundManager::fromArray($gameState);
+
         // Validaciones
-        if ($player->id === $gameState['current_drawer_id']) {
+        if ($isDrawer) {
             return ['success' => false, 'error' => 'El dibujante no puede pulsar "YO SÉ"'];
         }
 
-        if (in_array($player->id, $gameState['eliminated_this_round'])) {
+        if ($turnManager->isTemporarilyEliminated($player->id)) {
             return ['success' => false, 'error' => 'Ya fuiste eliminado en esta ronda'];
         }
 
@@ -631,8 +690,14 @@ class PictionaryEngine implements GameEngineInterface
         $gameState = $match->game_state;
         $isCorrect = $data['is_correct'] ?? false;
 
+        // ========================================================================
+        // ROLES SYSTEM MODULE: Verificar que sea el drawer
+        // ========================================================================
+        $roleManager = RoleManager::fromArray($gameState);
+        $isDrawer = $roleManager->hasRole($player->id, 'drawer');
+
         // Validar que el jugador es el dibujante
-        if ($player->id !== $gameState['current_drawer_id']) {
+        if (!$isDrawer) {
             return ['success' => false, 'error' => 'Solo el dibujante puede confirmar respuestas'];
         }
 
@@ -692,7 +757,7 @@ class PictionaryEngine implements GameEngineInterface
             // ========================================================================
             // TURN SYSTEM MODULE: Obtener ronda actual para el evento
             // ========================================================================
-            $turnManager = TurnManager::fromArray($gameState);
+            $turnManager = RoundManager::fromArray($gameState);
 
             Log::info("Answer confirmed as CORRECT - Round ended", [
                 'match_id' => $match->id,
@@ -734,8 +799,9 @@ class PictionaryEngine implements GameEngineInterface
         } else {
             // ❌ RESPUESTA INCORRECTA: Eliminar jugador y continuar
 
-            // Eliminar jugador de esta ronda
-            $gameState['eliminated_this_round'][] = $guesserPlayerId;
+            // TURN SYSTEM MODULE: Eliminar jugador temporalmente
+            $turnManager = RoundManager::fromArray($gameState);
+            $turnManager->eliminatePlayer($guesserPlayerId, permanent: false);
 
             // Limpiar respuesta pendiente
             $gameState['pending_answer'] = null;
@@ -743,6 +809,8 @@ class PictionaryEngine implements GameEngineInterface
             // REANUDAR el dibujo
             $gameState['game_is_paused'] = false;
 
+            // Actualizar game_state con turnManager modificado
+            $gameState = array_merge($gameState, $turnManager->toArray());
             $match->game_state = $gameState;
             $match->save();
 
@@ -750,7 +818,7 @@ class PictionaryEngine implements GameEngineInterface
                 'match_id' => $match->id,
                 'guesser_id' => $guesserPlayerId,
                 'guesser_name' => $guesserPlayerName,
-                'eliminated_count' => count($gameState['eliminated_this_round'])
+                'eliminated_count' => count($turnManager->getTemporarilyEliminated())
             ]);
 
             // Obtener el Player model para el evento
@@ -856,7 +924,7 @@ class PictionaryEngine implements GameEngineInterface
         // ========================================================================
         // TURN SYSTEM MODULE: Restaurar y avanzar turno
         // ========================================================================
-        $turnManager = TurnManager::fromArray($gameState);
+        $turnManager = RoundManager::fromArray($gameState);
         $turnInfo = $turnManager->nextTurn();
 
         // ========================================================================
@@ -865,14 +933,32 @@ class PictionaryEngine implements GameEngineInterface
         $timerService = TimerService::fromArray($gameState);
         $timerService->restartTimer('turn_timer');
 
+        // ========================================================================
+        // ROLES SYSTEM MODULE: Rotar rol de drawer al siguiente jugador
+        // ========================================================================
+        $roleManager = RoleManager::fromArray($gameState);
+        $newDrawerId = $roleManager->rotateRole('drawer', $turnManager->getTurnOrder());
+
+        // Reasignar guessers (todos excepto el nuevo drawer)
+        foreach ($turnManager->getTurnOrder() as $playerId) {
+            if ($playerId !== $newDrawerId) {
+                if (!$roleManager->hasRole($playerId, 'guesser')) {
+                    $roleManager->assignRole($playerId, 'guesser');
+                }
+            } else {
+                // Remover guesser del nuevo drawer si lo tenía
+                $roleManager->removeRole($playerId, 'guesser');
+            }
+        }
+
         // Seleccionar nueva palabra
         $newWord = $this->selectRandomWord($match, 'random');
 
         // Actualizar estado específico de Pictionary
-        $gameState['current_drawer_id'] = $turnInfo['player_id'];
+        $gameState['current_drawer_id'] = $newDrawerId; // Mantener para compatibilidad (computed desde RoleManager)
         $gameState['current_word'] = $newWord;
-        $gameState['eliminated_this_round'] = [];
         $gameState['pending_answer'] = null;
+        // Nota: Turn System limpia automáticamente temporarilyEliminated cuando completa ronda
 
         // Marcar palabra como usada
         if ($newWord) {
@@ -880,7 +966,7 @@ class PictionaryEngine implements GameEngineInterface
         }
 
         // Actualizar estado de los módulos en game_state
-        $gameState = array_merge($gameState, $turnManager->toArray(), $timerService->toArray());
+        $gameState = array_merge($gameState, $turnManager->toArray(), $timerService->toArray(), $roleManager->toArray());
 
         $match->game_state = $gameState;
         $match->save();

@@ -1,0 +1,420 @@
+<?php
+
+namespace App\Services\Modules\RoundSystem;
+
+use App\Services\Modules\TurnSystem\TurnManager;
+
+/**
+ * Servicio genérico para gestionar rondas en juegos.
+ *
+ * Una RONDA es un ciclo completo donde todos los jugadores han participado.
+ * RoundManager gestiona:
+ * - Conteo de rondas (actual, total)
+ * - Eliminación de jugadores (permanente/temporal por ronda)
+ * - Detección de fin de juego
+ * - Contiene un TurnManager para gestionar turnos dentro de la ronda
+ *
+ * Separación de responsabilidades:
+ * - RoundManager: ¿En qué ronda estamos? ¿Quién está eliminado? ¿Acabó el juego?
+ * - TurnManager: ¿De quién es el turno ahora? ¿En qué orden juegan?
+ *
+ * Ejemplos de uso:
+ * - Pictionary: 5 rondas, eliminación temporal por ronda
+ * - Battle Royale: Rondas infinitas, eliminación permanente
+ * - Trivia: N rondas, sin eliminación
+ * - Mafia: Múltiples rondas día/noche, eliminación permanente
+ */
+class RoundManager
+{
+    /**
+     * Ronda actual (1-based).
+     */
+    protected int $currentRound;
+
+    /**
+     * Total de rondas del juego (0 = infinitas).
+     */
+    protected int $totalRounds;
+
+    /**
+     * Jugadores eliminados permanentemente (fuera del juego).
+     *
+     * @var array<int>
+     */
+    protected array $permanentlyEliminated = [];
+
+    /**
+     * Jugadores eliminados temporalmente (solo esta ronda).
+     *
+     * @var array<int>
+     */
+    protected array $temporarilyEliminated = [];
+
+    /**
+     * TurnManager interno para gestionar turnos.
+     */
+    protected TurnManager $turnManager;
+
+    /**
+     * Si se acaba de completar una ronda.
+     */
+    protected bool $roundJustCompleted = false;
+
+    /**
+     * Constructor.
+     *
+     * @param TurnManager $turnManager Gestor de turnos
+     * @param int $totalRounds Total de rondas (0 = infinitas)
+     * @param int $currentRound Ronda inicial
+     */
+    public function __construct(
+        TurnManager $turnManager,
+        int $totalRounds = 0,
+        int $currentRound = 1
+    ) {
+        $this->turnManager = $turnManager;
+        $this->totalRounds = $totalRounds;
+        $this->currentRound = $currentRound;
+    }
+
+    /**
+     * Avanzar al siguiente turno.
+     *
+     * Delega al TurnManager y detecta cuando se completa una ronda.
+     *
+     * @return array Info del turno actual
+     */
+    public function nextTurn(): array
+    {
+        $this->roundJustCompleted = false;
+
+        // Delegar al TurnManager
+        $turnInfo = $this->turnManager->nextTurn();
+
+        // Detectar si completó un ciclo (= completó una ronda)
+        if ($this->turnManager->isCycleComplete()) {
+            $this->currentRound++;
+            $this->roundJustCompleted = true;
+
+            // Auto-limpiar eliminaciones temporales
+            $this->clearTemporaryEliminations();
+        }
+
+        return $turnInfo;
+    }
+
+    /**
+     * Verificar si se acaba de completar una ronda.
+     *
+     * @return bool True si el último nextTurn() completó una ronda
+     */
+    public function isNewRound(): bool
+    {
+        return $this->roundJustCompleted;
+    }
+
+    /**
+     * Obtener la ronda actual.
+     *
+     * @return int Ronda actual (1-based)
+     */
+    public function getCurrentRound(): int
+    {
+        return $this->currentRound;
+    }
+
+    /**
+     * Obtener total de rondas.
+     *
+     * @return int Total de rondas (0 = infinitas)
+     */
+    public function getTotalRounds(): int
+    {
+        return $this->totalRounds;
+    }
+
+    /**
+     * Verificar si el juego ha terminado.
+     *
+     * El juego termina cuando:
+     * 1. Se alcanzó el total de rondas (si totalRounds > 0)
+     * 2. O cuando cada juego decide (ej. Battle Royale: solo 1 jugador activo)
+     *
+     * Nota: Esta función solo verifica rondas. El game engine puede
+     * agregar lógica adicional (ej. verificar jugadores activos).
+     *
+     * @return bool True si se completaron todas las rondas
+     */
+    public function isGameComplete(): bool
+    {
+        if ($this->totalRounds === 0) {
+            return false; // Juego infinito
+        }
+
+        return $this->currentRound > $this->totalRounds;
+    }
+
+    // ========================================================================
+    // GESTIÓN DE ELIMINACIONES
+    // ========================================================================
+
+    /**
+     * Eliminar un jugador del juego.
+     *
+     * @param int $playerId ID del jugador
+     * @param bool $permanent True = permanente, False = solo esta ronda
+     * @return void
+     */
+    public function eliminatePlayer(int $playerId, bool $permanent = true): void
+    {
+        // Verificar que el jugador existe en el turn order
+        if (!in_array($playerId, $this->turnManager->getTurnOrder())) {
+            return;
+        }
+
+        if ($permanent) {
+            if (!in_array($playerId, $this->permanentlyEliminated)) {
+                $this->permanentlyEliminated[] = $playerId;
+            }
+            // Si estaba en temporales, remover
+            $this->temporarilyEliminated = array_values(
+                array_filter($this->temporarilyEliminated, fn($id) => $id !== $playerId)
+            );
+        } else {
+            // Eliminación temporal (solo esta ronda)
+            if (!in_array($playerId, $this->temporarilyEliminated) &&
+                !in_array($playerId, $this->permanentlyEliminated)) {
+                $this->temporarilyEliminated[] = $playerId;
+            }
+        }
+    }
+
+    /**
+     * Verificar si un jugador está eliminado.
+     *
+     * @param int $playerId ID del jugador
+     * @return bool True si está eliminado (temporal o permanente)
+     */
+    public function isEliminated(int $playerId): bool
+    {
+        return in_array($playerId, $this->permanentlyEliminated) ||
+               in_array($playerId, $this->temporarilyEliminated);
+    }
+
+    /**
+     * Verificar si está eliminado permanentemente.
+     *
+     * @param int $playerId ID del jugador
+     * @return bool True si está eliminado permanentemente
+     */
+    public function isPermanentlyEliminated(int $playerId): bool
+    {
+        return in_array($playerId, $this->permanentlyEliminated);
+    }
+
+    /**
+     * Verificar si está eliminado temporalmente.
+     *
+     * @param int $playerId ID del jugador
+     * @return bool True si está eliminado solo esta ronda
+     */
+    public function isTemporarilyEliminated(int $playerId): bool
+    {
+        return in_array($playerId, $this->temporarilyEliminated);
+    }
+
+    /**
+     * Restaurar un jugador eliminado temporalmente.
+     *
+     * @param int $playerId ID del jugador
+     * @return bool True si se restauró, False si era permanente
+     */
+    public function restorePlayer(int $playerId): bool
+    {
+        if (in_array($playerId, $this->permanentlyEliminated)) {
+            return false; // No se puede restaurar permanentes
+        }
+
+        $this->temporarilyEliminated = array_values(
+            array_filter($this->temporarilyEliminated, fn($id) => $id !== $playerId)
+        );
+
+        return true;
+    }
+
+    /**
+     * Limpiar todas las eliminaciones temporales.
+     *
+     * Se llama automáticamente al completar una ronda.
+     *
+     * @return void
+     */
+    public function clearTemporaryEliminations(): void
+    {
+        $this->temporarilyEliminated = [];
+    }
+
+    /**
+     * Obtener jugadores activos (no eliminados).
+     *
+     * @return array<int> IDs de jugadores activos
+     */
+    public function getActivePlayers(): array
+    {
+        return array_values(
+            array_filter(
+                $this->turnManager->getTurnOrder(),
+                fn($playerId) => !$this->isEliminated($playerId)
+            )
+        );
+    }
+
+    /**
+     * Obtener jugadores eliminados permanentemente.
+     *
+     * @return array<int>
+     */
+    public function getPermanentlyEliminated(): array
+    {
+        return $this->permanentlyEliminated;
+    }
+
+    /**
+     * Obtener jugadores eliminados temporalmente.
+     *
+     * @return array<int>
+     */
+    public function getTemporarilyEliminated(): array
+    {
+        return $this->temporarilyEliminated;
+    }
+
+    /**
+     * Obtener cantidad de jugadores activos.
+     *
+     * @return int Número de jugadores no eliminados
+     */
+    public function getActivePlayerCount(): int
+    {
+        return count($this->getActivePlayers());
+    }
+
+    // ========================================================================
+    // ACCESO AL TURNMANAGER
+    // ========================================================================
+
+    /**
+     * Obtener el TurnManager interno.
+     *
+     * @return TurnManager
+     */
+    public function getTurnManager(): TurnManager
+    {
+        return $this->turnManager;
+    }
+
+    /**
+     * Obtener el jugador del turno actual.
+     *
+     * @return mixed ID del jugador en turno
+     */
+    public function getCurrentPlayer(): mixed
+    {
+        return $this->turnManager->getCurrentPlayer();
+    }
+
+    /**
+     * Obtener el orden de turnos.
+     *
+     * @return array<int>
+     */
+    public function getTurnOrder(): array
+    {
+        return $this->turnManager->getTurnOrder();
+    }
+
+    /**
+     * Verificar si es el turno de un jugador específico.
+     *
+     * @param int $playerId ID del jugador
+     * @return bool
+     */
+    public function isPlayerTurn(int $playerId): bool
+    {
+        return $this->turnManager->isPlayerTurn($playerId);
+    }
+
+    /**
+     * Pausar los turnos.
+     *
+     * @return void
+     */
+    public function pause(): void
+    {
+        $this->turnManager->pause();
+    }
+
+    /**
+     * Reanudar los turnos.
+     *
+     * @return void
+     */
+    public function resume(): void
+    {
+        $this->turnManager->resume();
+    }
+
+    /**
+     * Verificar si está pausado.
+     *
+     * @return bool
+     */
+    public function isPaused(): bool
+    {
+        return $this->turnManager->isPaused();
+    }
+
+    // ========================================================================
+    // SERIALIZACIÓN
+    // ========================================================================
+
+    /**
+     * Serializar a array para guardar en game_state.
+     *
+     * @return array
+     */
+    public function toArray(): array
+    {
+        return [
+            'current_round' => $this->currentRound,
+            'total_rounds' => $this->totalRounds,
+            'permanently_eliminated' => $this->permanentlyEliminated,
+            'temporarily_eliminated' => $this->temporarilyEliminated,
+            // Incluir TurnManager serializado
+            'turn_system' => $this->turnManager->toArray(),
+        ];
+    }
+
+    /**
+     * Restaurar desde array serializado.
+     *
+     * @param array $data Estado serializado
+     * @return self Nueva instancia restaurada
+     */
+    public static function fromArray(array $data): self
+    {
+        // Restaurar TurnManager primero
+        $turnManager = TurnManager::fromArray($data['turn_system'] ?? []);
+
+        $instance = new self(
+            turnManager: $turnManager,
+            totalRounds: $data['total_rounds'] ?? 0,
+            currentRound: $data['current_round'] ?? 1
+        );
+
+        $instance->permanentlyEliminated = $data['permanently_eliminated'] ?? [];
+        $instance->temporarilyEliminated = $data['temporarily_eliminated'] ?? [];
+
+        return $instance;
+    }
+}

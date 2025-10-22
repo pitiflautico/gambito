@@ -79,7 +79,7 @@ class GameStateUpdatedEvent implements ShouldBroadcast
             'current_drawer_id' => $this->gameState['current_drawer_id'],
             'is_paused' => $this->gameState['game_is_paused'] ?? false, // Pausa del juego (no del TurnManager)
             'scores' => $this->gameState['scores'],
-            'eliminated_this_round' => $this->gameState['eliminated_this_round'],
+            'eliminated_this_round' => $this->gameState['temporarily_eliminated'] ?? [], // Desde TurnManager
             'pending_answer' => $this->gameState['pending_answer'],
             'timestamp' => now()->toIso8601String(),
         ];

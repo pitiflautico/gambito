@@ -7,79 +7,46 @@ use Illuminate\Support\Collection;
 /**
  * Turn System Module - Gestión de turnos para juegos.
  *
- * Módulo independiente y reutilizable para gestionar el orden de turnos
- * en cualquier juego que lo necesite.
+ * Responsabilidad: SOLO gestionar turnos (quién juega ahora).
+ * NO gestiona rondas ni eliminaciones (eso es responsabilidad de RoundManager).
  *
  * Funcionalidades:
  * - Crear orden de turnos (aleatorio, secuencial, personalizado)
  * - Avanzar al siguiente turno (rotación circular)
- * - Detectar fin de ronda (cuando se completa un ciclo)
- * - Obtener jugador actual
- * - Soportar eliminación de jugadores
- *
- * Ejemplo de uso:
- * ```php
- * $turnManager = new TurnManager(['player1', 'player2', 'player3'], 'shuffle');
- * $currentPlayer = $turnManager->getCurrentPlayer(); // player2 (aleatorio)
- * $turnManager->nextTurn(); // Avanza al siguiente
- * $roundEnded = $turnManager->isNewRound(); // false
- * ```
+ * - Detectar cuando se completa un ciclo (todos jugaron una vez)
+ * - Pausar/reanudar turnos
+ * - Invertir dirección de turnos
+ * - Saltar turnos
  */
 class TurnManager
 {
     /**
      * Orden de jugadores (IDs).
-     *
-     * @var array
      */
     protected array $turnOrder;
 
     /**
      * Índice del turno actual (0-based).
-     *
-     * @var int
      */
     protected int $currentTurnIndex;
 
     /**
-     * Número de ronda actual (1-based).
-     *
-     * @var int
-     */
-    protected int $currentRound;
-
-    /**
-     * Total de rondas previstas (0 = infinitas).
-     *
-     * @var int
-     */
-    protected int $totalRounds;
-
-    /**
      * Modo de turnos: 'sequential', 'simultaneous', 'free'.
-     *
-     * @var string
      */
     protected string $mode;
 
     /**
-     * Indica si en el último nextTurn() se completó una ronda.
-     *
-     * @var bool
+     * Indica si en el último nextTurn() se completó un ciclo.
      */
-    protected bool $roundJustCompleted = false;
+    protected bool $cycleJustCompleted = false;
 
     /**
      * Indica si el sistema de turnos está pausado.
-     *
-     * @var bool
      */
     protected bool $isPaused = false;
 
     /**
      * Dirección de los turnos: 1 = forward, -1 = backward (reversed).
-     *
-     * @var int
      */
     protected int $direction = 1;
 
@@ -88,38 +55,30 @@ class TurnManager
      *
      * @param array $playerIds Array de IDs de jugadores
      * @param string $mode Modo de turnos: 'sequential', 'shuffle', 'simultaneous', 'free'
-     * @param int $totalRounds Total de rondas (0 = infinitas)
-     * @param int $startingRound Ronda inicial (default: 1)
      */
     public function __construct(
         array $playerIds,
-        string $mode = 'sequential',
-        int $totalRounds = 0,
-        int $startingRound = 1
+        string $mode = 'sequential'
     ) {
         if (empty($playerIds)) {
             throw new \InvalidArgumentException('Se requiere al menos un jugador para el sistema de turnos');
         }
 
         $this->mode = $mode;
-        $this->totalRounds = $totalRounds;
-        $this->currentRound = $startingRound;
         $this->currentTurnIndex = 0;
 
         // Inicializar orden según modo
         $this->turnOrder = match ($mode) {
             'shuffle' => collect($playerIds)->shuffle()->values()->toArray(),
             'sequential' => array_values($playerIds),
-            'simultaneous' => array_values($playerIds), // Todos juegan a la vez
-            'free' => array_values($playerIds), // Sin orden específico
+            'simultaneous' => array_values($playerIds),
+            'free' => array_values($playerIds),
             default => array_values($playerIds),
         };
     }
 
     /**
      * Obtener el ID del jugador actual.
-     *
-     * @return mixed ID del jugador en turno
      */
     public function getCurrentPlayer(): mixed
     {
@@ -128,8 +87,6 @@ class TurnManager
 
     /**
      * Obtener el índice del turno actual.
-     *
-     * @return int Índice 0-based
      */
     public function getCurrentTurnIndex(): int
     {
@@ -137,19 +94,7 @@ class TurnManager
     }
 
     /**
-     * Obtener la ronda actual.
-     *
-     * @return int Ronda actual (1-based)
-     */
-    public function getCurrentRound(): int
-    {
-        return $this->currentRound;
-    }
-
-    /**
      * Obtener el orden completo de turnos.
-     *
-     * @return array Array de IDs de jugadores
      */
     public function getTurnOrder(): array
     {
@@ -159,40 +104,34 @@ class TurnManager
     /**
      * Avanzar al siguiente turno.
      *
-     * Rotación circular: Al llegar al último jugador, vuelve al primero
-     * y aumenta el contador de ronda.
+     * Rotación circular: Al llegar al último jugador, vuelve al primero.
      *
-     * Respeta la dirección (forward/backward) y el estado de pausa.
-     *
-     * @return array ['player_id' => mixed, 'turn_index' => int, 'round' => int, 'round_completed' => bool]
+     * @return array ['player_id', 'turn_index', 'cycle_completed']
      */
     public function nextTurn(): array
     {
-        // Si está pausado, no avanzar
         if ($this->isPaused) {
             return $this->getCurrentTurnInfo();
         }
 
-        $this->roundJustCompleted = false;
+        $this->cycleJustCompleted = false;
         $playerCount = count($this->turnOrder);
 
         // Incrementar/decrementar índice según dirección
         $this->currentTurnIndex += $this->direction;
 
-        // Manejar rotación circular en dirección forward
+        // Manejar rotación circular (forward)
         if ($this->direction === 1) {
             if ($this->currentTurnIndex >= $playerCount) {
                 $this->currentTurnIndex = 0;
-                $this->currentRound++;
-                $this->roundJustCompleted = true;
+                $this->cycleJustCompleted = true;
             }
         }
-        // Manejar rotación circular en dirección backward (reversa)
+        // Manejar rotación circular (backward)
         else {
             if ($this->currentTurnIndex < 0) {
                 $this->currentTurnIndex = $playerCount - 1;
-                $this->currentRound++;
-                $this->roundJustCompleted = true;
+                $this->cycleJustCompleted = true;
             }
         }
 
@@ -200,158 +139,30 @@ class TurnManager
     }
 
     /**
-     * Verificar si se acaba de completar una ronda.
+     * Verificar si se acaba de completar un ciclo.
      *
-     * @return bool True si en el último nextTurn() se completó una ronda
+     * Un ciclo se completa cuando todos los jugadores han jugado una vez.
+     * En RoundManager, esto se mapea a "completar una ronda".
      */
-    public function isNewRound(): bool
+    public function isCycleComplete(): bool
     {
-        return $this->roundJustCompleted;
-    }
-
-    /**
-     * Verificar si el juego ha terminado (todas las rondas completadas).
-     *
-     * @return bool True si se completaron todas las rondas
-     */
-    public function isGameComplete(): bool
-    {
-        if ($this->totalRounds === 0) {
-            return false; // Juego infinito
-        }
-
-        return $this->currentRound > $this->totalRounds;
+        return $this->cycleJustCompleted;
     }
 
     /**
      * Obtener información completa del turno actual.
-     *
-     * @return array ['player_id', 'turn_index', 'round', 'round_completed', 'game_complete']
      */
     public function getCurrentTurnInfo(): array
     {
         return [
             'player_id' => $this->getCurrentPlayer(),
             'turn_index' => $this->currentTurnIndex,
-            'round' => $this->currentRound,
-            'round_completed' => $this->roundJustCompleted,
-            'game_complete' => $this->isGameComplete(),
+            'cycle_completed' => $this->cycleJustCompleted,
         ];
-    }
-
-    /**
-     * Eliminar un jugador del orden de turnos.
-     *
-     * IMPORTANTE: Esto ajusta el índice actual si es necesario.
-     *
-     * @param mixed $playerId ID del jugador a eliminar
-     * @return bool True si se eliminó, false si no existía
-     */
-    public function removePlayer(mixed $playerId): bool
-    {
-        $index = array_search($playerId, $this->turnOrder, true);
-
-        if ($index === false) {
-            return false; // Jugador no existe
-        }
-
-        // Eliminar jugador
-        array_splice($this->turnOrder, $index, 1);
-
-        // Ajustar índice actual si es necesario
-        if ($this->currentTurnIndex >= count($this->turnOrder)) {
-            $this->currentTurnIndex = 0;
-        } elseif ($index < $this->currentTurnIndex) {
-            // Si eliminamos un jugador antes del actual, decrementar índice
-            $this->currentTurnIndex--;
-        }
-
-        return true;
-    }
-
-    /**
-     * Agregar un jugador al final del orden de turnos.
-     *
-     * @param mixed $playerId ID del jugador a agregar
-     * @return void
-     */
-    public function addPlayer(mixed $playerId): void
-    {
-        $this->turnOrder[] = $playerId;
-    }
-
-    /**
-     * Reiniciar el sistema de turnos.
-     *
-     * Vuelve al turno 0, ronda inicial, sin modificar el orden.
-     *
-     * @param int $startingRound Ronda de inicio (default: 1)
-     * @return void
-     */
-    public function reset(int $startingRound = 1): void
-    {
-        $this->currentTurnIndex = 0;
-        $this->currentRound = $startingRound;
-        $this->roundJustCompleted = false;
-    }
-
-    /**
-     * Exportar el estado actual a un array.
-     *
-     * Útil para guardar en game_state JSON.
-     *
-     * @return array Estado serializado
-     */
-    public function toArray(): array
-    {
-        return [
-            'turn_order' => $this->turnOrder,
-            'current_turn_index' => $this->currentTurnIndex,
-            'current_round' => $this->currentRound,
-            'total_rounds' => $this->totalRounds,
-            'mode' => $this->mode,
-            'is_paused' => $this->isPaused,
-            'direction' => $this->direction,
-        ];
-    }
-
-    /**
-     * Crear instancia desde un array guardado.
-     *
-     * @param array $state Estado previamente guardado con toArray()
-     * @return self Nueva instancia restaurada
-     */
-    public static function fromArray(array $state): self
-    {
-        $instance = new self(
-            $state['turn_order'],
-            $state['mode'] ?? 'sequential',
-            $state['total_rounds'] ?? 0,
-            $state['current_round'] ?? 1
-        );
-
-        $instance->currentTurnIndex = $state['current_turn_index'] ?? 0;
-        $instance->isPaused = $state['is_paused'] ?? false;
-        $instance->direction = $state['direction'] ?? 1;
-
-        return $instance;
-    }
-
-    /**
-     * Obtener el modo de turnos.
-     *
-     * @return string 'sequential', 'shuffle', 'simultaneous', 'free'
-     */
-    public function getMode(): string
-    {
-        return $this->mode;
     }
 
     /**
      * Verificar si es el turno de un jugador específico.
-     *
-     * @param mixed $playerId ID del jugador a verificar
-     * @return bool True si es su turno
      */
     public function isPlayerTurn(mixed $playerId): bool
     {
@@ -359,38 +170,79 @@ class TurnManager
     }
 
     /**
-     * Obtener el total de jugadores activos.
-     *
-     * @return int Número de jugadores
-     */
-    public function getPlayerCount(): int
-    {
-        return count($this->turnOrder);
-    }
-
-    /**
-     * Obtener ID del siguiente jugador sin avanzar el turno.
-     *
-     * @return mixed ID del siguiente jugador
+     * Ver el siguiente jugador sin avanzar.
      */
     public function peekNextPlayer(): mixed
     {
-        $nextIndex = ($this->currentTurnIndex + $this->direction) % count($this->turnOrder);
+        $playerCount = count($this->turnOrder);
+        $nextIndex = ($this->currentTurnIndex + $this->direction) % $playerCount;
 
-        // Ajustar para índices negativos si vamos en reversa
         if ($nextIndex < 0) {
-            $nextIndex = count($this->turnOrder) + $nextIndex;
+            $nextIndex = $playerCount - 1;
         }
 
         return $this->turnOrder[$nextIndex];
     }
 
     /**
-     * Pausar el sistema de turnos.
-     *
-     * Cuando está pausado, nextTurn() no avanzará el turno.
-     *
-     * @return void
+     * Obtener el total de jugadores.
+     */
+    public function getPlayerCount(): int
+    {
+        return count($this->turnOrder);
+    }
+
+    // ========================================================================
+    // GESTIÓN DE JUGADORES
+    // ========================================================================
+
+    /**
+     * Eliminar un jugador del orden de turnos.
+     */
+    public function removePlayer(mixed $playerId): bool
+    {
+        $key = array_search($playerId, $this->turnOrder);
+
+        if ($key === false) {
+            return false;
+        }
+
+        unset($this->turnOrder[$key]);
+        $this->turnOrder = array_values($this->turnOrder);
+
+        // Ajustar índice si es necesario
+        if ($this->currentTurnIndex >= count($this->turnOrder) && count($this->turnOrder) > 0) {
+            $this->currentTurnIndex = 0;
+        }
+
+        return true;
+    }
+
+    /**
+     * Agregar un jugador al final del orden.
+     */
+    public function addPlayer(mixed $playerId): void
+    {
+        $this->turnOrder[] = $playerId;
+    }
+
+    /**
+     * Reiniciar al estado inicial.
+     */
+    public function reset(): void
+    {
+        $this->currentTurnIndex = 0;
+        $this->cycleJustCompleted = false;
+        $this->isPaused = false;
+        $this->direction = 1;
+    }
+
+    // ========================================================================
+    // PAUSA/RESUME
+    // ========================================================================
+
+    /**
+     * Pausar los turnos.
      */
     public function pause(): void
     {
@@ -398,9 +250,7 @@ class TurnManager
     }
 
     /**
-     * Reanudar el sistema de turnos.
-     *
-     * @return void
+     * Reanudar los turnos.
      */
     public function resume(): void
     {
@@ -408,22 +258,19 @@ class TurnManager
     }
 
     /**
-     * Verificar si el sistema de turnos está pausado.
-     *
-     * @return bool True si está pausado
+     * Verificar si está pausado.
      */
     public function isPaused(): bool
     {
         return $this->isPaused;
     }
 
+    // ========================================================================
+    // DIRECCIÓN
+    // ========================================================================
+
     /**
      * Invertir la dirección de los turnos.
-     *
-     * Si estaba en orden normal (1→2→3), pasará a (3→2→1).
-     * Útil para juegos como UNO con cartas de reversa.
-     *
-     * @return void
      */
     public function reverse(): void
     {
@@ -431,9 +278,7 @@ class TurnManager
     }
 
     /**
-     * Obtener la dirección actual de los turnos.
-     *
-     * @return int 1 = forward, -1 = backward
+     * Obtener la dirección actual.
      */
     public function getDirection(): int
     {
@@ -442,43 +287,81 @@ class TurnManager
 
     /**
      * Verificar si los turnos van en dirección normal.
-     *
-     * @return bool True si va hacia adelante (forward)
      */
     public function isForward(): bool
     {
         return $this->direction === 1;
     }
 
+    // ========================================================================
+    // SALTAR TURNOS
+    // ========================================================================
+
     /**
      * Saltar el turno actual y avanzar al siguiente.
-     *
-     * Útil cuando un jugador pierde su turno por alguna condición del juego.
-     *
-     * @return array Información del nuevo turno (después del salto)
      */
     public function skipTurn(): array
     {
-        // Simplemente avanzamos al siguiente turno
         return $this->nextTurn();
     }
 
     /**
-     * Saltar el turno de un jugador específico una vez.
-     *
-     * Si es el turno de ese jugador, avanza automáticamente.
-     * Si no es su turno, se marca para saltar cuando le toque.
-     *
-     * @param mixed $playerId ID del jugador a saltar
-     * @return bool True si se saltó, false si no era su turno
+     * Saltar el turno de un jugador específico si es su turno.
      */
     public function skipPlayerTurn(mixed $playerId): bool
     {
-        if ($this->isPlayerTurn($playerId)) {
-            $this->skipTurn();
+        if ($this->getCurrentPlayer() === $playerId) {
+            $this->nextTurn();
             return true;
         }
 
         return false;
+    }
+
+    // ========================================================================
+    // UTILIDADES
+    // ========================================================================
+
+    /**
+     * Obtener el modo de turnos.
+     */
+    public function getMode(): string
+    {
+        return $this->mode;
+    }
+
+    // ========================================================================
+    // SERIALIZACIÓN
+    // ========================================================================
+
+    /**
+     * Serializar a array para guardar en game_state.
+     */
+    public function toArray(): array
+    {
+        return [
+            'turn_order' => $this->turnOrder,
+            'current_turn_index' => $this->currentTurnIndex,
+            'mode' => $this->mode,
+            'is_paused' => $this->isPaused,
+            'direction' => $this->direction,
+        ];
+    }
+
+    /**
+     * Crear instancia desde un array guardado.
+     */
+    public static function fromArray(array $state): self
+    {
+        $instance = new self(
+            $state['turn_order'],
+            $state['mode'] ?? 'sequential'
+        );
+
+        $instance->currentTurnIndex = $state['current_turn_index'] ?? 0;
+        $instance->isPaused = $state['is_paused'] ?? false;
+        $instance->direction = $state['direction'] ?? 1;
+
+        return $instance;
     }
 }
