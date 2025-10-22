@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\GameMatch;
 use App\Models\Player;
 use App\Models\Room;
+use App\Services\Modules\SessionManager\SessionManager;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
@@ -42,8 +43,13 @@ class TriviaController extends Controller
             ];
         });
 
-        // Obtener player ID de la sesión
-        $playerId = session('player_id');
+        // Obtener el jugador actual usando SessionManager
+        $player = SessionManager::getCurrentPlayer($match);
+
+        if (!$player) {
+            return redirect()->route('rooms.lobby', ['code' => $roomCode])
+                ->with('error', 'Debes unirte a la partida primero');
+        }
 
         // Cargar configuración de eventos desde capabilities.json
         $capabilitiesPath = base_path("games/trivia/capabilities.json");
@@ -54,7 +60,7 @@ class TriviaController extends Controller
             'room' => $room,
             'match' => $match,
             'players' => $players,
-            'playerId' => $playerId,
+            'playerId' => $player->id,
             'eventConfig' => $eventConfig,
         ]);
     }
@@ -72,13 +78,14 @@ class TriviaController extends Controller
 
         try {
             $room = Room::where('code', $validated['room_code'])->firstOrFail();
-            $player = Player::findOrFail($validated['player_id']);
             $match = GameMatch::where('room_id', $room->id)
                 ->whereNotNull('started_at')
                 ->whereNull('finished_at')
                 ->firstOrFail();
 
-            // Verificar que el jugador pertenezca a la sala
+            // Obtener el jugador del request y verificar que pertenezca al match
+            $player = Player::findOrFail($validated['player_id']);
+
             if ($player->match_id !== $match->id) {
                 return response()->json([
                     'success' => false,

@@ -21,7 +21,7 @@ use Illuminate\Support\Facades\Route;
 // API Routes - Endpoints del juego
 // ============================================================================
 
-Route::prefix('api/pictionary')->name('api.pictionary.')->group(function () {
+Route::prefix('api/pictionary')->name('api.pictionary.')->middleware('api')->group(function () {
     // Canvas - Dibujo en tiempo real
     Route::post('/draw', [PictionaryController::class, 'broadcastDraw'])->name('draw');
     Route::post('/clear', [PictionaryController::class, 'broadcastClear'])->name('clear');
@@ -37,7 +37,7 @@ Route::prefix('api/pictionary')->name('api.pictionary.')->group(function () {
 // Web Routes - Páginas del juego
 // ============================================================================
 
-Route::prefix('pictionary')->name('pictionary.')->group(function () {
+Route::prefix('pictionary')->name('pictionary.')->middleware('web')->group(function () {
     // Ruta principal del juego
     Route::get('/{roomCode}', [PictionaryController::class, 'game'])->name('game');
 

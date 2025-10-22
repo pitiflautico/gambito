@@ -437,4 +437,82 @@ class RoundManager
 
         return $instance;
     }
+
+    /**
+     * Programar el avance automático a la siguiente ronda.
+     *
+     * Útil para juegos simultáneos donde todos juegan al mismo tiempo
+     * y después de mostrar resultados se debe avanzar automáticamente.
+     *
+     * @param callable $callback Función a ejecutar para avanzar la ronda
+     * @param int $delaySeconds Segundos de espera antes de ejecutar
+     * @return void
+     */
+    public function scheduleNextRound(callable $callback, int $delaySeconds = 5): void
+    {
+        dispatch($callback)->delay(now()->addSeconds($delaySeconds));
+    }
+
+    /**
+     * Verificar si todos los jugadores activos han participado en la ronda actual.
+     *
+     * Útil para juegos simultáneos donde necesitas saber si todos ya jugaron
+     * antes de avanzar.
+     *
+     * @param array $participatedPlayers IDs de jugadores que ya participaron
+     * @return bool True si todos los jugadores activos ya participaron
+     */
+    public function allPlayersParticipated(array $participatedPlayers): bool
+    {
+        $activePlayers = $this->getActivePlayers();
+        $participated = array_intersect($activePlayers, $participatedPlayers);
+
+        return count($participated) === count($activePlayers);
+    }
+
+    /**
+     * Determinar si la ronda debe terminar basado en las respuestas en juegos simultáneos.
+     *
+     * En juegos simultáneos competitivos (como Trivia):
+     * - Si alguien acierta → terminar ronda inmediatamente
+     * - Si todos fallan → terminar ronda
+     * - Si algunos fallan pero no todos respondieron → continuar
+     *
+     * @param array $playerResults Array de resultados: [player_id => ['success' => bool]]
+     * @return array ['should_end' => bool, 'reason' => string]
+     */
+    public function shouldEndSimultaneousRound(array $playerResults): array
+    {
+        $activePlayers = $this->getActivePlayers();
+        $totalActivePlayers = count($activePlayers);
+        $respondedPlayers = count($playerResults);
+
+        // Verificar si alguien tuvo éxito
+        foreach ($playerResults as $result) {
+            if ($result['success'] ?? false) {
+                return [
+                    'should_end' => true,
+                    'reason' => 'player_succeeded',
+                    'winner_found' => true,
+                ];
+            }
+        }
+
+        // Nadie tuvo éxito aún
+        // Verificar si todos ya respondieron
+        if ($respondedPlayers >= $totalActivePlayers) {
+            return [
+                'should_end' => true,
+                'reason' => 'all_failed',
+                'winner_found' => false,
+            ];
+        }
+
+        // Aún hay jugadores que no han respondido y nadie acertó
+        return [
+            'should_end' => false,
+            'reason' => 'waiting_for_players',
+            'winner_found' => false,
+        ];
+    }
 }

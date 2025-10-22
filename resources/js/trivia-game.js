@@ -258,13 +258,36 @@ class TriviaGame {
                 })
             });
 
+            // Check if response is OK before parsing JSON
+            if (!response.ok) {
+                const text = await response.text();
+                console.error('[Trivia] Server error:', {
+                    status: response.status,
+                    statusText: response.statusText,
+                    body: text
+                });
+                this.showMessage(`Error del servidor (${response.status})`, 'error');
+                return;
+            }
+
             const data = await response.json();
 
             if (data.success) {
                 console.log('[Trivia] Answer sent successfully', data);
+
+                // Mostrar feedback basado en si es correcta o incorrecta
+                if (data.is_correct) {
+                    this.showMessage('¡Correcto! +100 puntos', 'success');
+                } else if (!data.question_ended) {
+                    // Respuesta incorrecta pero la pregunta continúa
+                    this.showMessage('Respuesta incorrecta. Espera a que el resto responda.', 'info');
+                }
+                // Si question_ended es true, el evento QuestionEndedEvent manejará la UI
             } else {
                 console.error('[Trivia] Error sending answer', data);
-                this.showMessage(data.error || 'Error al enviar respuesta', 'error');
+                // Mostrar el error específico del servidor
+                const errorMsg = data.error || data.message || data.data?.error || 'Error al enviar respuesta';
+                this.showMessage(errorMsg, 'error');
             }
         } catch (error) {
             console.error('[Trivia] Network error', error);

@@ -67,7 +67,9 @@ class GameServiceProvider extends ServiceProvider
         $middleware = $config['routes']['middleware'] ?? [];
 
         // Cargar el archivo de rutas
-        // Nota: Las rutas dentro del archivo ya tienen sus propios prefijos y nombres
+        // IMPORTANTE: Las rutas que empiezan con 'api/' necesitan el middleware 'api'
+        // Las demás rutas necesitan el middleware 'web'
+        // Esto se determina por el prefijo en el archivo de rutas
         require $routesFile;
     }
 

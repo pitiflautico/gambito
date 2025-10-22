@@ -3,6 +3,7 @@
   "version": "1.0",
   "requires": {
     "modules": {
+      "session_manager": "^1.0",
       "event_manager": "^1.0",
       "turn_system": "^1.0",
       "scoring_system": "^1.0",

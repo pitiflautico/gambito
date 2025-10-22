@@ -183,13 +183,13 @@ class TriviaController extends Controller
 use App\Http\Controllers\{GameName}Controller;
 use Illuminate\Support\Facades\Route;
 
-// API Routes
-Route::prefix('api/{slug}')->name('api.{slug}.')->group(function () {
+// API Routes - IMPORTANTE: Usar middleware('api') para eximir de CSRF
+Route::prefix('api/{slug}')->name('api.{slug}.')->middleware('api')->group(function () {
     Route::post('/action', [Controller::class, 'method'])->name('action');
 });
 
-// Web Routes
-Route::prefix('{slug}')->name('{slug}.')->group(function () {
+// Web Routes - IMPORTANTE: Usar middleware('web') para sesiones y CSRF
+Route::prefix('{slug}')->name('{slug}.')->middleware('web')->group(function () {
     Route::get('/page', [Controller::class, 'method'])->name('page');
 });
 ```

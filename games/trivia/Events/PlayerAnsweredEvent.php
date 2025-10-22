@@ -19,17 +19,20 @@ class PlayerAnsweredEvent implements ShouldBroadcast
     public string $playerName;
     public int $answeredCount;
     public int $totalPlayers;
+    public bool $isCorrect;
 
     /**
      * Create a new event instance.
      */
     public function __construct(
         GameMatch $match,
-        Player $player
+        Player $player,
+        bool $isCorrect
     ) {
         $this->roomCode = $match->room->code;
         $this->playerId = $player->id;
         $this->playerName = $player->name;
+        $this->isCorrect = $isCorrect;
         $this->answeredCount = count($match->game_state['player_answers'] ?? []);
 
         $roundManager = \App\Services\Modules\RoundSystem\RoundManager::fromArray($match->game_state);
@@ -60,6 +63,7 @@ class PlayerAnsweredEvent implements ShouldBroadcast
         return [
             'player_id' => $this->playerId,
             'player_name' => $this->playerName,
+            'is_correct' => $this->isCorrect,
             'answered_count' => $this->answeredCount,
             'total_players' => $this->totalPlayers,
         ];

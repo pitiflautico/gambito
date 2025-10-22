@@ -299,6 +299,11 @@ class TriviaEngine implements GameEngineInterface
             return ['success' => false, 'error' => 'Respuesta inválida'];
         }
 
+        // Obtener la respuesta correcta
+        $currentQuestion = $gameState['current_question'];
+        $correctAnswer = $currentQuestion['correct'];
+        $isCorrect = (int)$answerIndex === $correctAnswer;
+
         // Calcular tiempo transcurrido desde inicio de pregunta
         $secondsElapsed = now()->timestamp - $gameState['question_start_time'];
 
@@ -307,6 +312,7 @@ class TriviaEngine implements GameEngineInterface
             'answer' => (int)$answerIndex,
             'seconds_elapsed' => $secondsElapsed,
             'timestamp' => now()->timestamp,
+            'is_correct' => $isCorrect,
         ];
 
         $match->game_state = $gameState;
@@ -316,27 +322,52 @@ class TriviaEngine implements GameEngineInterface
             'match_id' => $match->id,
             'player_id' => $player->id,
             'answer' => $answerIndex,
+            'is_correct' => $isCorrect,
             'seconds_elapsed' => $secondsElapsed
         ]);
 
         // Broadcast respuesta
-        event(new PlayerAnsweredEvent($match, $player));
+        event(new PlayerAnsweredEvent($match, $player, $isCorrect));
 
-        // Verificar si todos han respondido
+        // Usar RoundManager para determinar si la ronda debe terminar
         $roundManager = RoundManager::fromArray($gameState);
-        $totalPlayers = count($roundManager->getTurnOrder());
-        $answeredPlayers = count($gameState['player_answers']);
 
-        if ($answeredPlayers >= $totalPlayers) {
-            // Todos respondieron, terminar pregunta automáticamente
-            $this->endQuestion($match);
+        // Convertir player_answers a formato que entiende RoundManager
+        $playerResults = [];
+        foreach ($gameState['player_answers'] as $pid => $answer) {
+            $playerResults[$pid] = ['success' => $answer['is_correct']];
         }
 
+        $roundStatus = $roundManager->shouldEndSimultaneousRound($playerResults);
+
+        if ($roundStatus['should_end']) {
+            // La ronda debe terminar
+            $this->endQuestion($match);
+
+            if ($roundStatus['reason'] === 'player_succeeded') {
+                return [
+                    'success' => true,
+                    'message' => $isCorrect ? '¡Correcto! Has ganado esta ronda' : 'Respuesta incorrecta. Otro jugador acertó.',
+                    'is_correct' => $isCorrect,
+                    'question_ended' => true,
+                ];
+            } else {
+                // all_failed
+                return [
+                    'success' => true,
+                    'message' => 'Respuesta incorrecta. Nadie acertó esta pregunta.',
+                    'is_correct' => false,
+                    'question_ended' => true,
+                ];
+            }
+        }
+
+        // La ronda continúa - aún hay jugadores que no han respondido
         return [
             'success' => true,
-            'message' => 'Respuesta registrada',
-            'answered_players' => $answeredPlayers,
-            'total_players' => $totalPlayers
+            'message' => 'Respuesta incorrecta. Espera a que el resto responda.',
+            'is_correct' => false,
+            'question_ended' => false,
         ];
     }
 
@@ -403,6 +434,19 @@ class TriviaEngine implements GameEngineInterface
             $questionResults,
             $gameState['scores']
         ));
+
+        // Usar RoundManager para programar el avance automático a la siguiente ronda
+        // Esto mantiene la responsabilidad en el módulo correcto
+        $roundManager = RoundManager::fromArray($gameState);
+        $matchId = $match->id;
+
+        $roundManager->scheduleNextRound(function () use ($matchId) {
+            $match = GameMatch::find($matchId);
+            if ($match && $match->game_state['phase'] === 'results') {
+                $engine = new TriviaEngine();
+                $engine->nextQuestion($match);
+            }
+        }, delaySeconds: 5);
     }
 
     /**

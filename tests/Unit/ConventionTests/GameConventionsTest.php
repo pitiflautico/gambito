@@ -574,4 +574,39 @@ class GameConventionsTest extends TestCase
             );
         }
     }
+
+    /**
+     * TEST 14: Las rutas del juego deben usar middleware correcto
+     * - Rutas API deben usar middleware('api') para eximir CSRF
+     * - Rutas Web deben usar middleware('web') para sesiones y CSRF
+     */
+    public function test_game_routes_use_correct_middleware(): void
+    {
+        foreach ($this->games as $game) {
+            $slug = $game['slug'];
+            $routesFile = "{$game['path']}/routes.php";
+
+            if (!File::exists($routesFile)) {
+                $this->fail("El juego '{$slug}' debe tener un archivo routes.php");
+            }
+
+            $routesCode = File::get($routesFile);
+
+            // Verificar que las rutas API usan middleware('api')
+            if (str_contains($routesCode, "prefix('api/")) {
+                $this->assertTrue(
+                    str_contains($routesCode, "->middleware('api')"),
+                    "El juego '{$slug}' tiene rutas API pero NO usa ->middleware('api'). Las rutas API deben usar middleware('api') para eximir CSRF."
+                );
+            }
+
+            // Verificar que las rutas web usan middleware('web')
+            if (str_contains($routesCode, "prefix('{$slug}')")) {
+                $this->assertTrue(
+                    str_contains($routesCode, "->middleware('web')"),
+                    "El juego '{$slug}' tiene rutas web pero NO usa ->middleware('web'). Las rutas web deben usar middleware('web') para sesiones y CSRF."
+                );
+            }
+        }
+    }
 }

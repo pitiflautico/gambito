@@ -5,6 +5,7 @@ namespace Games\Pictionary;
 use App\Http\Controllers\Controller;
 use App\Models\GameMatch;
 use App\Models\Room;
+use App\Services\Modules\SessionManager\SessionManager;
 use Games\Pictionary\Events\CanvasDrawEvent;
 use Games\Pictionary\Events\PlayerAnsweredEvent;
 use Games\Pictionary\Events\AnswerConfirmedEvent;
@@ -34,23 +35,13 @@ class PictionaryController extends Controller
             abort(404, 'No hay una partida en progreso');
         }
 
-        // Obtener el jugador actual (guest o autenticado)
-        $player = null;
-        $playerId = null;
-
-        if (\Auth::check()) {
-            $player = $match->players()->where('user_id', \Auth::id())->first();
-        } elseif (session()->has('guest_session_id')) {
-            $guestSessionId = session('guest_session_id');
-            $player = $match->players()->where('session_id', $guestSessionId)->first();
-        }
+        // Obtener el jugador actual usando SessionManager
+        $player = SessionManager::getCurrentPlayer($match);
 
         if (!$player) {
             return redirect()->route('rooms.lobby', ['code' => $roomCode])
                 ->with('error', 'Debes unirte a la partida primero');
         }
-
-        $playerId = $player->id;
 
         // Obtener el rol del jugador desde el motor del juego
         $gameState = $match->game_state ?? [];
@@ -58,7 +49,12 @@ class PictionaryController extends Controller
         $role = ($player->id === $currentDrawerId) ? 'drawer' : 'guesser';
 
         // Retornar la vista usando el namespace del juego
-        return view('games.pictionary.canvas', compact('room', 'match', 'playerId', 'role'));
+        return view('games.pictionary.canvas', [
+            'room' => $room,
+            'match' => $match,
+            'playerId' => $player->id,
+            'role' => $role,
+        ]);
     }
 
     /**
