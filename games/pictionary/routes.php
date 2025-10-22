@@ -38,6 +38,9 @@ Route::prefix('api/pictionary')->name('api.pictionary.')->group(function () {
 // ============================================================================
 
 Route::prefix('pictionary')->name('pictionary.')->group(function () {
+    // Ruta principal del juego
+    Route::get('/{roomCode}', [PictionaryController::class, 'game'])->name('game');
+
     // Demo/Testing (solo desarrollo - TODO: agregar middleware de environment)
     Route::get('/demo', [PictionaryController::class, 'demo'])->name('demo');
 });

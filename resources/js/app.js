@@ -1,4 +1,4 @@
-console.log('🎯 APP.JS LOADED - VERSION: 2024-10-21-17:00');
+console.log('🎯 APP.JS LOADED - VERSION: 2024-10-22');
 
 import './bootstrap';
 
@@ -8,6 +8,5 @@ window.Alpine = Alpine;
 
 Alpine.start();
 
-// Importar módulos de juegos
-import './pictionary-canvas.js';
-import './trivia-game.js';
+// Game-specific JavaScript is loaded separately in each game view
+// See vite.config.js for game entry points

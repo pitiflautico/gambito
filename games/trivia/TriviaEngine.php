@@ -12,6 +12,7 @@ use App\Services\Modules\TurnSystem\TurnManager;
 use Games\Trivia\Events\QuestionStartedEvent;
 use Games\Trivia\Events\PlayerAnsweredEvent;
 use Games\Trivia\Events\QuestionEndedEvent;
+use Games\Trivia\TriviaScoreCalculator;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -42,14 +43,14 @@ class TriviaEngine implements GameEngineInterface
         Log::info("Initializing Trivia game", ['match_id' => $match->id]);
 
         // Verificar que hay suficientes jugadores
-        $players = $match->room->players;
+        $players = $match->players;
 
-        if ($players->count() < 2) {
+        if ($players->count() < 1) {
             Log::error("Not enough players to start Trivia", [
                 'match_id' => $match->id,
                 'player_count' => $players->count()
             ]);
-            throw new \Exception('Se requieren al menos 2 jugadores para jugar Trivia');
+            throw new \Exception('Se requiere al menos 1 jugador para jugar Trivia');
         }
 
         // Cargar configuración del juego
@@ -107,10 +108,11 @@ class TriviaEngine implements GameEngineInterface
         // ========================================================================
         // MÓDULO: Scoring System
         // ========================================================================
+        $scoreCalculator = new TriviaScoreCalculator();
         $scoreManager = new ScoreManager(
             playerIds: $playerIds,
-            trackHistory: true,
-            allowNegativeScores: false
+            calculator: $scoreCalculator,
+            trackHistory: true
         );
 
         // ========================================================================

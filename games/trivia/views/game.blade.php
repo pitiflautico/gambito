@@ -160,15 +160,9 @@
             playerId: {{ $playerId ?? 'null' }},
             matchId: {{ $match->id ?? 'null' }},
             gameSlug: 'trivia',
-
-            @if(isset($match->game_state))
-            phase: '{{ $match->game_state['phase'] ?? 'waiting' }}',
-            currentQuestion: {{ $match->game_state['question_index'] ?? 0 }},
-            totalQuestions: {{ count($match->game_state['questions'] ?? []) }},
-            scores: @json($match->game_state['scores'] ?? []),
-            @endif
-
             players: @json($players ?? []),
+            scores: @json($match->game_state['scores'] ?? []),
+            gameState: @json($match->game_state ?? null),
         };
 
         // Inicializar el juego cuando el DOM esté listo

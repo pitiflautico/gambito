@@ -17,6 +17,7 @@ class TriviaGame {
         this.gameSlug = config.gameSlug;
         this.players = config.players || [];
         this.scores = config.scores || {};
+        this.currentGameState = config.gameState || null;
 
         this.currentQuestion = null;
         this.hasAnswered = false;
@@ -25,11 +26,13 @@ class TriviaGame {
         this.initializeElements();
         this.setupWebSocket();
         this.setupEventListeners();
+        this.syncInitialState(); // Sincronizar con el estado actual
 
         console.log('[Trivia] Game initialized', {
             roomCode: this.roomCode,
             playerId: this.playerId,
-            players: this.players.length
+            players: this.players.length,
+            phase: this.currentGameState?.phase
         });
     }
 
@@ -111,6 +114,25 @@ class TriviaGame {
 
         if (btnBackLobby) {
             btnBackLobby.addEventListener('click', () => this.backToLobby());
+        }
+    }
+
+    syncInitialState() {
+        // Si ya hay un game_state con una pregunta activa, mostrarla
+        if (this.currentGameState && this.currentGameState.phase === 'question') {
+            const currentQuestion = this.currentGameState.current_question;
+            const currentRound = this.currentGameState.current_question_index + 1;
+            const totalRounds = this.currentGameState.total_rounds || 10;
+
+            if (currentQuestion) {
+                console.log('[Trivia] Syncing initial state - showing current question');
+                this.handleQuestionStarted({
+                    question: currentQuestion.question,
+                    options: currentQuestion.options,
+                    current_round: currentRound,
+                    total_rounds: totalRounds
+                });
+            }
         }
     }
 

@@ -546,4 +546,32 @@ class GameConventionsTest extends TestCase
             }
         }
     }
+
+    /**
+     * TEST 13: Cada juego debe tener una ruta {slug}.game
+     */
+    public function test_games_have_required_game_route(): void
+    {
+        foreach ($this->games as $game) {
+            $slug = $game['slug'];
+            $routeName = "{$slug}.game";
+
+            $this->assertTrue(
+                \Route::has($routeName),
+                "El juego '{$slug}' debe tener una ruta '{$routeName}' definida en routes.php. Esta ruta es necesaria para que RoomController::show() pueda redirigir a la vista del juego."
+            );
+
+            // Verificar que la ruta acepta roomCode como parámetro
+            $route = \Route::getRoutes()->getByName($routeName);
+            $this->assertNotNull($route, "La ruta '{$routeName}' existe pero no se puede obtener");
+
+            // Verificar que tiene el parámetro roomCode
+            $parameterNames = $route->parameterNames();
+            $this->assertContains(
+                'roomCode',
+                $parameterNames,
+                "La ruta '{$routeName}' debe aceptar el parámetro 'roomCode'"
+            );
+        }
+    }
 }

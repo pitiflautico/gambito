@@ -524,7 +524,16 @@ class RoomController extends Controller
             ];
         });
 
-        // Cargar vista específica del juego
+        // Redirigir a la ruta específica del juego si existe
+        $gameSlug = $room->game->slug;
+        $gameRouteName = "{$gameSlug}.game";
+
+        if (\Route::has($gameRouteName)) {
+            // El juego tiene su propia ruta, redirigir ahí
+            return redirect()->route($gameRouteName, ['roomCode' => $code]);
+        }
+
+        // Cargar vista genérica si el juego no tiene ruta específica
         return view('rooms.show', compact('room', 'playerId', 'role', 'players'));
     }
 

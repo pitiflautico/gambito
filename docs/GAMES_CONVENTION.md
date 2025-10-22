@@ -1,5 +1,28 @@
 # Convención de Estructura para Juegos
 
+## 🎯 Requisitos Obligatorios
+
+**TODOS los juegos DEBEN cumplir con estos requisitos:**
+
+1. ✅ **Tener su propia vista y controller**
+   - Cada juego debe manejar su propia interfaz
+   - No usar vistas genéricas compartidas
+
+2. ✅ **Implementar la ruta `{slug}.game`**
+   - Esta ruta carga la vista principal del juego
+   - `RoomController::show()` redirige automáticamente a esta ruta
+
+3. ✅ **Controller en la carpeta del juego**
+   - Ubicación: `games/{slug}/{GameName}Controller.php`
+   - Namespace: `Games\{GameName}`
+
+4. ✅ **Usar campos correctos de GameMatch**
+   - ❌ NO existe campo `status` en la tabla `matches`
+   - ✅ Usar `started_at` y `finished_at` para verificar estado
+
+5. ✅ **Pasar los tests de convención**
+   - Ejecutar: `php artisan test tests/Unit/ConventionTests/GameConventionsTest.php`
+
 ## 📁 Estructura de Carpetas para Juegos
 
 Cada juego debe seguir esta estructura estándar:
@@ -35,13 +58,46 @@ resources/
     └── app.js                     # Importa los módulos del juego
 ```
 
-### Importación en app.js
+### ❌ NO importar en app.js
+
+**IMPORTANTE**: El JavaScript de cada juego NO se debe importar en `app.js`. Cada juego carga su propio JavaScript solo cuando se accede a su vista.
 
 ```javascript
 // resources/js/app.js
-import './pictionary-canvas.js';
-import './trivia-game.js';
-// etc...
+// ❌ NO HACER ESTO:
+// import './pictionary-canvas.js';
+// import './trivia-game.js';
+
+// ✅ Los juegos cargan su JS en sus propias vistas
+```
+
+### ✅ Configurar en vite.config.js
+
+```javascript
+// vite.config.js
+export default defineConfig({
+    plugins: [
+        laravel({
+            input: [
+                'resources/css/app.css',
+                'resources/js/app.js',
+                // Entry points para cada juego
+                'resources/js/pictionary-canvas.js',
+                'resources/js/trivia-game.js',
+            ],
+            refresh: true,
+        }),
+    ],
+});
+```
+
+### ✅ Cargar en la vista del juego
+
+```blade
+{{-- games/{slug}/views/game.blade.php --}}
+@push('scripts')
+    @vite(['resources/js/{slug}-game.js'])
+@endpush
 ```
 
 ## 🎨 CSS/Estilos
@@ -143,18 +199,38 @@ Route::prefix('{slug}')->name('{slug}.')->group(function () {
 
 **Ubicación:** `games/{slug}/views/`
 
-**Registro:** Las vistas deben registrarse en el `GameServiceProvider`:
+**Registro:** Las vistas se registran automáticamente en el `GameServiceProvider`
 
+**Convención Importante:**
+- ✅ **TODOS los juegos DEBEN tener su propia vista**
+- ✅ Cada juego debe tener una ruta `{slug}.game` que cargue su vista
+- ✅ La vista principal del juego debe llamarse `game.blade.php`
+- ✅ El `RoomController::show()` redirige automáticamente a la ruta del juego
+
+**Ejemplo de ruta web requerida:**
 ```php
-// app/Providers/GameServiceProvider.php
-public function boot(): void
+// games/{slug}/routes.php
+Route::prefix('{slug}')->name('{slug}.')->group(function () {
+    Route::get('/{roomCode}', [{GameName}Controller::class, 'game'])->name('game');
+});
+```
+
+**Ejemplo de controller:**
+```php
+// games/{slug}/{GameName}Controller.php
+public function game(string $roomCode)
 {
-    $this->loadViewsFrom(__DIR__.'/../../games/pictionary/views', 'pictionary');
-    $this->loadViewsFrom(__DIR__.'/../../games/trivia/views', 'trivia');
+    $room = Room::where('code', $roomCode)->firstOrFail();
+    $match = GameMatch::where('room_id', $room->id)
+        ->whereNotNull('started_at')
+        ->whereNull('finished_at')
+        ->first();
+
+    return view('{slug}::game', compact('room', 'match'));
 }
 ```
 
-**Uso:** `@extends('pictionary::canvas')`
+**Uso en vistas:** `@extends('pictionary::canvas')` o `view('trivia::game')`
 
 ## 🎯 Resumen de Ubicaciones
 

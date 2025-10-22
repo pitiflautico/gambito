@@ -13,6 +13,55 @@ use Illuminate\Http\Request;
 class PictionaryController extends Controller
 {
     /**
+     * Mostrar la vista del juego de Pictionary.
+     */
+    public function game(string $roomCode)
+    {
+        $room = Room::where('code', $roomCode)->firstOrFail();
+
+        // Verificar que el juego sea Pictionary
+        if ($room->game->slug !== 'pictionary') {
+            abort(404, 'Esta sala no es de Pictionary');
+        }
+
+        // Obtener el match actual
+        $match = GameMatch::where('room_id', $room->id)
+            ->whereNotNull('started_at')
+            ->whereNull('finished_at')
+            ->first();
+
+        if (!$match) {
+            abort(404, 'No hay una partida en progreso');
+        }
+
+        // Obtener el jugador actual (guest o autenticado)
+        $player = null;
+        $playerId = null;
+
+        if (\Auth::check()) {
+            $player = $match->players()->where('user_id', \Auth::id())->first();
+        } elseif (session()->has('guest_session_id')) {
+            $guestSessionId = session('guest_session_id');
+            $player = $match->players()->where('session_id', $guestSessionId)->first();
+        }
+
+        if (!$player) {
+            return redirect()->route('rooms.lobby', ['code' => $roomCode])
+                ->with('error', 'Debes unirte a la partida primero');
+        }
+
+        $playerId = $player->id;
+
+        // Obtener el rol del jugador desde el motor del juego
+        $gameState = $match->game_state ?? [];
+        $currentDrawerId = $gameState['current_drawer_id'] ?? null;
+        $role = ($player->id === $currentDrawerId) ? 'drawer' : 'guesser';
+
+        // Retornar la vista usando el namespace del juego
+        return view('games.pictionary.canvas', compact('room', 'match', 'playerId', 'role'));
+    }
+
+    /**
      * Mostrar demo del canvas (solo para desarrollo)
      */
     public function demo(Request $request)

@@ -25,15 +25,16 @@ class TriviaController extends Controller
 
         // Obtener el match actual
         $match = GameMatch::where('room_id', $room->id)
-            ->where('status', 'in_progress')
+            ->whereNotNull('started_at')
+            ->whereNull('finished_at')
             ->first();
 
         if (!$match) {
             abort(404, 'No hay una partida en progreso');
         }
 
-        // Obtener jugadores
-        $players = $room->players->map(function ($player) {
+        // Obtener jugadores del match
+        $players = $match->players->map(function ($player) {
             return [
                 'id' => $player->id,
                 'name' => $player->name,
@@ -67,7 +68,8 @@ class TriviaController extends Controller
             $room = Room::where('code', $validated['room_code'])->firstOrFail();
             $player = Player::findOrFail($validated['player_id']);
             $match = GameMatch::where('room_id', $room->id)
-                ->where('status', 'in_progress')
+                ->whereNotNull('started_at')
+                ->whereNull('finished_at')
                 ->firstOrFail();
 
             // Verificar que el jugador pertenezca a la sala
