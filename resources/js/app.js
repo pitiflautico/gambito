@@ -8,5 +8,6 @@ window.Alpine = Alpine;
 
 Alpine.start();
 
-// Importar canvas de Pictionary si estamos en esa página
+// Importar módulos de juegos
 import './pictionary-canvas.js';
+import './trivia-game.js';

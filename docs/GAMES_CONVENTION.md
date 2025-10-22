@@ -8,6 +8,7 @@ Cada juego debe seguir esta estructura estándar:
 games/
 └── {game-slug}/                    # Slug del juego (ej: pictionary, trivia, uno)
     ├── {GameName}Engine.php       # Motor del juego (ej: PictionaryEngine.php)
+    ├── {GameName}Controller.php   # Controlador del juego (ej: TriviaController.php)
     ├── capabilities.json          # Módulos que requiere el juego
     ├── config.php                 # Configuración específica del juego
     ├── routes.php                 # Rutas API y Web del juego (auto-cargadas)
@@ -16,7 +17,7 @@ games/
     │   ├── GameStateUpdatedEvent.php
     │   └── ...
     └── views/                     # Vistas Blade del juego
-        ├── canvas.blade.php
+        ├── game.blade.php
         └── ...
 ```
 
@@ -72,6 +73,41 @@ Y se cargan directamente en las vistas Blade:
 **Ejemplo:** `Games\Pictionary\PictionaryEngine`
 
 **Debe implementar:** `App\Contracts\GameEngineInterface`
+
+## 🎮 Controlador del Juego (Controller)
+
+**Ubicación:** `games/{slug}/{GameName}Controller.php`
+
+**Namespace:** `Games\{GameName}\`
+
+**Ejemplo:** `Games\Trivia\TriviaController`
+
+**Debe extender:** `App\Http\Controllers\Controller`
+
+**Propósito:** Manejar peticiones HTTP (vistas y API) del juego
+
+**Ejemplo:**
+```php
+<?php
+
+namespace Games\Trivia;
+
+use App\Http\Controllers\Controller;
+use Illuminate\Http\Request;
+
+class TriviaController extends Controller
+{
+    public function game(string $roomCode)
+    {
+        // Mostrar vista del juego
+    }
+
+    public function answer(Request $request)
+    {
+        // Procesar acción vía API
+    }
+}
+```
 
 ## 🛣️ Rutas del Juego (Routes)
 

@@ -1,7 +1,8 @@
 <?php
 
-namespace App\Http\Controllers;
+namespace Games\Pictionary;
 
+use App\Http\Controllers\Controller;
 use App\Models\GameMatch;
 use App\Models\Room;
 use Games\Pictionary\Events\CanvasDrawEvent;

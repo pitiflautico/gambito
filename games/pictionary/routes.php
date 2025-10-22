@@ -1,6 +1,6 @@
 <?php
 
-use App\Http\Controllers\PictionaryController;
+use Games\Pictionary\PictionaryController;
 use Illuminate\Support\Facades\Route;
 
 /*

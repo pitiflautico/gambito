@@ -112,7 +112,38 @@ class GameConventionsTest extends TestCase
     }
 
     /**
-     * TEST 3: config.json debe tener los campos requeridos
+     * TEST 3: Cada juego debe tener un Controller válido
+     */
+    public function test_games_have_valid_controller(): void
+    {
+        foreach ($this->games as $game) {
+            $slug = $game['slug'];
+            $className = str_replace('-', '', ucwords($slug, '-'));
+            $controllerClass = "Games\\{$className}\\{$className}Controller";
+            $controllerFile = "{$game['path']}/{$className}Controller.php";
+
+            // Verificar que existe el archivo
+            $this->assertFileExists(
+                $controllerFile,
+                "El juego '{$slug}' debe tener un archivo Controller: {$className}Controller.php"
+            );
+
+            // Verificar que la clase existe
+            $this->assertTrue(
+                class_exists($controllerClass),
+                "La clase Controller '{$controllerClass}' debe existir para el juego '{$slug}'"
+            );
+
+            // Verificar que extiende Controller
+            $this->assertTrue(
+                is_subclass_of($controllerClass, \App\Http\Controllers\Controller::class),
+                "La clase Controller '{$controllerClass}' debe extender App\\Http\\Controllers\\Controller"
+            );
+        }
+    }
+
+    /**
+     * TEST 4: config.json debe tener los campos requeridos
      */
     public function test_config_json_has_required_fields(): void
     {
