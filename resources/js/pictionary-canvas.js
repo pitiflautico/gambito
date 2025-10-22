@@ -1319,6 +1319,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Configurar rol inicial si está disponible en gameData
     if (window.gameData?.role) {
         const isDrawer = window.gameData.role === 'drawer';
-        window.pictionaryCanvas.setRole(isDrawer, isDrawer ? 'PALABRA_DEMO' : null);
+        const currentWord = window.gameData?.currentWord || null;
+        window.pictionaryCanvas.setRole(isDrawer, isDrawer ? currentWord : null);
     }
 });

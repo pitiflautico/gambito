@@ -18,7 +18,7 @@ class RoundEndedEvent implements ShouldBroadcast
     public string $roomCode;
     public int $round;
     public string $word;
-    public int $winnerId;
+    public ?int $winnerId; // Nullable cuando no hay ganador
     public string $winnerName;
     public int $guesserPoints;
     public int $drawerPoints;
@@ -31,7 +31,7 @@ class RoundEndedEvent implements ShouldBroadcast
         string $roomCode,
         int $round,
         string $word,
-        int $winnerId,
+        ?int $winnerId, // Nullable cuando no hay ganador
         string $winnerName,
         int $guesserPoints,
         int $drawerPoints,

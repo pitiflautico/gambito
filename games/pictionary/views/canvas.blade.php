@@ -223,6 +223,9 @@
             @if(isset($role))
             role: '{{ $role }}',
             @endif
+            @if(isset($match->game_state['current_word']))
+            currentWord: '{{ $match->game_state['current_word'] }}',
+            @endif
             @if(isset($match->game_state['phase']))
             phase: '{{ $match->game_state['phase'] }}',
             @endif

@@ -55,30 +55,20 @@ class PictionaryGameFlowTest extends TestCase
     /**
      * Helper para crear 3 jugadores en un match
      */
-    protected function createPlayersForMatch(GameMatch $match): array
+    protected function createPlayersForMatch(GameMatch $match, int $count = 3): array
     {
-        $player1 = Player::create([
-            'match_id' => $match->id,
-            'name' => 'Player 1',
-            'session_id' => 'session-1',
-            'is_connected' => true,
-        ]);
+        $players = [];
 
-        $player2 = Player::create([
-            'match_id' => $match->id,
-            'name' => 'Player 2',
-            'session_id' => 'session-2',
-            'is_connected' => true,
-        ]);
+        for ($i = 1; $i <= $count; $i++) {
+            $players[] = Player::create([
+                'match_id' => $match->id,
+                'name' => "Player $i",
+                'session_id' => "session-$i",
+                'is_connected' => true,
+            ]);
+        }
 
-        $player3 = Player::create([
-            'match_id' => $match->id,
-            'name' => 'Player 3',
-            'session_id' => 'session-3',
-            'is_connected' => true,
-        ]);
-
-        return [$player1, $player2, $player3];
+        return $players;
     }
 
     /** @test */
@@ -190,13 +180,13 @@ class PictionaryGameFlowTest extends TestCase
 
         // Verificar estado inicial
         $this->assertEquals('playing', $gameState['phase']);
-        $this->assertEquals(1, $gameState['current_round']); // Desde TurnManager
-        $this->assertEquals(3, $gameState['total_rounds']); // Desde TurnManager: 3 jugadores = 3 rondas (modo auto)
-        $this->assertEquals(0, $gameState['current_turn_index']); // Desde TurnManager
+        $this->assertEquals(1, $gameState['current_round']); // Desde RoundManager
+        $this->assertEquals(3, $gameState['total_rounds']); // Desde RoundManager: 3 jugadores = 3 rondas (modo auto)
+        $this->assertEquals(0, $gameState['turn_system']['current_turn_index']); // Anidado en turn_system
         $this->assertNotNull($gameState['current_drawer_id']);
         $this->assertNotNull($gameState['current_word']);
-        $this->assertIsArray($gameState['turn_order']);
-        $this->assertCount(3, $gameState['turn_order']);
+        $this->assertIsArray($gameState['turn_system']['turn_order']); // Anidado en turn_system
+        $this->assertCount(3, $gameState['turn_system']['turn_order']);
         $this->assertArrayHasKey('scores', $gameState);
         $this->assertEquals(0, $gameState['scores'][$player1->id]);
         $this->assertEquals(0, $gameState['scores'][$player2->id]);
@@ -295,7 +285,7 @@ class PictionaryGameFlowTest extends TestCase
         $this->assertEquals("{$guesser->name} falló. El juego continúa.", $response['message']);
 
         $match->refresh();
-        $this->assertContains($guesser->id, $match->game_state['eliminated_this_round']);
+        $this->assertContains($guesser->id, $match->game_state['temporarily_eliminated']); // Actualizado de eliminated_this_round
     }
 
     /** @test */
@@ -346,7 +336,7 @@ class PictionaryGameFlowTest extends TestCase
         // Cuando avanza, va a ronda 4, que excede total_rounds (3)
         $gameState = $match->game_state;
         $gameState['current_round'] = 3; // Última ronda (3 jugadores = 3 rondas)
-        $gameState['current_turn_index'] = 2; // Último turno (0-based)
+        $gameState['turn_system']['current_turn_index'] = 2; // Último turno (0-based, anidado en turn_system)
         $gameState['phase'] = 'scoring';
         $gameState['scores'][$player1->id] = 500;
         $gameState['scores'][$player2->id] = 300;
@@ -366,5 +356,108 @@ class PictionaryGameFlowTest extends TestCase
         $this->assertNotEmpty($scores);
         $maxScore = max($scores);
         $this->assertEquals(500, $maxScore); // El jugador con más puntos
+    }
+
+    /** @test */
+    public function test_round_ends_when_all_guessers_fail()
+    {
+        // Crear match con 3 jugadores (1 drawer + 2 guessers)
+        $match = GameMatch::create([
+            'room_id' => $this->room->id,
+            'game_state' => [],
+        ]);
+
+        [$drawer, $guesser1, $guesser2] = $this->createPlayersForMatch($match, 3);
+        $this->engine->initialize($match);
+        $match->refresh();
+
+        // Verificar scores iniciales
+        $this->assertEquals(0, $match->game_state['scores'][$drawer->id]);
+        $this->assertEquals(0, $match->game_state['scores'][$guesser1->id]);
+        $this->assertEquals(0, $match->game_state['scores'][$guesser2->id]);
+
+        // Simular que guesser1 presiona "YO SÉ" y falla
+        $response = $this->engine->processAction($match, $guesser1, 'answer', []);
+        $this->assertTrue($response['success']);
+
+        $response = $this->engine->processAction($match, $drawer, 'confirm_answer', [
+            'is_correct' => false,
+        ]);
+        $this->assertTrue($response['success']);
+        $this->assertTrue($response['round_continues']); // Aún queda guesser2
+
+        // Simular que guesser2 presiona "YO SÉ" y falla (último guesser)
+        $response = $this->engine->processAction($match, $guesser2, 'answer', []);
+        $this->assertTrue($response['success']);
+
+        $response = $this->engine->processAction($match, $drawer, 'confirm_answer', [
+            'is_correct' => false,
+        ]);
+
+        // Verificar respuesta - AHORA la ronda debe terminar
+        $this->assertTrue($response['success']);
+        $this->assertFalse($response['correct']);
+        $this->assertTrue($response['round_ended']); // La ronda debe terminar
+        $this->assertTrue($response['all_eliminated']); // Todos eliminados
+        $this->assertEquals('Todos los jugadores fallaron. La ronda termina sin ganador.', $response['message']);
+        $this->assertEquals('scoring', $response['phase']);
+
+        // Verificar estado del match
+        $match->refresh();
+        $this->assertEquals('scoring', $match->game_state['phase']);
+        $this->assertFalse($match->game_state['game_is_paused']);
+        $this->assertNull($match->game_state['pending_answer']);
+
+        // Verificar que NO se otorgaron puntos
+        $this->assertEquals(0, $match->game_state['scores'][$drawer->id]);
+        $this->assertEquals(0, $match->game_state['scores'][$guesser1->id]);
+        $this->assertEquals(0, $match->game_state['scores'][$guesser2->id]);
+
+        // Verificar que ambos guessers fueron eliminados temporalmente
+        $this->assertContains($guesser1->id, $match->game_state['temporarily_eliminated']);
+        $this->assertContains($guesser2->id, $match->game_state['temporarily_eliminated']);
+    }
+
+    /** @test */
+    public function test_round_continues_when_some_guessers_remain()
+    {
+        // Crear match con 3 jugadores (1 drawer + 2 guessers)
+        $match = GameMatch::create([
+            'room_id' => $this->room->id,
+            'game_state' => [],
+        ]);
+
+        [$drawer, $guesser1, $guesser2] = $this->createPlayersForMatch($match, 3);
+        $this->engine->initialize($match);
+        $match->refresh();
+
+        // Simular que guesser1 presiona "YO SÉ"
+        $response = $this->engine->processAction($match, $guesser1, 'answer', []);
+        $this->assertTrue($response['success']);
+
+        // El drawer confirma que es INCORRECTA
+        $response = $this->engine->processAction($match, $drawer, 'confirm_answer', [
+            'is_correct' => false,
+        ]);
+
+        // Verificar respuesta
+        $this->assertTrue($response['success']);
+        $this->assertFalse($response['correct']);
+        $this->assertTrue($response['round_continues']); // La ronda debe CONTINUAR
+        $this->assertArrayNotHasKey('all_eliminated', $response); // No todos eliminados
+        $this->assertEquals("{$guesser1->name} falló. El juego continúa.", $response['message']);
+        $this->assertEquals(1, $response['active_guessers_remaining']); // Queda 1 guesser
+
+        // Verificar estado del match
+        $match->refresh();
+        $this->assertEquals('playing', $match->game_state['phase']); // Sigue jugando
+        $this->assertFalse($match->game_state['game_is_paused']);
+        $this->assertNull($match->game_state['pending_answer']);
+
+        // Verificar que guesser1 fue eliminado temporalmente
+        $this->assertContains($guesser1->id, $match->game_state['temporarily_eliminated']);
+
+        // Verificar que guesser2 NO está eliminado (puede seguir jugando)
+        $this->assertNotContains($guesser2->id, $match->game_state['temporarily_eliminated']);
     }
 }

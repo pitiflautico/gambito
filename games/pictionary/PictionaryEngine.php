@@ -797,19 +797,74 @@ class PictionaryEngine implements GameEngineInterface
                 'phase' => 'scoring'
             ];
         } else {
-            // ❌ RESPUESTA INCORRECTA: Eliminar jugador y continuar
+            // ❌ RESPUESTA INCORRECTA: Eliminar jugador y verificar si quedan jugadores activos
 
             // TURN SYSTEM MODULE: Eliminar jugador temporalmente
             $roundManager = RoundManager::fromArray($gameState);
+            $roleManager = RoleManager::fromArray($gameState);
+
             $roundManager->eliminatePlayer($guesserPlayerId, permanent: false);
 
             // Limpiar respuesta pendiente
             $gameState['pending_answer'] = null;
 
+            // Verificar cuántos jugadores activos quedan (excluyendo al drawer)
+            $drawerId = $roleManager->getPlayersWithRole('drawer')[0] ?? null;
+            $activePlayers = $roundManager->getActivePlayers();
+
+            // Filtrar el drawer de los jugadores activos (solo contar adivinos)
+            $activeGuessers = array_filter($activePlayers, fn($id) => $id !== $drawerId);
+
+            // Si NO quedan jugadores activos para adivinar → Terminar ronda sin ganador
+            if (count($activeGuessers) === 0) {
+                Log::info("All guessers eliminated - Round ended without winner", [
+                    'match_id' => $match->id,
+                    'last_guesser_id' => $guesserPlayerId,
+                    'last_guesser_name' => $guesserPlayerName,
+                ]);
+
+                // Cambiar a fase de scoring (fin de turno sin ganador)
+                $gameState['phase'] = 'scoring';
+                $gameState['game_is_paused'] = false;
+
+                // Actualizar game_state
+                $gameState = array_merge($gameState, $roundManager->toArray());
+                $match->game_state = $gameState;
+                $match->save();
+
+                // Obtener room code para el evento
+                $roomCode = $match->room->code ?? 'UNKNOWN';
+
+                // Broadcast fin de ronda sin ganador
+                event(new RoundEndedEvent(
+                    $roomCode,
+                    $roundManager->getCurrentRound(),
+                    $gameState['current_word'],
+                    null, // No hay ganador
+                    'Nadie',
+                    0, // Sin puntos
+                    0, // Sin puntos
+                    $gameState['scores']
+                ));
+
+                // Broadcast actualización de estado
+                event(new GameStateUpdatedEvent($match, 'round_ended_no_winner'));
+
+                return [
+                    'success' => true,
+                    'correct' => false,
+                    'round_ended' => true,
+                    'all_eliminated' => true,
+                    'message' => "Todos los jugadores fallaron. La ronda termina sin ganador.",
+                    'phase' => 'scoring'
+                ];
+            }
+
+            // Si SÍ quedan jugadores activos → Continuar el juego
             // REANUDAR el dibujo
             $gameState['game_is_paused'] = false;
 
-            // Actualizar game_state con turnManager modificado
+            // Actualizar game_state con roundManager modificado
             $gameState = array_merge($gameState, $roundManager->toArray());
             $match->game_state = $gameState;
             $match->save();
@@ -818,7 +873,8 @@ class PictionaryEngine implements GameEngineInterface
                 'match_id' => $match->id,
                 'guesser_id' => $guesserPlayerId,
                 'guesser_name' => $guesserPlayerName,
-                'eliminated_count' => count($roundManager->getTemporarilyEliminated())
+                'eliminated_count' => count($roundManager->getTemporarilyEliminated()),
+                'active_guessers_remaining' => count($activeGuessers)
             ]);
 
             // Obtener el Player model para el evento
@@ -835,6 +891,7 @@ class PictionaryEngine implements GameEngineInterface
                 'correct' => false,
                 'round_continues' => true,
                 'eliminated_player' => $guesserPlayerName,
+                'active_guessers_remaining' => count($activeGuessers),
                 'message' => "{$guesserPlayerName} falló. El juego continúa."
             ];
         }
@@ -981,18 +1038,18 @@ class PictionaryEngine implements GameEngineInterface
             $roomCode,
             $turnInfo['player_id'],
             $newDrawerName,
-            $turnInfo['round'],
+            $gameState['current_round'], // Desde RoundManager, no desde turnInfo
             $turnInfo['turn_index'],
             $gameState['scores']
         ));
 
         Log::info("Advanced to next turn", [
             'match_id' => $match->id,
-            'round' => $turnInfo['round'],
+            'round' => $gameState['current_round'], // Desde RoundManager
             'turn_index' => $turnInfo['turn_index'],
             'drawer_id' => $turnInfo['player_id'],
             'word' => $newWord,
-            'round_completed' => $turnInfo['round_completed']
+            'cycle_completed' => $turnInfo['cycle_completed'] // Actualizado de round_completed
         ]);
     }
 
