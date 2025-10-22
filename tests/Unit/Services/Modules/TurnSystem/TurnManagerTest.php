@@ -485,4 +485,183 @@ class TurnManagerTest extends TestCase
         // Debería ajustar al siguiente jugador disponible
         $this->assertContains($turnManager->getCurrentPlayer(), [1, 3]);
     }
+
+    // ========================================================================
+    // Tests de Tracking de Completions (para equipos)
+    // ========================================================================
+
+    public function test_can_mark_player_completed()
+    {
+        $turnManager = new TurnManager([1, 2, 3], 'sequential');
+
+        $turnManager->markPlayerCompleted(1);
+
+        $this->assertTrue($turnManager->hasPlayerCompleted(1));
+        $this->assertFalse($turnManager->hasPlayerCompleted(2));
+        $this->assertFalse($turnManager->hasPlayerCompleted(3));
+    }
+
+    public function test_can_mark_multiple_players_completed()
+    {
+        $turnManager = new TurnManager([1, 2, 3], 'sequential');
+
+        $turnManager->markPlayerCompleted(1);
+        $turnManager->markPlayerCompleted(3);
+
+        $this->assertTrue($turnManager->hasPlayerCompleted(1));
+        $this->assertFalse($turnManager->hasPlayerCompleted(2));
+        $this->assertTrue($turnManager->hasPlayerCompleted(3));
+    }
+
+    public function test_get_completed_players_returns_correct_list()
+    {
+        $turnManager = new TurnManager([1, 2, 3, 4], 'sequential');
+
+        $turnManager->markPlayerCompleted(1);
+        $turnManager->markPlayerCompleted(3);
+        $turnManager->markPlayerCompleted(4);
+
+        $completed = $turnManager->getCompletedPlayers();
+
+        $this->assertCount(3, $completed);
+        $this->assertContains(1, $completed);
+        $this->assertContains(3, $completed);
+        $this->assertContains(4, $completed);
+        $this->assertNotContains(2, $completed);
+    }
+
+    public function test_clear_completions_removes_all_completions()
+    {
+        $turnManager = new TurnManager([1, 2, 3], 'sequential');
+
+        $turnManager->markPlayerCompleted(1);
+        $turnManager->markPlayerCompleted(2);
+
+        $this->assertCount(2, $turnManager->getCompletedPlayers());
+
+        $turnManager->clearCompletions();
+
+        $this->assertCount(0, $turnManager->getCompletedPlayers());
+        $this->assertFalse($turnManager->hasPlayerCompleted(1));
+        $this->assertFalse($turnManager->hasPlayerCompleted(2));
+    }
+
+    public function test_next_turn_clears_completions_automatically()
+    {
+        $turnManager = new TurnManager([1, 2, 3], 'sequential');
+
+        $turnManager->markPlayerCompleted(1);
+        $this->assertCount(1, $turnManager->getCompletedPlayers());
+
+        // Avanzar turno debería limpiar completions
+        $turnManager->nextTurn();
+
+        $this->assertCount(0, $turnManager->getCompletedPlayers());
+        $this->assertFalse($turnManager->hasPlayerCompleted(1));
+    }
+
+    public function test_is_turn_complete_returns_true_for_individual_mode()
+    {
+        $turnManager = new TurnManager([1, 2, 3], 'sequential');
+
+        // Sin equipos, el turno siempre está completo
+        $status = $turnManager->isTurnComplete();
+
+        $this->assertTrue($status['is_complete']);
+        $this->assertEquals('individual_turn', $status['reason']);
+        $this->assertEquals(1, $status['completed_count']);
+        $this->assertEquals(1, $status['total_count']);
+    }
+
+    public function test_can_advance_turn_returns_true_when_not_paused()
+    {
+        $turnManager = new TurnManager([1, 2, 3], 'sequential');
+
+        $status = $turnManager->canAdvanceTurn();
+
+        $this->assertTrue($status['can_advance']);
+        $this->assertEquals('turn_complete', $status['reason']);
+    }
+
+    public function test_can_advance_turn_returns_false_when_paused()
+    {
+        $turnManager = new TurnManager([1, 2, 3], 'sequential');
+
+        $turnManager->pause();
+
+        $status = $turnManager->canAdvanceTurn();
+
+        $this->assertFalse($status['can_advance']);
+        $this->assertEquals('paused', $status['reason']);
+    }
+
+    public function test_set_require_all_team_members_changes_setting()
+    {
+        $turnManager = new TurnManager([1, 2, 3], 'sequential');
+
+        // Verificar que inicia en false
+        $state = $turnManager->toArray();
+        $this->assertFalse($state['require_all_team_members']);
+
+        $turnManager->setRequireAllTeamMembers(true);
+
+        $state = $turnManager->toArray();
+        $this->assertTrue($state['require_all_team_members']);
+    }
+
+    // ========================================================================
+    // Tests de Serialización con Nuevos Campos
+    // ========================================================================
+
+    public function test_to_array_includes_turn_completions()
+    {
+        $turnManager = new TurnManager([1, 2, 3], 'sequential');
+
+        $turnManager->markPlayerCompleted(1);
+        $turnManager->markPlayerCompleted(2);
+
+        $state = $turnManager->toArray();
+
+        $this->assertArrayHasKey('turn_completions', $state);
+        $this->assertArrayHasKey('require_all_team_members', $state);
+        $this->assertCount(2, $state['turn_completions']);
+    }
+
+    public function test_from_array_restores_turn_completions()
+    {
+        $state = [
+            'turn_order' => [1, 2, 3],
+            'current_turn_index' => 0,
+            'mode' => 'sequential',
+            'is_paused' => false,
+            'direction' => 1,
+            'turn_completions' => [1 => true, 3 => true],
+            'require_all_team_members' => true,
+        ];
+
+        $turnManager = TurnManager::fromArray($state);
+
+        $this->assertTrue($turnManager->hasPlayerCompleted(1));
+        $this->assertFalse($turnManager->hasPlayerCompleted(2));
+        $this->assertTrue($turnManager->hasPlayerCompleted(3));
+        $this->assertEquals(true, $turnManager->toArray()['require_all_team_members']);
+    }
+
+    public function test_serialization_with_completions_preserves_state()
+    {
+        $original = new TurnManager([1, 2, 3, 4], 'sequential');
+
+        $original->markPlayerCompleted(1);
+        $original->markPlayerCompleted(3);
+        $original->setRequireAllTeamMembers(true);
+
+        $state = $original->toArray();
+        $restored = TurnManager::fromArray($state);
+
+        $this->assertEquals($original->getCompletedPlayers(), $restored->getCompletedPlayers());
+        $this->assertEquals(
+            $original->toArray()['require_all_team_members'],
+            $restored->toArray()['require_all_team_members']
+        );
+    }
 }

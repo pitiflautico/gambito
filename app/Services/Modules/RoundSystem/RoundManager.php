@@ -3,6 +3,7 @@
 namespace App\Services\Modules\RoundSystem;
 
 use App\Services\Modules\TurnSystem\TurnManager;
+use App\Services\Modules\TeamsSystem\TeamsManager;
 
 /**
  * Servicio genérico para gestionar rondas en juegos.
@@ -54,6 +55,11 @@ class RoundManager
      * TurnManager interno para gestionar turnos.
      */
     protected TurnManager $turnManager;
+
+    /**
+     * TeamsManager opcional para juegos por equipos.
+     */
+    protected ?TeamsManager $teamsManager = null;
 
     /**
      * Si se acaba de completar una ronda.
@@ -478,10 +484,34 @@ class RoundManager
      * - Si todos fallan → terminar ronda
      * - Si algunos fallan pero no todos respondieron → continuar
      *
+     * SOPORTE DE EQUIPOS:
+     * - Si NO hay equipos: comportamiento normal (jugadores individuales)
+     * - Si hay equipos: depende del modo de equipos
+     *
      * @param array $playerResults Array de resultados: [player_id => ['success' => bool]]
      * @return array ['should_end' => bool, 'reason' => string]
      */
     public function shouldEndSimultaneousRound(array $playerResults): array
+    {
+        // Sin equipos: comportamiento normal
+        if (!$this->teamsManager || !$this->teamsManager->isEnabled()) {
+            return $this->shouldEndSimultaneousRoundIndividual($playerResults);
+        }
+
+        // Con equipos: según el modo
+        $mode = $this->teamsManager->getMode();
+
+        return match ($mode) {
+            'all_teams' => $this->shouldEndSimultaneousRoundAllTeams($playerResults),
+            'team_turns' => $this->shouldEndSimultaneousRoundTeamTurns($playerResults),
+            default => $this->shouldEndSimultaneousRoundIndividual($playerResults)
+        };
+    }
+
+    /**
+     * Verificar fin de ronda en modo individual (sin equipos)
+     */
+    protected function shouldEndSimultaneousRoundIndividual(array $playerResults): array
     {
         $activePlayers = $this->getActivePlayers();
         $totalActivePlayers = count($activePlayers);
@@ -514,5 +544,156 @@ class RoundManager
             'reason' => 'waiting_for_players',
             'winner_found' => false,
         ];
+    }
+
+    /**
+     * Verificar fin de ronda en modo "all_teams" (todos los equipos juegan simultáneamente)
+     *
+     * Ejemplo: Trivia por equipos - todos responden cada pregunta
+     * Termina cuando:
+     * - Un equipo completo respondió correctamente (todos sus miembros)
+     * - O todos los equipos completaron sus respuestas
+     */
+    protected function shouldEndSimultaneousRoundAllTeams(array $playerResults): array
+    {
+        $teams = $this->teamsManager->getTeams();
+
+        // Verificar por cada equipo
+        foreach ($teams as $team) {
+            $teamMembers = $team['members'];
+            $teamResponses = array_filter(
+                $playerResults,
+                fn($playerId) => in_array($playerId, $teamMembers),
+                ARRAY_FILTER_USE_KEY
+            );
+
+            // ¿Todos los miembros del equipo respondieron?
+            if (count($teamResponses) === count($teamMembers)) {
+                // ¿Alguno tuvo éxito?
+                foreach ($teamResponses as $result) {
+                    if ($result['success'] ?? false) {
+                        return [
+                            'should_end' => true,
+                            'reason' => 'team_succeeded',
+                            'winner_found' => true,
+                            'winning_team_id' => $team['id']
+                        ];
+                    }
+                }
+            }
+        }
+
+        // Verificar si todos los equipos ya respondieron
+        $allTeamsResponded = true;
+        foreach ($teams as $team) {
+            $teamMembers = $team['members'];
+            $teamResponses = array_filter(
+                $playerResults,
+                fn($playerId) => in_array($playerId, $teamMembers),
+                ARRAY_FILTER_USE_KEY
+            );
+
+            if (count($teamResponses) < count($teamMembers)) {
+                $allTeamsResponded = false;
+                break;
+            }
+        }
+
+        if ($allTeamsResponded) {
+            return [
+                'should_end' => true,
+                'reason' => 'all_teams_failed',
+                'winner_found' => false,
+            ];
+        }
+
+        return [
+            'should_end' => false,
+            'reason' => 'waiting_for_teams',
+            'winner_found' => false,
+        ];
+    }
+
+    /**
+     * Verificar fin de ronda en modo "team_turns" (turnos por equipo)
+     *
+     * Ejemplo: Pictionary por equipos - un equipo juega su turno completo
+     * Termina cuando:
+     * - Todos los miembros del equipo actual han respondido
+     */
+    protected function shouldEndSimultaneousRoundTeamTurns(array $playerResults): array
+    {
+        $currentTeam = $this->teamsManager->getCurrentTeam();
+
+        if (!$currentTeam) {
+            return [
+                'should_end' => false,
+                'reason' => 'no_current_team',
+                'winner_found' => false,
+            ];
+        }
+
+        $teamMembers = $currentTeam['members'];
+        $teamResponses = array_filter(
+            $playerResults,
+            fn($playerId) => in_array($playerId, $teamMembers),
+            ARRAY_FILTER_USE_KEY
+        );
+
+        // Verificar si alguien del equipo tuvo éxito
+        foreach ($teamResponses as $result) {
+            if ($result['success'] ?? false) {
+                return [
+                    'should_end' => true,
+                    'reason' => 'team_member_succeeded',
+                    'winner_found' => true,
+                    'team_id' => $currentTeam['id']
+                ];
+            }
+        }
+
+        // Verificar si todos los miembros del equipo ya respondieron
+        if (count($teamResponses) >= count($teamMembers)) {
+            return [
+                'should_end' => true,
+                'reason' => 'team_all_failed',
+                'winner_found' => false,
+                'team_id' => $currentTeam['id']
+            ];
+        }
+
+        return [
+            'should_end' => false,
+            'reason' => 'waiting_for_team_members',
+            'winner_found' => false,
+        ];
+    }
+
+    // ========================================================================
+    // INTEGRACIÓN CON EQUIPOS
+    // ========================================================================
+
+    /**
+     * Establecer el TeamsManager para juegos por equipos
+     */
+    public function setTeamsManager(?TeamsManager $teamsManager): void
+    {
+        $this->teamsManager = $teamsManager;
+    }
+
+    /**
+     * Obtener el TeamsManager
+     */
+    public function getTeamsManager(): ?TeamsManager
+    {
+        return $this->teamsManager;
+    }
+
+    /**
+     * Verificar si el juego se está jugando por equipos
+     */
+    public function isTeamsMode(): bool
+    {
+        return $this->teamsManager && $this->teamsManager->isEnabled();
     }
 }

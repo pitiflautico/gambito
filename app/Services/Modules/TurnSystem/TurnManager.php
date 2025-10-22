@@ -2,6 +2,7 @@
 
 namespace App\Services\Modules\TurnSystem;
 
+use App\Services\Modules\TeamsSystem\TeamsManager;
 use Illuminate\Support\Collection;
 
 /**
@@ -49,6 +50,23 @@ class TurnManager
      * Dirección de los turnos: 1 = forward, -1 = backward (reversed).
      */
     protected int $direction = 1;
+
+    /**
+     * TeamsManager opcional para juegos por equipos.
+     */
+    protected ?TeamsManager $teamsManager = null;
+
+    /**
+     * Tracking de jugadores que completaron su acción en el turno actual.
+     * Formato: ['player_id' => true, ...]
+     */
+    protected array $turnCompletions = [];
+
+    /**
+     * Requiere que todos los miembros del equipo completen antes de avanzar.
+     * Solo aplica en modo team_turns.
+     */
+    protected bool $requireAllTeamMembers = false;
 
     /**
      * Constructor.
@@ -113,6 +131,9 @@ class TurnManager
         if ($this->isPaused) {
             return $this->getCurrentTurnInfo();
         }
+
+        // Limpiar completions del turno anterior
+        $this->turnCompletions = [];
 
         $this->cycleJustCompleted = false;
         $playerCount = count($this->turnOrder);
@@ -345,6 +366,8 @@ class TurnManager
             'mode' => $this->mode,
             'is_paused' => $this->isPaused,
             'direction' => $this->direction,
+            'turn_completions' => $this->turnCompletions,
+            'require_all_team_members' => $this->requireAllTeamMembers,
         ];
     }
 
@@ -361,7 +384,290 @@ class TurnManager
         $instance->currentTurnIndex = $state['current_turn_index'] ?? 0;
         $instance->isPaused = $state['is_paused'] ?? false;
         $instance->direction = $state['direction'] ?? 1;
+        $instance->turnCompletions = $state['turn_completions'] ?? [];
+        $instance->requireAllTeamMembers = $state['require_all_team_members'] ?? false;
 
         return $instance;
+    }
+
+    // ========================================================================
+    // INTEGRACIÓN CON EQUIPOS
+    // ========================================================================
+
+    /**
+     * Establecer el TeamsManager para juegos por equipos
+     */
+    public function setTeamsManager(?TeamsManager $teamsManager): void
+    {
+        $this->teamsManager = $teamsManager;
+    }
+
+    /**
+     * Obtener el TeamsManager
+     */
+    public function getTeamsManager(): ?TeamsManager
+    {
+        return $this->teamsManager;
+    }
+
+    /**
+     * Verificar si el juego se está jugando por equipos
+     */
+    public function isTeamsMode(): bool
+    {
+        return $this->teamsManager && $this->teamsManager->isEnabled();
+    }
+
+    /**
+     * Avanzar al siguiente turno considerando equipos
+     *
+     * En modo "team_turns":
+     * - Avanza al siguiente equipo en lugar de siguiente jugador
+     * - Actualiza el equipo actual en TeamsManager
+     *
+     * @return array Info del turno con datos del equipo si aplica
+     */
+    public function nextTeamTurn(): array
+    {
+        if (!$this->isTeamsMode()) {
+            return $this->nextTurn();
+        }
+
+        $mode = $this->teamsManager->getMode();
+
+        if ($mode === 'team_turns') {
+            // Avanzar al siguiente equipo
+            $nextTeam = $this->teamsManager->nextTeam();
+
+            return [
+                'player_id' => null, // En team_turns no hay un solo jugador actual
+                'team_id' => $nextTeam['id'] ?? null,
+                'team' => $nextTeam,
+                'turn_index' => $this->currentTurnIndex,
+                'cycle_completed' => $this->cycleJustCompleted,
+                'mode' => 'team_turns'
+            ];
+        }
+
+        // Para otros modos, usar comportamiento normal
+        return $this->nextTurn();
+    }
+
+    /**
+     * Obtener equipo del jugador actual
+     *
+     * @return array|null Datos del equipo o null
+     */
+    public function getCurrentPlayerTeam(): ?array
+    {
+        if (!$this->isTeamsMode()) {
+            return null;
+        }
+
+        $currentPlayerId = $this->getCurrentPlayer();
+        return $this->teamsManager->getPlayerTeam($currentPlayerId);
+    }
+
+    // ========================================================================
+    // TRACKING DE COMPLETIONS (Para equipos)
+    // ========================================================================
+
+    /**
+     * Marcar que un jugador completó su acción en el turno actual
+     *
+     * @param mixed $playerId ID del jugador
+     */
+    public function markPlayerCompleted(mixed $playerId): void
+    {
+        $this->turnCompletions[$playerId] = true;
+    }
+
+    /**
+     * Verificar si un jugador ya completó su acción en el turno actual
+     *
+     * @param mixed $playerId ID del jugador
+     * @return bool
+     */
+    public function hasPlayerCompleted(mixed $playerId): bool
+    {
+        return isset($this->turnCompletions[$playerId]);
+    }
+
+    /**
+     * Obtener lista de jugadores que completaron
+     *
+     * @return array IDs de jugadores
+     */
+    public function getCompletedPlayers(): array
+    {
+        return array_keys($this->turnCompletions);
+    }
+
+    /**
+     * Limpiar tracking de completions (útil al iniciar nuevo turno)
+     */
+    public function clearCompletions(): void
+    {
+        $this->turnCompletions = [];
+    }
+
+    /**
+     * Configurar si se requiere que todos los miembros del equipo completen
+     *
+     * @param bool $required
+     */
+    public function setRequireAllTeamMembers(bool $required): void
+    {
+        $this->requireAllTeamMembers = $required;
+    }
+
+    /**
+     * Verificar si el turno actual está completo (considerando equipos)
+     *
+     * Lógica según modo:
+     * - Sin equipos: Siempre true (turno individual)
+     * - team_turns + requireAllTeamMembers=false: true cuando 1+ miembro completa
+     * - team_turns + requireAllTeamMembers=true: true cuando TODOS los miembros completan
+     * - all_teams: true cuando todos los equipos tienen al menos 1 respuesta
+     *
+     * @return array ['is_complete' => bool, 'reason' => string, 'completed_count' => int, 'total_count' => int]
+     */
+    public function isTurnComplete(): array
+    {
+        // Sin equipos: turno siempre está completo (comportamiento clásico)
+        if (!$this->isTeamsMode()) {
+            return [
+                'is_complete' => true,
+                'reason' => 'individual_turn',
+                'completed_count' => 1,
+                'total_count' => 1
+            ];
+        }
+
+        $mode = $this->teamsManager->getMode();
+
+        // Modo team_turns: Verificar si el equipo actual completó
+        if ($mode === 'team_turns') {
+            return $this->isTurnCompleteTeamTurns();
+        }
+
+        // Modo all_teams: Verificar si todos los equipos tienen respuestas
+        if ($mode === 'all_teams') {
+            return $this->isTurnCompleteAllTeams();
+        }
+
+        // Otros modos: comportamiento individual
+        return [
+            'is_complete' => true,
+            'reason' => 'sequential_individual',
+            'completed_count' => count($this->turnCompletions),
+            'total_count' => 1
+        ];
+    }
+
+    /**
+     * Verificar si el turno está completo en modo team_turns
+     */
+    protected function isTurnCompleteTeamTurns(): array
+    {
+        $currentTeam = $this->teamsManager->getCurrentTeam();
+
+        if (!$currentTeam) {
+            return [
+                'is_complete' => false,
+                'reason' => 'no_current_team',
+                'completed_count' => 0,
+                'total_count' => 0
+            ];
+        }
+
+        $teamMembers = $currentTeam['members'] ?? [];
+        $completedMembers = array_filter(
+            $teamMembers,
+            fn($memberId) => $this->hasPlayerCompleted($memberId)
+        );
+
+        $completedCount = count($completedMembers);
+        $totalCount = count($teamMembers);
+
+        // Si se requiere que todos completen
+        if ($this->requireAllTeamMembers) {
+            return [
+                'is_complete' => $completedCount === $totalCount,
+                'reason' => 'require_all_members',
+                'completed_count' => $completedCount,
+                'total_count' => $totalCount,
+                'team_id' => $currentTeam['id']
+            ];
+        }
+
+        // Si solo se requiere al menos uno
+        return [
+            'is_complete' => $completedCount > 0,
+            'reason' => 'at_least_one_member',
+            'completed_count' => $completedCount,
+            'total_count' => $totalCount,
+            'team_id' => $currentTeam['id']
+        ];
+    }
+
+    /**
+     * Verificar si el turno está completo en modo all_teams
+     */
+    protected function isTurnCompleteAllTeams(): array
+    {
+        $teams = $this->teamsManager->getTeams();
+        $teamsWithResponses = 0;
+
+        foreach ($teams as $team) {
+            $teamMembers = $team['members'] ?? [];
+            $hasAnyResponse = false;
+
+            foreach ($teamMembers as $memberId) {
+                if ($this->hasPlayerCompleted($memberId)) {
+                    $hasAnyResponse = true;
+                    break;
+                }
+            }
+
+            if ($hasAnyResponse) {
+                $teamsWithResponses++;
+            }
+        }
+
+        $totalTeams = count($teams);
+
+        return [
+            'is_complete' => $teamsWithResponses === $totalTeams,
+            'reason' => 'all_teams_responded',
+            'completed_count' => $teamsWithResponses,
+            'total_count' => $totalTeams
+        ];
+    }
+
+    /**
+     * Verificar si se puede avanzar al siguiente turno
+     *
+     * Combina isPaused + isTurnComplete para decidir si es válido llamar nextTurn()
+     *
+     * @return array ['can_advance' => bool, 'reason' => string, 'details' => array]
+     */
+    public function canAdvanceTurn(): array
+    {
+        if ($this->isPaused) {
+            return [
+                'can_advance' => false,
+                'reason' => 'paused',
+                'details' => []
+            ];
+        }
+
+        $turnStatus = $this->isTurnComplete();
+
+        return [
+            'can_advance' => $turnStatus['is_complete'],
+            'reason' => $turnStatus['is_complete'] ? 'turn_complete' : 'turn_incomplete',
+            'details' => $turnStatus
+        ];
     }
 }

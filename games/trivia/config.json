@@ -81,6 +81,16 @@
     "round_system": {
       "enabled": true,
       "total_rounds": 10
+    },
+    "teams_system": {
+      "enabled": false,
+      "allow_toggle": true,
+      "default_mode": "all_teams",
+      "available_modes": ["all_teams"],
+      "min_teams": 2,
+      "max_teams": 4,
+      "default_teams": 2,
+      "require_all_team_members": false
     }
   }
 }

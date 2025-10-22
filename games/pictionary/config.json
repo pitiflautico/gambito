@@ -79,5 +79,35 @@
     "mode": "sequential",
     "allowModeChange": false,
     "description": "Los turnos siempre son secuenciales para que todos dibujen la misma cantidad de veces"
+  },
+
+  "modules": {
+    "turn_system": {
+      "enabled": true,
+      "mode": "sequential"
+    },
+    "scoring_system": {
+      "enabled": true,
+      "track_history": true,
+      "allow_negative_scores": false
+    },
+    "timer_system": {
+      "enabled": true
+    },
+    "round_system": {
+      "enabled": true,
+      "total_rounds": "auto"
+    },
+    "teams_system": {
+      "enabled": false,
+      "allow_toggle": true,
+      "default_mode": "team_turns",
+      "available_modes": ["team_turns"],
+      "min_teams": 2,
+      "max_teams": 4,
+      "default_teams": 2,
+      "require_all_team_members": false,
+      "description": "En modo equipos, cada equipo tiene un turno completo donde uno dibuja y el resto del equipo adivina"
+    }
   }
 }

@@ -537,56 +537,279 @@ class RoundManager
 
 ### TurnManager
 
-**Cambios necesarios:**
+**⚠️ ACOPLAMIENTO CRÍTICO: TurnManager y TeamsManager**
+
+El `TurnManager` está **fuertemente acoplado** con `TeamsManager` porque los equipos cambian fundamentalmente **cuándo se considera completado un turno**:
+
+**Sin equipos**: Un turno = Una acción de un jugador
+**Con equipos**: Un turno puede requerir que múltiples jugadores del equipo completen antes de avanzar
+
+#### Nuevas Propiedades
 
 ```php
 class TurnManager
 {
     protected ?TeamsManager $teamsManager = null;
 
+    // Tracking de completions del turno actual
+    protected array $turnCompletions = [];
+
+    // ¿Se requiere que TODOS los miembros completen?
+    protected bool $requireAllTeamMembers = false;
+}
+```
+
+#### Métodos Clave de Tracking
+
+```php
+// Marcar que un jugador completó su acción
+$turnManager->markPlayerCompleted($playerId);
+
+// Verificar si ya completó
+$completed = $turnManager->hasPlayerCompleted($playerId);
+
+// Verificar si el turno está completo (lógica según modo de equipo)
+$status = $turnManager->isTurnComplete();
+// Retorna: ['is_complete' => bool, 'reason' => string, 'completed_count' => int, 'total_count' => int]
+
+// Verificar si se puede avanzar al siguiente turno
+$canAdvance = $turnManager->canAdvanceTurn();
+// Retorna: ['can_advance' => bool, 'reason' => string, 'details' => array]
+```
+
+#### Lógica de Completions según Modo
+
+**Modo `team_turns` + requireAllTeamMembers=false:**
+- Turno completo cuando **al menos 1 miembro** del equipo actual completó
+- Ejemplo: Pictionary - solo el dibujante dibuja
+
+**Modo `team_turns` + requireAllTeamMembers=true:**
+- Turno completo cuando **TODOS los miembros** del equipo actual completaron
+- Ejemplo: Trivia en equipo - todos deben responder
+
+**Modo `all_teams`:**
+- Turno completo cuando **todos los equipos tienen al menos 1 respuesta**
+- Ejemplo: Pregunta simultánea - cada equipo envía una respuesta
+
+#### Integración Completa
+
+```php
+class TurnManager
+{
+    protected ?TeamsManager $teamsManager = null;
+    protected array $turnCompletions = [];
+    protected bool $requireAllTeamMembers = false;
+
     public function setTeamsManager(?TeamsManager $teamsManager): void
     {
         $this->teamsManager = $teamsManager;
     }
 
-    public function nextTurn(GameMatch $match): array
+    public function setRequireAllTeamMembers(bool $required): void
     {
-        $gameState = $match->game_state;
+        $this->requireAllTeamMembers = $required;
+    }
 
-        if (!$this->teamsManager || !$this->teamsManager->isEnabled()) {
-            // Modo normal: jugador a jugador
-            return $this->nextPlayerTurn($gameState);
+    // Avanzar al siguiente turno (limpia completions)
+    public function nextTurn(): array
+    {
+        if ($this->isPaused) {
+            return $this->getCurrentTurnInfo();
+        }
+
+        // Limpiar completions del turno anterior
+        $this->turnCompletions = [];
+
+        $this->cycleJustCompleted = false;
+        $playerCount = count($this->turnOrder);
+
+        $this->currentTurnIndex += $this->direction;
+
+        if ($this->direction === 1) {
+            if ($this->currentTurnIndex >= $playerCount) {
+                $this->currentTurnIndex = 0;
+                $this->cycleJustCompleted = true;
+            }
+        } else {
+            if ($this->currentTurnIndex < 0) {
+                $this->currentTurnIndex = $playerCount - 1;
+                $this->cycleJustCompleted = true;
+            }
+        }
+
+        return $this->getCurrentTurnInfo();
+    }
+
+    // Verificar si el turno está completo (lógica específica por modo)
+    public function isTurnComplete(): array
+    {
+        if (!$this->isTeamsMode()) {
+            return [
+                'is_complete' => true,
+                'reason' => 'individual_turn',
+                'completed_count' => 1,
+                'total_count' => 1
+            ];
         }
 
         $mode = $this->teamsManager->getMode();
 
         if ($mode === 'team_turns') {
-            // Siguiente equipo completo
-            return $this->nextTeamTurn($gameState);
+            return $this->isTurnCompleteTeamTurns();
         }
 
-        if ($mode === 'sequential_within_team') {
-            // Siguiente jugador dentro del equipo, luego siguiente equipo
-            return $this->nextPlayerInTeamSequence($gameState);
+        if ($mode === 'all_teams') {
+            return $this->isTurnCompleteAllTeams();
         }
 
-        return $gameState;
+        return [
+            'is_complete' => true,
+            'reason' => 'sequential_individual',
+            'completed_count' => count($this->turnCompletions),
+            'total_count' => 1
+        ];
     }
 
-    protected function nextTeamTurn(array $gameState): array
+    protected function isTurnCompleteTeamTurns(): array
     {
-        $nextTeam = $this->teamsManager->nextTeam();
-        $gameState['teams_config']['current_team_id'] = $nextTeam->id;
-        return $gameState;
+        $currentTeam = $this->teamsManager->getCurrentTeam();
+
+        if (!$currentTeam) {
+            return [
+                'is_complete' => false,
+                'reason' => 'no_current_team',
+                'completed_count' => 0,
+                'total_count' => 0
+            ];
+        }
+
+        $teamMembers = $currentTeam['members'] ?? [];
+        $completedMembers = array_filter(
+            $teamMembers,
+            fn($memberId) => $this->hasPlayerCompleted($memberId)
+        );
+
+        $completedCount = count($completedMembers);
+        $totalCount = count($teamMembers);
+
+        if ($this->requireAllTeamMembers) {
+            return [
+                'is_complete' => $completedCount === $totalCount,
+                'reason' => 'require_all_members',
+                'completed_count' => $completedCount,
+                'total_count' => $totalCount,
+                'team_id' => $currentTeam['id']
+            ];
+        }
+
+        return [
+            'is_complete' => $completedCount > 0,
+            'reason' => 'at_least_one_member',
+            'completed_count' => $completedCount,
+            'total_count' => $totalCount,
+            'team_id' => $currentTeam['id']
+        ];
     }
 
-    protected function nextPlayerInTeamSequence(array $gameState): array
+    protected function isTurnCompleteAllTeams(): array
     {
-        // Lógica para rotar jugadores dentro del equipo
-        // y luego pasar al siguiente equipo
-        // ...
-        return $gameState;
+        $teams = $this->teamsManager->getTeams();
+        $teamsWithResponses = 0;
+
+        foreach ($teams as $team) {
+            $teamMembers = $team['members'] ?? [];
+            $hasAnyResponse = false;
+
+            foreach ($teamMembers as $memberId) {
+                if ($this->hasPlayerCompleted($memberId)) {
+                    $hasAnyResponse = true;
+                    break;
+                }
+            }
+
+            if ($hasAnyResponse) {
+                $teamsWithResponses++;
+            }
+        }
+
+        $totalTeams = count($teams);
+
+        return [
+            'is_complete' => $teamsWithResponses === $totalTeams,
+            'reason' => 'all_teams_responded',
+            'completed_count' => $teamsWithResponses,
+            'total_count' => $totalTeams
+        ];
     }
+
+    // Avanzar turno considerando equipos
+    public function nextTeamTurn(): array
+    {
+        if (!$this->isTeamsMode()) {
+            return $this->nextTurn();
+        }
+
+        $mode = $this->teamsManager->getMode();
+
+        if ($mode === 'team_turns') {
+            $nextTeam = $this->teamsManager->nextTeam();
+
+            return [
+                'player_id' => null,
+                'team_id' => $nextTeam['id'] ?? null,
+                'team' => $nextTeam,
+                'turn_index' => $this->currentTurnIndex,
+                'cycle_completed' => $this->cycleJustCompleted,
+                'mode' => 'team_turns'
+            ];
+        }
+
+        return $this->nextTurn();
+    }
+}
+```
+
+#### Ejemplo de Uso en Juegos
+
+**Pictionary (team_turns + requireAllTeamMembers=false):**
+```php
+// El dibujante completa su turno
+$turnManager->setRequireAllTeamMembers(false);
+$turnManager->markPlayerCompleted($drawerId);
+
+// Verificar si puede avanzar (debería ser true, solo se requiere el dibujante)
+$status = $turnManager->canAdvanceTurn();
+if ($status['can_advance']) {
+    $turnManager->nextTeamTurn();
+}
+```
+
+**Trivia en Equipos (team_turns + requireAllTeamMembers=true):**
+```php
+// Todos los miembros del equipo responden
+$turnManager->setRequireAllTeamMembers(true);
+
+foreach ($teamMembers as $memberId) {
+    $turnManager->markPlayerCompleted($memberId);
+}
+
+// Verificar si puede avanzar (true solo cuando todos completaron)
+$status = $turnManager->canAdvanceTurn();
+if ($status['can_advance']) {
+    $turnManager->nextTeamTurn();
+}
+```
+
+**Trivia Simultánea (all_teams):**
+```php
+// Cada equipo envía una respuesta (al menos un miembro)
+$turnManager->markPlayerCompleted($teamLeaderId1);
+$turnManager->markPlayerCompleted($teamLeaderId2);
+
+// Verificar si puede avanzar (true cuando todos los equipos tienen respuesta)
+$status = $turnManager->canAdvanceTurn();
+if ($status['can_advance']) {
+    $turnManager->nextTurn();
 }
 ```
 
