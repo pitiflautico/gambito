@@ -374,6 +374,26 @@ class RoundManager
         return $this->turnManager->isPaused();
     }
 
+    /**
+     * Obtener índice del turno actual.
+     *
+     * @return int
+     */
+    public function getCurrentTurnIndex(): int
+    {
+        return $this->turnManager->getCurrentTurnIndex();
+    }
+
+    /**
+     * Obtener cantidad de jugadores.
+     *
+     * @return int
+     */
+    public function getPlayerCount(): int
+    {
+        return $this->turnManager->getPlayerCount();
+    }
+
     // ========================================================================
     // SERIALIZACIÓN
     // ========================================================================
