@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\GameController;
 use App\Http\Controllers\RoomController;
+use App\Http\Controllers\TeamController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -25,4 +26,25 @@ Route::prefix('games')->name('api.games.')->group(function () {
 Route::prefix('rooms')->name('api.rooms.')->group(function () {
     Route::get('/{code}/stats', [RoomController::class, 'apiStats'])->name('stats');
     Route::post('/{code}/leave', [RoomController::class, 'apiLeave'])->name('leave');
+});
+
+// API de Equipos
+Route::prefix('rooms/{roomCode}/teams')->name('api.teams.')->middleware(['web'])->group(function () {
+    // Configuración
+    Route::post('/enable', [TeamController::class, 'enable'])->name('enable');
+    Route::post('/disable', [TeamController::class, 'disable'])->name('disable');
+    Route::get('/', [TeamController::class, 'index'])->name('index');
+    Route::get('/validate', [TeamController::class, 'validate'])->name('validate');
+
+    // CRUD de equipos
+    Route::post('/', [TeamController::class, 'store'])->name('store');
+    Route::delete('/{teamId}', [TeamController::class, 'destroy'])->name('destroy');
+
+    // Asignación de jugadores
+    Route::post('/assign', [TeamController::class, 'assignPlayer'])->name('assign');
+    Route::delete('/players/{playerId}', [TeamController::class, 'removePlayer'])->name('remove');
+    Route::post('/balance', [TeamController::class, 'balance'])->name('balance');
+
+    // Configuración avanzada
+    Route::put('/self-selection', [TeamController::class, 'updateSelfSelection'])->name('self-selection');
 });
