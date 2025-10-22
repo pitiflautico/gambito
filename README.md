@@ -123,3 +123,33 @@ Y en otra terminal:
 ```bash
 npm run dev
 ```
+
+### Testing de Convenciones
+
+**IMPORTANTE:** Antes de hacer commit de un nuevo juego, ejecuta los tests de convenciones:
+
+```bash
+php artisan test tests/Unit/ConventionTests/GameConventionsTest.php
+```
+
+Este test suite valida automáticamente que tu juego cumple con TODAS las convenciones establecidas:
+- Estructura de archivos correcta
+- Formato de config.json y capabilities.json
+- Uso de camelCase vs snake_case
+- Módulos declarados coinciden con uso real
+- No hay archivos JavaScript en ubicaciones incorrectas
+- Engine implementa correctamente GameEngineInterface
+
+**Documentación completa:** Ver `docs/conventions/CONVENTIONS_TESTING.md`
+
+**Resultado esperado:** ✅ 12/12 tests passing (197 assertions)
+
+### Crear un Nuevo Juego
+
+**Guía completa:** `docs/HOW_TO_CREATE_A_GAME.md`
+
+**Convenciones obligatorias:**
+- `docs/GAMES_CONVENTION.md` - Estructura de archivos
+- `docs/conventions/GAME_CONFIGURATION_CONVENTION.md` - Formato de configuración
+
+**Validación automática:** Los tests de convenciones detectarán cualquier violación antes del commit.

@@ -1,0 +1,86 @@
+{
+  "id": "trivia",
+  "name": "Trivia",
+  "slug": "trivia",
+  "description": "Responde preguntas de cultura general, deportes y ciencia. Gana puntos por respuestas correctas y bonificaciones por velocidad.",
+  "minPlayers": 2,
+  "maxPlayers": 10,
+  "estimatedDuration": "10-15 minutos",
+  "type": "trivia",
+  "isPremium": false,
+  "version": "1.0",
+  "author": "Gambito",
+
+  "customizableSettings": {
+    "questions_per_game": {
+      "type": "number",
+      "label": "Preguntas por partida",
+      "description": "Número de preguntas que tendrá la partida",
+      "default": 10,
+      "min": 5,
+      "max": 30,
+      "step": 1
+    },
+    "time_per_question": {
+      "type": "select",
+      "label": "Tiempo por pregunta",
+      "description": "Segundos disponibles para responder cada pregunta",
+      "default": 15,
+      "options": [
+        { "value": 10, "label": "10 segundos (rápido)" },
+        { "value": 15, "label": "15 segundos (normal)" },
+        { "value": 20, "label": "20 segundos (relajado)" },
+        { "value": 30, "label": "30 segundos (pensado)" }
+      ]
+    },
+    "difficulty": {
+      "type": "select",
+      "label": "Dificultad",
+      "description": "Nivel de dificultad de las preguntas",
+      "default": "mixed",
+      "options": [
+        { "value": "easy", "label": "Fácil" },
+        { "value": "medium", "label": "Media" },
+        { "value": "hard", "label": "Difícil" },
+        { "value": "mixed", "label": "Mixta (todas)" }
+      ]
+    },
+    "category": {
+      "type": "select",
+      "label": "Categoría",
+      "description": "Tipo de preguntas a incluir",
+      "default": "mixed",
+      "options": [
+        { "value": "mixed", "label": "Mixta (todas)" },
+        { "value": "general", "label": "Cultura general" },
+        { "value": "deportes", "label": "Deportes" },
+        { "value": "ciencia", "label": "Ciencia" }
+      ]
+    }
+  },
+
+  "turnSystemConfig": {
+    "mode": "simultaneous",
+    "allowModeChange": false,
+    "description": "Todos los jugadores responden simultáneamente cada pregunta"
+  },
+
+  "modules": {
+    "turn_system": {
+      "enabled": true,
+      "mode": "simultaneous"
+    },
+    "scoring_system": {
+      "enabled": true,
+      "track_history": true,
+      "allow_negative_scores": false
+    },
+    "timer_system": {
+      "enabled": true
+    },
+    "round_system": {
+      "enabled": true,
+      "total_rounds": 10
+    }
+  }
+}

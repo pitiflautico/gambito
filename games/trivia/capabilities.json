@@ -1,0 +1,26 @@
+{
+  "slug": "trivia",
+  "version": "1.0",
+  "requires": {
+    "modules": {
+      "turn_system": "^1.0",
+      "scoring_system": "^1.0",
+      "timer_system": "^1.0",
+      "round_system": "^1.0",
+      "guest_system": "^1.0"
+    }
+  },
+  "provides": {
+    "events": [
+      "QuestionStartedEvent",
+      "PlayerAnsweredEvent",
+      "QuestionEndedEvent"
+    ],
+    "routes": [
+      "/api/trivia/answer"
+    ],
+    "views": [
+      "games/trivia/game"
+    ]
+  }
+}
