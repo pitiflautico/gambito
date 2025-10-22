@@ -99,10 +99,15 @@ class TriviaController extends Controller
                 'answer' => $validated['answer']
             ]);
 
+            // Extraer información relevante del resultado
+            $roundStatus = $result['round_status'] ?? [];
+
             return response()->json([
                 'success' => $result['success'] ?? false,
+                'is_correct' => $result['is_correct'] ?? false,
                 'message' => $result['message'] ?? null,
-                'data' => $result
+                'question_ended' => $roundStatus['should_end'] ?? false,
+                'round_status' => $roundStatus,
             ]);
         } catch (\Exception $e) {
             Log::error('[TriviaController] Error processing answer', [

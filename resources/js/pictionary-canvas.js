@@ -4,13 +4,20 @@
  * Maneja el canvas HTML5 para dibujar, herramientas de dibujo,
  * y eventos de mouse/touch.
  *
- * Integra WebSockets con Laravel Echo para sincronización en tiempo real
+ * DEPENDENCIAS:
+ * - window.EventManager (cargado en app.js)
+ * - window.Echo (cargado en bootstrap.js)
  */
 
 class PictionaryCanvas {
-    constructor() {
+    constructor(config) {
         this.canvas = document.getElementById('drawing-canvas');
         this.ctx = this.canvas.getContext('2d');
+
+        // Configuración
+        this.roomCode = config.roomCode;
+        this.gameSlug = config.gameSlug || 'pictionary';
+        this.eventConfig = config.eventConfig || null;
 
         // Estado del dibujo
         this.isDrawing = false;
@@ -27,9 +34,6 @@ class PictionaryCanvas {
         this.gameState = null;
         this.isConfirming = false; // Flag para prevenir doble clic en confirmación
 
-        // WebSocket (usamos el Echo global de bootstrap.js)
-        this.roomCode = window.gameData?.roomCode || null;
-
         // Inicializar
         this.init();
     }
@@ -39,11 +43,9 @@ class PictionaryCanvas {
         this.bindToolEvents();
         this.bindCanvasEvents();
         this.bindFormEvents();
-        this.connectWebSocket();
+        this.setupEventManager();
 
-        console.log('🎨 Pictionary Canvas initialized - VERSION: 2024-10-21-WEBSOCKET-INTEGRATED');
-        console.log('Room code:', this.roomCode);
-        console.log('Echo available:', !!window.Echo);
+        console.log('🎨 ROOM:', this.roomCode, '| VERSION: 2024-10-22 | EventManager:', !!this.eventManager);
 
         // Si el juego ya terminó, mostrar resultados automáticamente
         if (window.gameData?.phase === 'results') {
@@ -53,70 +55,43 @@ class PictionaryCanvas {
     }
 
     /**
-     * Conectar WebSocket con Laravel Echo
+     * Configurar EventManager para WebSockets
      */
-    connectWebSocket() {
-        if (!this.roomCode) {
-            console.warn('No room code available, skipping WebSocket connection');
+    setupEventManager() {
+        if (!window.EventManager) {
+            console.error('EventManager no disponible');
             return;
         }
 
-        if (!window.Echo) {
-            console.error('Laravel Echo not initialized. Make sure @vite directive is in your layout.');
+        if (!this.eventConfig) {
+            console.error('eventConfig no proporcionado');
             return;
         }
 
-        // Suscribirse al canal público de la sala (demo)
-        // TODO: En producción cambiar a .private() con autenticación
-        const channel = window.Echo.channel(`room.${this.roomCode}`);
+        // Inicializar EventManager con los handlers de este juego
+        this.eventManager = new window.EventManager({
+            roomCode: this.roomCode,
+            gameSlug: this.gameSlug,
+            eventConfig: this.eventConfig,
+            handlers: {
+                handlePlayerAnswered: (event) => this.handlePlayerAnswered(event),
+                handlePlayerEliminated: (event) => this.handlePlayerEliminated(event),
+                handleGameStateUpdated: (event) => this.handleGameStateUpdate(event),
+                handleRoundEnded: (event) => this.handleRoundEnded(event),
+                handleTurnChanged: (event) => this.handleTurnChanged(event),
+                handleGameFinished: (event) => this.handleGameFinished(event),
+                handleCanvasDraw: (event) => this.handleCanvasDraw(event),
+                handleAnswerConfirmed: (event) => this.handleAnswerConfirmed(event),
 
-        // Evento: Jugador respondió (presionó "YO SÉ")
-        channel.listen('.player.answered', (data) => {
-            console.log('Player answered:', data);
-            this.handlePlayerAnswered(data);
+                // Callbacks de conexión
+                onConnected: () => {},
+                onError: (error, context) => {
+                    console.error('Error WebSocket:', error);
+                },
+                onDisconnected: () => {}
+            },
+            autoConnect: true
         });
-
-        // Evento: Jugador eliminado
-        channel.listen('.player.eliminated', (data) => {
-            console.log('Player eliminated:', data);
-            this.handlePlayerEliminated(data);
-        });
-
-        // Evento: Estado del juego actualizado
-        channel.listen('.game.state.updated', (data) => {
-            console.log('Game state updated:', data);
-            this.handleGameStateUpdate(data);
-        });
-
-        // Evento: Ronda terminada
-        channel.listen('.round.ended', (data) => {
-            console.log('Round ended:', data);
-            this.handleRoundEnded(data);
-        });
-
-        // Evento: Turno cambiado (nuevo dibujante)
-        channel.listen('.turn.changed', (data) => {
-            console.log('Turn changed:', data);
-            this.handleTurnChanged(data);
-        });
-
-        // Evento: Juego terminado
-        channel.listen('.game.finished', (data) => {
-            console.log('Game finished:', data);
-            this.handleGameFinished(data);
-        });
-
-        // Evento: Canvas dibujado (sincronización de trazos)
-        channel.listen('.canvas.draw', (data) => {
-            console.log('Canvas draw received:', data);
-            if (data.action === 'clear') {
-                this.clearCanvasRemote();
-            } else {
-                this.drawRemoteStroke(data.stroke);
-            }
-        });
-
-        console.log(`Connected to WebSocket channel: room.${this.roomCode}`);
     }
 
     /**
@@ -225,6 +200,25 @@ class PictionaryCanvas {
 
         // Mostrar modal de resultados finales
         this.showFinalResults(data);
+    }
+
+    /**
+     * Manejar dibujo en canvas (sincronización)
+     */
+    handleCanvasDraw(data) {
+        if (data.action === 'clear') {
+            this.clearCanvasRemote();
+        } else {
+            this.drawRemoteStroke(data.stroke);
+        }
+    }
+
+    /**
+     * Manejar respuesta confirmada por el dibujante
+     */
+    handleAnswerConfirmed(data) {
+        console.log('[AnswerConfirmed] Respuesta confirmada:', data);
+        // La lógica se maneja en handleRoundEnded o handlePlayerEliminated
     }
 
     /**
@@ -1304,22 +1298,5 @@ class PictionaryCanvas {
     }
 }
 
-// Inicializar cuando el DOM esté listo
-document.addEventListener('DOMContentLoaded', () => {
-    // Solo inicializar si existe el canvas de Pictionary
-    const canvas = document.getElementById('drawing-canvas');
-    if (!canvas) {
-        console.log('Pictionary canvas not found, skipping initialization');
-        return;
-    }
-
-    console.log('🚀 Initializing Pictionary Canvas...');
-    window.pictionaryCanvas = new PictionaryCanvas();
-
-    // Configurar rol inicial si está disponible en gameData
-    if (window.gameData?.role) {
-        const isDrawer = window.gameData.role === 'drawer';
-        const currentWord = window.gameData?.currentWord || null;
-        window.pictionaryCanvas.setRole(isDrawer, isDrawer ? currentWord : null);
-    }
-});
+// Export to window
+window.PictionaryCanvas = PictionaryCanvas;

@@ -609,4 +609,109 @@ class GameConventionsTest extends TestCase
             }
         }
     }
+
+    /**
+     * TEST: GameFinishedEvent debe estar presente en todos los juegos con event_manager
+     *
+     * CONVENCIÓN: Todos los juegos que usan event_manager DEBEN emitir un evento
+     * cuando el juego finaliza para mostrar resultados finales al usuario.
+     */
+    public function test_games_with_event_manager_must_have_game_finished_event(): void
+    {
+        foreach ($this->games as $game) {
+            $slug = $game['slug'];
+            $capabilitiesPath = "{$game['path']}/capabilities.json";
+            $capabilities = json_decode(File::get($capabilitiesPath), true);
+
+            // Solo verificar juegos que usan event_manager
+            $usesEventManager = isset($capabilities['requires']['modules']['event_manager']);
+
+            if (!$usesEventManager) {
+                $this->assertTrue(
+                    true,
+                    "El juego '{$slug}' no usa event_manager, saltando validación de GameFinishedEvent"
+                );
+                continue;
+            }
+
+            // 1. Verificar que GameFinishedEvent está en provides.events
+            $this->assertArrayHasKey(
+                'provides',
+                $capabilities,
+                "El juego '{$slug}' debe tener sección 'provides' en capabilities.json"
+            );
+
+            $this->assertArrayHasKey(
+                'events',
+                $capabilities['provides'],
+                "El juego '{$slug}' debe tener 'provides.events' en capabilities.json"
+            );
+
+            $providedEvents = $capabilities['provides']['events'];
+            $hasGameFinishedEvent = in_array('GameFinishedEvent', $providedEvents);
+
+            $this->assertTrue(
+                $hasGameFinishedEvent,
+                "El juego '{$slug}' usa event_manager pero NO declara 'GameFinishedEvent' en 'provides.events'. TODOS los juegos deben emitir un evento cuando finalizan."
+            );
+
+            // 2. Verificar que GameFinishedEvent está configurado en event_config
+            $this->assertArrayHasKey(
+                'event_config',
+                $capabilities,
+                "El juego '{$slug}' debe tener 'event_config' en capabilities.json"
+            );
+
+            $this->assertArrayHasKey(
+                'events',
+                $capabilities['event_config'],
+                "El juego '{$slug}' debe tener 'event_config.events' en capabilities.json"
+            );
+
+            $configuredEvents = $capabilities['event_config']['events'];
+            $this->assertArrayHasKey(
+                'GameFinishedEvent',
+                $configuredEvents,
+                "El juego '{$slug}' declara GameFinishedEvent en 'provides.events' pero NO lo configura en 'event_config.events'"
+            );
+
+            // 3. Verificar que el nombre del evento sigue la convención
+            $eventConfig = $configuredEvents['GameFinishedEvent'];
+            $this->assertArrayHasKey(
+                'name',
+                $eventConfig,
+                "El juego '{$slug}': GameFinishedEvent debe tener 'name' configurado"
+            );
+
+            $eventName = $eventConfig['name'];
+            $expectedName = ".{$slug}.game.finished";
+
+            $this->assertEquals(
+                $expectedName,
+                $eventName,
+                "El juego '{$slug}': GameFinishedEvent debe usar el nombre '{$expectedName}' (con punto al inicio)"
+            );
+
+            // 4. Verificar que tiene un handler configurado
+            $this->assertArrayHasKey(
+                'handler',
+                $eventConfig,
+                "El juego '{$slug}': GameFinishedEvent debe tener 'handler' configurado"
+            );
+
+            $handler = $eventConfig['handler'];
+            $this->assertEquals(
+                'handleGameFinished',
+                $handler,
+                "El juego '{$slug}': GameFinishedEvent debe usar el handler 'handleGameFinished'"
+            );
+
+            // 5. Verificar que existe el archivo del evento
+            $eventFilePath = "{$game['path']}/Events/GameFinishedEvent.php";
+            $this->assertFileExists(
+                $eventFilePath,
+                "El juego '{$slug}' configura GameFinishedEvent pero el archivo no existe en Events/GameFinishedEvent.php"
+            );
+        }
+    }
 }

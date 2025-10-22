@@ -60,15 +60,15 @@ Cada juego declara los eventos que usa:
     "channel": "room.{roomCode}",
     "events": {
       "QuestionStartedEvent": {
-        "name": "trivia.question.started",
+        "name": ".trivia.question.started",
         "handler": "handleQuestionStarted"
       },
       "PlayerAnsweredEvent": {
-        "name": "trivia.player.answered",
+        "name": ".trivia.player.answered",
         "handler": "handlePlayerAnswered"
       },
       "QuestionEndedEvent": {
-        "name": "trivia.question.ended",
+        "name": ".trivia.question.ended",
         "handler": "handleQuestionEnded"
       }
     }
@@ -76,16 +76,35 @@ Cada juego declara los eventos que usa:
 }
 ```
 
+**IMPORTANTE:** Los nombres de eventos deben empezar con un **punto `.`** cuando usas `broadcastAs()` en Laravel. Laravel Echo automáticamente procesa eventos personalizados con este prefijo.
+
 ## 💻 API del EventManager (JavaScript)
 
-### Inicialización
+### Carga Global
+
+**EventManager se carga automáticamente en `app.js` y está disponible como `window.EventManager`.**
+
+No necesitas importarlo en tus juegos - está disponible globalmente.
 
 ```javascript
+// resources/js/app.js
 import EventManager from './modules/EventManager.js';
+window.EventManager = EventManager; // ✅ Disponible globalmente
+```
 
+### Inicialización en Juegos
+
+```javascript
 class TriviaGame {
     constructor(config) {
-        this.eventManager = new EventManager({
+        // Verificar que EventManager esté disponible
+        if (!window.EventManager) {
+            console.error('[Trivia] EventManager not available');
+            return;
+        }
+
+        // Usar EventManager global (NO importar)
+        this.eventManager = new window.EventManager({
             roomCode: config.roomCode,
             gameSlug: config.gameSlug,
             eventConfig: config.eventConfig,
@@ -93,11 +112,9 @@ class TriviaGame {
                 handleQuestionStarted: (event) => this.onQuestionStarted(event),
                 handlePlayerAnswered: (event) => this.onPlayerAnswered(event),
                 handleQuestionEnded: (event) => this.onQuestionEnded(event),
-            }
+            },
+            autoConnect: true  // Conecta automáticamente
         });
-
-        // Conectar y sincronizar estado inicial
-        this.eventManager.connect();
     }
 }
 ```
@@ -276,19 +293,25 @@ public function game(string $roomCode)
    - Lógica de WebSockets escrita una vez
    - Reutilizable en todos los juegos
 
-2. **Configuración Declarativa**
+2. **Biblioteca Global**
+   - Cargada una sola vez en `app.js`
+   - Disponible para todos los juegos como `window.EventManager`
+   - Reduce bundle size de juegos individuales
+
+3. **Configuración Declarativa**
    - Eventos definidos en `capabilities.json`
    - No código hardcodeado
 
-3. **Fácil Debugging**
-   - Logs centralizados de eventos
-   - Estado de conexión visible
+4. **Fácil Debugging**
+   - Logs centralizados de eventos con prefijo `[EventManager]`
+   - Estado de conexión visible con `getDebugInfo()`
 
-4. **Manejo de Errores Robusto**
-   - Reconexión automática
-   - Handlers de error centralizados
+5. **Manejo de Errores Robusto**
+   - Validación de configuración
+   - Callbacks de error centralizados
+   - Manejo de desconexiones
 
-5. **Testeable**
+6. **Testeable**
    - Mock del EventManager fácilmente
    - Tests unitarios del módulo
 
@@ -325,14 +348,72 @@ setupWebSocket() {
 }
 ```
 
-### ✅ Con EventManager (reutilizable)
+### ✅ Con EventManager (reutilizable y global)
 ```javascript
-// En ambos juegos
-this.eventManager = new EventManager({
+// En ambos juegos - EventManager ya cargado globalmente
+this.eventManager = new window.EventManager({
     roomCode: this.roomCode,
+    gameSlug: this.gameSlug,
     eventConfig: this.config.eventConfig,
-    handlers: this.getHandlers()
+    handlers: this.getHandlers(),
+    autoConnect: true
 });
+```
+
+**Ventaja adicional:** EventManager está en `app.js` (163 kB), no duplicado en cada juego.
+- `trivia-game.js`: 8.36 kB (antes 12.19 kB)
+- `pictionary-canvas.js`: 21.08 kB
+- Ahorro: ~4 kB por juego
+
+## 🔧 Nombres de Eventos y Prefijos
+
+**Regla importante:** Cuando defines eventos en `capabilities.json`, usa el prefijo de **punto `.`** al inicio del nombre.
+
+### ¿Por qué el punto?
+
+Cuando usas `broadcastAs()` en Laravel para personalizar el nombre del evento:
+
+```php
+public function broadcastAs(): string
+{
+    return 'trivia.question.ended';
+}
+```
+
+Laravel Echo procesa este evento como **`.trivia.question.ended`** (agrega un punto al inicio automáticamente para diferenciarlo de eventos con namespace completo).
+
+### Ejemplos correctos:
+
+```json
+{
+  "event_config": {
+    "events": {
+      "QuestionStartedEvent": {
+        "name": ".trivia.question.started",
+        "handler": "handleQuestionStarted"
+      }
+    }
+  }
+}
+```
+
+### Ejemplos incorrectos:
+
+```json
+{
+  "event_config": {
+    "events": {
+      "QuestionStartedEvent": {
+        "name": "trivia.question.started",  // ❌ Sin punto - NO funcionará
+        "handler": "handleQuestionStarted"
+      },
+      "QuestionEndedEvent": {
+        "name": "\\App\\Events\\trivia\\question\\ended",  // ❌ Namespace completo - NO funcionará
+        "handler": "handleQuestionEnded"
+      }
+    }
+  }
+}
 ```
 
 ## 📚 Ver También

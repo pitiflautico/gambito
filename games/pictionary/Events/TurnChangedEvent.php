@@ -56,7 +56,7 @@ class TurnChangedEvent implements ShouldBroadcast
      */
     public function broadcastAs(): string
     {
-        return 'turn.changed';
+        return 'pictionary.turn.changed';
     }
 
     /**

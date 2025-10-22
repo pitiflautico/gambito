@@ -4,9 +4,13 @@
  * Maneja la lógica del juego de Trivia en el cliente:
  * - Mostrar preguntas y opciones
  * - Enviar respuestas al servidor
- * - Recibir actualizaciones vía WebSocket
+ * - Recibir actualizaciones vía WebSocket (usando EventManager)
  * - Mostrar resultados y ranking
  * - Actualizar UI en tiempo real
+ *
+ * DEPENDENCIAS:
+ * - window.EventManager (cargado en app.js)
+ * - window.Echo (cargado en bootstrap.js)
  */
 
 class TriviaGame {
@@ -18,22 +22,18 @@ class TriviaGame {
         this.players = config.players || [];
         this.scores = config.scores || {};
         this.currentGameState = config.gameState || null;
+        this.eventConfig = config.eventConfig || null;
 
         this.currentQuestion = null;
         this.hasAnswered = false;
         this.selectedOption = null;
 
         this.initializeElements();
-        this.setupWebSocket();
+        this.setupEventManager();
         this.setupEventListeners();
         this.syncInitialState(); // Sincronizar con el estado actual
 
-        console.log('[Trivia] Game initialized', {
-            roomCode: this.roomCode,
-            playerId: this.playerId,
-            players: this.players.length,
-            phase: this.currentGameState?.phase
-        });
+        console.log('🎮 ROOM:', this.roomCode, '| VERSION: 2024-10-22 09:32 | EventManager:', !!this.eventManager);
     }
 
     initializeElements() {
@@ -65,33 +65,36 @@ class TriviaGame {
         this.gameMessages = document.getElementById('game-messages');
     }
 
-    setupWebSocket() {
-        if (!window.Echo) {
-            console.error('[Trivia] Laravel Echo not initialized');
+    setupEventManager() {
+        if (!window.EventManager) {
             return;
         }
 
-        const channel = window.Echo.channel(`room.${this.roomCode}`);
+        if (!this.eventConfig) {
+            return;
+        }
 
-        // Question Started
-        channel.listen('trivia.question.started', (event) => {
-            console.log('[Trivia] Question started', event);
-            this.handleQuestionStarted(event);
+        // Inicializar EventManager con los handlers de este juego
+        this.eventManager = new window.EventManager({
+            roomCode: this.roomCode,
+            gameSlug: this.gameSlug,
+            eventConfig: this.eventConfig,
+            handlers: {
+                // Mapear handlers a métodos de esta clase
+                handleQuestionStarted: (event) => this.handleQuestionStarted(event),
+                handlePlayerAnswered: (event) => this.handlePlayerAnswered(event),
+                handleQuestionEnded: (event) => this.handleQuestionEnded(event),
+                handleGameFinished: (event) => this.handleGameFinished(event),
+
+                // Callbacks de conexión
+                onConnected: () => {},
+                onError: (error, context) => {
+                    this.showMessage('Error de conexión WebSocket', 'error');
+                },
+                onDisconnected: () => {}
+            },
+            autoConnect: true
         });
-
-        // Player Answered
-        channel.listen('trivia.player.answered', (event) => {
-            console.log('[Trivia] Player answered', event);
-            this.handlePlayerAnswered(event);
-        });
-
-        // Question Ended
-        channel.listen('trivia.question.ended', (event) => {
-            console.log('[Trivia] Question ended', event);
-            this.handleQuestionEnded(event);
-        });
-
-        console.log('[Trivia] WebSocket listeners configured');
     }
 
     setupEventListeners() {
@@ -125,7 +128,6 @@ class TriviaGame {
             const totalRounds = this.currentGameState.total_rounds || 10;
 
             if (currentQuestion) {
-                console.log('[Trivia] Syncing initial state - showing current question');
                 this.handleQuestionStarted({
                     question: currentQuestion.question,
                     options: currentQuestion.options,
@@ -179,6 +181,11 @@ class TriviaGame {
         setTimeout(() => {
             this.showResults(event.correct_answer, event.results);
         }, 2000);
+    }
+
+    handleGameFinished(event) {
+        // Mostrar resultados finales
+        this.showFinalResults(event.ranking, event.statistics);
     }
 
     showQuestionActive() {
@@ -258,14 +265,7 @@ class TriviaGame {
                 })
             });
 
-            // Check if response is OK before parsing JSON
             if (!response.ok) {
-                const text = await response.text();
-                console.error('[Trivia] Server error:', {
-                    status: response.status,
-                    statusText: response.statusText,
-                    body: text
-                });
                 this.showMessage(`Error del servidor (${response.status})`, 'error');
                 return;
             }
@@ -273,24 +273,16 @@ class TriviaGame {
             const data = await response.json();
 
             if (data.success) {
-                console.log('[Trivia] Answer sent successfully', data);
-
-                // Mostrar feedback basado en si es correcta o incorrecta
                 if (data.is_correct) {
                     this.showMessage('¡Correcto! +100 puntos', 'success');
                 } else if (!data.question_ended) {
-                    // Respuesta incorrecta pero la pregunta continúa
                     this.showMessage('Respuesta incorrecta. Espera a que el resto responda.', 'info');
                 }
-                // Si question_ended es true, el evento QuestionEndedEvent manejará la UI
             } else {
-                console.error('[Trivia] Error sending answer', data);
-                // Mostrar el error específico del servidor
                 const errorMsg = data.error || data.message || data.data?.error || 'Error al enviar respuesta';
                 this.showMessage(errorMsg, 'error');
             }
         } catch (error) {
-            console.error('[Trivia] Network error', error);
             this.showMessage('Error de conexión', 'error');
         }
     }
@@ -299,6 +291,9 @@ class TriviaGame {
         const buttons = this.optionsGrid.querySelectorAll('.option-btn');
 
         buttons.forEach((btn, idx) => {
+            // Deshabilitar TODOS los botones - la ronda terminó
+            btn.disabled = true;
+
             if (idx === correctIndex) {
                 btn.classList.add('correct');
             } else if (idx === this.selectedOption) {
@@ -313,9 +308,15 @@ class TriviaGame {
         this.answerFeedback.classList.toggle('incorrect', !isCorrect);
 
         const feedbackMessage = this.answerFeedback.querySelector('.feedback-message');
-        feedbackMessage.textContent = isCorrect
-            ? '¡Correcto! +100 puntos'
-            : 'Incorrecto';
+
+        // Mensaje diferente si no respondió
+        if (this.selectedOption === null) {
+            feedbackMessage.textContent = 'No respondiste a tiempo';
+        } else {
+            feedbackMessage.textContent = isCorrect
+                ? '¡Correcto! +100 puntos'
+                : 'Incorrecto';
+        }
     }
 
     showResults(correctIndex, results) {
@@ -431,6 +432,38 @@ class TriviaGame {
 
     backToLobby() {
         window.location.href = `/lobby/${this.roomCode}`;
+    }
+
+    showFinalResults(ranking, statistics) {
+        // Ocultar otros paneles
+        this.questionActive.classList.add('hidden');
+        this.questionResults.classList.add('hidden');
+        this.questionWaiting.classList.add('hidden');
+        this.finalResults.classList.remove('hidden');
+
+        // Mostrar ganador
+        const winner = ranking[0];
+        const winnerAnnouncement = document.getElementById('winner-announcement');
+        if (winner && winnerAnnouncement) {
+            winnerAnnouncement.querySelector('.winner-name').textContent = winner.player_name;
+            winnerAnnouncement.querySelector('.winner-score').textContent = `${winner.score} puntos`;
+        }
+
+        // Mostrar ranking completo
+        const finalRanking = document.getElementById('final-ranking');
+        if (finalRanking) {
+            finalRanking.innerHTML = '';
+            ranking.forEach((entry) => {
+                const rankItem = document.createElement('div');
+                rankItem.className = 'rank-item';
+                rankItem.innerHTML = `
+                    <div class="rank-position">${entry.position}</div>
+                    <div class="rank-player">${entry.player_name}</div>
+                    <div class="rank-score">${entry.score} pts</div>
+                `;
+                finalRanking.appendChild(rankItem);
+            });
+        }
     }
 }
 

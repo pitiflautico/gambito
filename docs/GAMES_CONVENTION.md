@@ -28,6 +28,12 @@
    - Configurar eventos en `event_config`
    - NO duplicar lógica de WebSockets en cada juego
 
+7. ✅ **Implementar GameFinishedEvent** (OBLIGATORIO)
+   - TODOS los juegos DEBEN emitir un evento cuando finalizan
+   - El evento DEBE tener un handler en el frontend para mostrar resultados
+   - Configurar en `event_config` con nombre `.{game}.game.finished`
+   - El handler DEBE mostrar al ganador, ranking y estadísticas finales
+
 ## 📁 Estructura de Carpetas para Juegos
 
 Cada juego debe seguir esta estructura estándar:
@@ -332,23 +338,28 @@ public/games/pictionary/js/        ❌ BORRAR
     "events": [
       "QuestionStartedEvent",
       "PlayerAnsweredEvent",
-      "QuestionEndedEvent"
+      "QuestionEndedEvent",
+      "GameFinishedEvent"
     ]
   },
   "event_config": {
     "channel": "room.{roomCode}",
     "events": {
       "QuestionStartedEvent": {
-        "name": "trivia.question.started",
+        "name": ".trivia.question.started",
         "handler": "handleQuestionStarted"
       },
       "PlayerAnsweredEvent": {
-        "name": "trivia.player.answered",
+        "name": ".trivia.player.answered",
         "handler": "handlePlayerAnswered"
       },
       "QuestionEndedEvent": {
-        "name": "trivia.question.ended",
+        "name": ".trivia.question.ended",
         "handler": "handleQuestionEnded"
+      },
+      "GameFinishedEvent": {
+        "name": ".trivia.game.finished",
+        "handler": "handleGameFinished"
       }
     }
   }
@@ -357,13 +368,13 @@ public/games/pictionary/js/        ❌ BORRAR
 
 ### Usar en JavaScript
 
-```javascript
-import EventManager from './modules/EventManager.js';
+**EventManager está disponible globalmente como `window.EventManager`** (cargado en `app.js`).
 
+```javascript
 class TriviaGame {
     constructor(config) {
-        // Inicializar EventManager
-        this.eventManager = new EventManager({
+        // Inicializar EventManager (disponible globalmente)
+        this.eventManager = new window.EventManager({
             roomCode: config.roomCode,
             gameSlug: config.gameSlug,
             eventConfig: config.eventConfig,
@@ -371,17 +382,37 @@ class TriviaGame {
                 handleQuestionStarted: (e) => this.onQuestionStarted(e),
                 handlePlayerAnswered: (e) => this.onPlayerAnswered(e),
                 handleQuestionEnded: (e) => this.onQuestionEnded(e),
-            }
+                handleGameFinished: (e) => this.onGameFinished(e),  // OBLIGATORIO
+            },
+            autoConnect: true
         });
-        // EventManager se conecta automáticamente
     }
 
     onQuestionStarted(event) {
         // Actualizar UI con nueva pregunta
         console.log('Nueva pregunta:', event.question);
     }
+
+    onGameFinished(event) {
+        // OBLIGATORIO: Mostrar resultados finales
+        this.showFinalResults(event.ranking, event.statistics);
+    }
+
+    showFinalResults(ranking, statistics) {
+        // Mostrar ganador y ranking
+        const winner = ranking[0];
+        console.log('Ganador:', winner.player_name, 'con', winner.score, 'puntos');
+
+        // Actualizar UI con resultados finales
+        // ...mostrar pantalla de resultados, ranking, botones jugar de nuevo, etc.
+    }
 }
 ```
+
+**IMPORTANTE - Nombres de eventos:**
+- Los nombres en `event_config` deben empezar con **punto `.`**
+- Ejemplo: `".trivia.question.started"` (no `"trivia.question.started"`)
+- Laravel Echo procesa eventos personalizados con este prefijo automáticamente
 
 ### Pasar configuración desde el Controller
 
@@ -440,6 +471,20 @@ setupWebSocket() {
     const channel = window.Echo.channel(`room.${this.roomCode}`);
     channel.listen('trivia.question.started', ...);
     // Esto es código duplicado que debe estar en EventManager
+}
+
+// ❌ NO importar EventManager en cada archivo
+import EventManager from './modules/EventManager.js';
+// EventManager ya está disponible globalmente como window.EventManager
+
+// ❌ NO usar nombres de eventos sin el punto al inicio
+"event_config": {
+  "events": {
+    "QuestionStartedEvent": {
+      "name": "trivia.question.started",  // ❌ Falta el punto
+      "handler": "handleQuestionStarted"
+    }
+  }
 }
 ```
 

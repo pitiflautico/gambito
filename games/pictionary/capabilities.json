@@ -4,6 +4,7 @@
   "requires": {
     "modules": {
       "session_manager": "^1.0",
+      "event_manager": "^1.0",
       "turn_system": "^1.0",
       "scoring_system": "^1.0",
       "timer_system": "^1.0",
@@ -34,5 +35,42 @@
     "views": [
       "games/pictionary/canvas"
     ]
+  },
+  "event_config": {
+    "channel": "room.{roomCode}",
+    "events": {
+      "PlayerAnsweredEvent": {
+        "name": ".pictionary.player.answered",
+        "handler": "handlePlayerAnswered"
+      },
+      "PlayerEliminatedEvent": {
+        "name": ".pictionary.player.eliminated",
+        "handler": "handlePlayerEliminated"
+      },
+      "RoundEndedEvent": {
+        "name": ".pictionary.round.ended",
+        "handler": "handleRoundEnded"
+      },
+      "TurnChangedEvent": {
+        "name": ".pictionary.turn.changed",
+        "handler": "handleTurnChanged"
+      },
+      "CanvasDrawEvent": {
+        "name": ".pictionary.canvas.draw",
+        "handler": "handleCanvasDraw"
+      },
+      "AnswerConfirmedEvent": {
+        "name": ".pictionary.answer.confirmed",
+        "handler": "handleAnswerConfirmed"
+      },
+      "GameStateUpdatedEvent": {
+        "name": ".pictionary.game.state.updated",
+        "handler": "handleGameStateUpdated"
+      },
+      "GameFinishedEvent": {
+        "name": ".pictionary.game.finished",
+        "handler": "handleGameFinished"
+      }
+    }
   }
 }

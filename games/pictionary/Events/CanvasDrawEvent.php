@@ -60,7 +60,7 @@ class CanvasDrawEvent implements ShouldBroadcast
      */
     public function broadcastAs(): string
     {
-        return 'canvas.draw';
+        return 'pictionary.canvas.draw';
     }
 
     /**

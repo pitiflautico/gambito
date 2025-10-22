@@ -62,7 +62,7 @@ class RoundEndedEvent implements ShouldBroadcast
      */
     public function broadcastAs(): string
     {
-        return 'round.ended';
+        return 'pictionary.round.ended';
     }
 
     /**

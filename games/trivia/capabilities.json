@@ -16,7 +16,8 @@
     "events": [
       "QuestionStartedEvent",
       "PlayerAnsweredEvent",
-      "QuestionEndedEvent"
+      "QuestionEndedEvent",
+      "GameFinishedEvent"
     ],
     "routes": [
       "/api/trivia/answer"
@@ -29,16 +30,20 @@
     "channel": "room.{roomCode}",
     "events": {
       "QuestionStartedEvent": {
-        "name": "trivia.question.started",
+        "name": ".trivia.question.started",
         "handler": "handleQuestionStarted"
       },
       "PlayerAnsweredEvent": {
-        "name": "trivia.player.answered",
+        "name": ".trivia.player.answered",
         "handler": "handlePlayerAnswered"
       },
       "QuestionEndedEvent": {
-        "name": "trivia.question.ended",
+        "name": ".trivia.question.ended",
         "handler": "handleQuestionEnded"
+      },
+      "GameFinishedEvent": {
+        "name": ".trivia.game.finished",
+        "handler": "handleGameFinished"
       }
     }
   }

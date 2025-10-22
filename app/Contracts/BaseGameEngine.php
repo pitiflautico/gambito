@@ -89,12 +89,14 @@ abstract class BaseGameEngine implements GameEngineInterface
      * Procesar una acción de un jugador.
      *
      * Este método coordina entre la lógica del juego y los módulos.
+     * Soporta diferentes modos de juego automáticamente.
      *
      * FLUJO:
      * 1. Procesar acción específica del juego
-     * 2. Consultar a RoundManager si debe terminar la ronda
-     * 3. Si termina: finalizar ronda y programar siguiente
-     * 4. Retornar resultado
+     * 2. Detectar modo de juego (simultáneo/secuencial)
+     * 3. Consultar a RoundManager si debe terminar la ronda/turno
+     * 4. Si termina: finalizar y programar siguiente
+     * 5. Retornar resultado
      *
      * @param GameMatch $match
      * @param Player $player
@@ -111,40 +113,61 @@ abstract class BaseGameEngine implements GameEngineInterface
         ]);
 
         // 1. Procesar acción específica del juego
+        // Pasar el tipo de acción en los datos para que el juego sepa qué hacer
+        $data['action'] = $action;
         $actionResult = $this->processRoundAction($match, $player, $data);
 
-        // 2. Obtener RoundManager
-        $roundManager = RoundManager::fromArray($match->game_state);
+        // 2. Obtener RoundManager y detectar modo
+        $gameState = $match->game_state;
+        $roundManager = RoundManager::fromArray($gameState);
+        $turnManager = $roundManager->getTurnManager();
+        $turnMode = $turnManager->getMode();
 
-        // 3. Obtener todos los resultados de jugadores
-        $playerResults = $this->getAllPlayerResults($match);
+        // 3. Verificar si debe terminar según el modo
+        $roundStatus = ['should_end' => false];
 
-        // 4. Preguntar a RoundManager si la ronda debe terminar
-        $roundStatus = $roundManager->shouldEndSimultaneousRound($playerResults);
+        if ($turnMode === 'simultaneous') {
+            // Modo simultáneo: Verificar si todos respondieron o alguien ganó
+            $playerResults = $this->getAllPlayerResults($match);
+            $roundStatus = $roundManager->shouldEndSimultaneousRound($playerResults);
+        } elseif ($turnMode === 'sequential') {
+            // Modo secuencial: El juego decide cuándo terminar
+            // Verificar si el juego dice que debe terminar el turno
+            $shouldEnd = $actionResult['should_end_turn'] ?? false;
+            $roundStatus = [
+                'should_end' => $shouldEnd,
+                'reason' => $shouldEnd ? 'turn_completed' : 'turn_ongoing',
+                'delay_seconds' => $actionResult['delay_seconds'] ?? 3,
+            ];
+        }
 
-        // 5. Actuar según decisión de RoundManager
+        // 4. Actuar según decisión
         if ($roundStatus['should_end']) {
-            Log::info("[{$this->getGameSlug()}] Round ending", [
+            Log::info("[{$this->getGameSlug()}] Round/Turn ending", [
                 'match_id' => $match->id,
-                'reason' => $roundStatus['reason']
+                'mode' => $turnMode,
+                'reason' => $roundStatus['reason'] ?? 'game_decided'
             ]);
 
-            // Finalizar ronda actual
+            // Finalizar ronda/turno actual
             $this->endCurrentRound($match);
 
             // Programar siguiente ronda vía RoundManager
             $matchId = $match->id;
+            $delaySeconds = $roundStatus['delay_seconds'] ?? 5;
+
             $roundManager->scheduleNextRound(function () use ($matchId) {
                 $match = GameMatch::find($matchId);
                 if ($match && !$this->isGameComplete($match)) {
                     $this->startNewRound($match);
                 }
-            }, delaySeconds: 5);
+            }, delaySeconds: $delaySeconds);
         }
 
-        // 6. Retornar resultado con información adicional
+        // 5. Retornar resultado con información adicional
         return array_merge($actionResult, [
             'round_status' => $roundStatus,
+            'turn_mode' => $turnMode,
         ]);
     }
 

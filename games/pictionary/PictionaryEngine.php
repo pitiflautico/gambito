@@ -2,7 +2,7 @@
 
 namespace Games\Pictionary;
 
-use App\Contracts\GameEngineInterface;
+use App\Contracts\BaseGameEngine;
 use App\Models\GameMatch;
 use App\Models\Player;
 use Illuminate\Support\Facades\Log;
@@ -30,7 +30,7 @@ use Games\Pictionary\PictionaryScoreCalculator;
  * - Timer System: Temporizadores por turno ✅
  * - Roles System: Roles drawer/guesser ✅
  */
-class PictionaryEngine implements GameEngineInterface
+class PictionaryEngine extends BaseGameEngine
 {
     /**
      * Obtener la configuración del juego desde config.json.
@@ -175,35 +175,8 @@ class PictionaryEngine implements GameEngineInterface
         ]);
     }
 
-    /**
-     * Procesar una acción de un jugador.
-     *
-     * Acciones soportadas:
-     * - 'draw': Trazo en el canvas (Task 7.0 - WebSockets)
-     * - 'answer': Jugador intenta responder
-     * - 'confirm_answer': Dibujante confirma si respuesta es correcta
-     *
-     * @param GameMatch $match La partida actual
-     * @param Player $player El jugador que realizó la acción
-     * @param string $action El tipo de acción
-     * @param array $data Datos adicionales de la acción
-     * @return array Resultado de la acción
-     */
-    public function processAction(GameMatch $match, Player $player, string $action, array $data): array
-    {
-        Log::info("Processing action", [
-            'match_id' => $match->id,
-            'player_id' => $player->id,
-            'action' => $action,
-        ]);
-
-        return match ($action) {
-            'draw' => $this->handleDrawAction($match, $player, $data),
-            'answer' => $this->handleAnswerAction($match, $player, $data),
-            'confirm_answer' => $this->handleConfirmAnswer($match, $player, $data),
-            default => ['success' => false, 'error' => 'Unknown action'],
-        };
-    }
+    // processAction() ahora es heredado de BaseGameEngine
+    // que llama a processRoundAction() con el action en $data
 
     /**
      * Verificar si hay un ganador.
@@ -790,6 +763,8 @@ class PictionaryEngine implements GameEngineInterface
                 'success' => true,
                 'correct' => true,
                 'round_ended' => true,
+                'should_end_turn' => true, // Señal para BaseGameEngine
+                'delay_seconds' => 3, // Delay antes del siguiente turno
                 'guesser_points' => $guesserPoints,
                 'drawer_points' => $drawerPoints,
                 'seconds_elapsed' => $secondsElapsed,
@@ -1051,6 +1026,96 @@ class PictionaryEngine implements GameEngineInterface
             'word' => $newWord,
             'cycle_completed' => $turnInfo['cycle_completed'] // Actualizado de round_completed
         ]);
+    }
+
+    // ============================================================================
+    // MÉTODOS ABSTRACTOS DE BASEGAMEENGINE
+    // ============================================================================
+
+    /**
+     * Procesar acción de jugador en modo secuencial.
+     *
+     * Para Pictionary, tenemos múltiples tipos de acciones:
+     * - 'draw': Trazos en el canvas
+     * - 'answer': Jugador presiona "YO SÉ"
+     * - 'confirm_answer': Drawer confirma si es correcto/incorrecto
+     *
+     * @param GameMatch $match
+     * @param Player $player
+     * @param array $data
+     * @return array
+     */
+    protected function processRoundAction(GameMatch $match, Player $player, array $data): array
+    {
+        // BaseGameEngine nos pasa el 'action' dentro de $data
+        $action = $data['action'] ?? 'unknown';
+
+        return match ($action) {
+            'draw' => $this->handleDrawAction($match, $player, $data),
+            'answer' => $this->handleAnswerAction($match, $player, $data),
+            'confirm_answer' => $this->handleConfirmAnswer($match, $player, $data),
+            default => ['success' => false, 'error' => 'Unknown action'],
+        };
+    }
+
+    /**
+     * Obtener resultados de jugadores.
+     *
+     * En modo secuencial (Pictionary) no aplica este concepto,
+     * ya que solo un jugador actúa por turno.
+     *
+     * @param GameMatch $match
+     * @return array
+     */
+    protected function getAllPlayerResults(GameMatch $match): array
+    {
+        // No aplica en modo secuencial
+        return [];
+    }
+
+    /**
+     * Iniciar nueva ronda/turno.
+     *
+     * Verifica si el juego terminó antes de avanzar.
+     *
+     * @param GameMatch $match
+     * @return void
+     */
+    protected function startNewRound(GameMatch $match): void
+    {
+        $gameState = $match->game_state;
+        $roundManager = RoundManager::fromArray($gameState);
+
+        // Verificar si el juego terminó
+        if ($roundManager->isGameComplete()) {
+            $this->finalize($match);
+            return;
+        }
+
+        // Continuar - avanzar al siguiente turno
+        $this->nextTurn($match);
+
+        // Actualizar fase a 'playing'
+        $gameState = $match->fresh()->game_state;
+        $gameState['phase'] = 'playing';
+        $match->game_state = $gameState;
+        $match->save();
+    }
+
+    /**
+     * Finalizar turno actual.
+     *
+     * En Pictionary, esto ya se maneja en handleConfirmAnswer,
+     * así que no necesitamos hacer nada adicional aquí.
+     *
+     * @param GameMatch $match
+     * @return void
+     */
+    protected function endCurrentRound(GameMatch $match): void
+    {
+        // La lógica de fin de turno ya está en handleConfirmAnswer
+        // que emite eventos y actualiza puntos
+        // No necesitamos duplicarla aquí
     }
 
     // ============================================================================

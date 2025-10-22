@@ -2,13 +2,14 @@
 
 namespace Games\Trivia;
 
-use App\Contracts\GameEngineInterface;
+use App\Contracts\BaseGameEngine;
 use App\Models\GameMatch;
 use App\Models\Player;
 use App\Services\Modules\ScoringSystem\ScoreManager;
 use App\Services\Modules\TimerSystem\TimerService;
 use App\Services\Modules\RoundSystem\RoundManager;
 use App\Services\Modules\TurnSystem\TurnManager;
+use Games\Trivia\Events\GameFinishedEvent;
 use Games\Trivia\Events\QuestionStartedEvent;
 use Games\Trivia\Events\PlayerAnsweredEvent;
 use Games\Trivia\Events\QuestionEndedEvent;
@@ -20,20 +21,28 @@ use Illuminate\Support\Facades\Log;
  *
  * Juego de preguntas y respuestas donde todos los jugadores responden simultáneamente.
  *
+ * ARQUITECTURA DESACOPLADA:
+ * ========================
+ * - Extiende BaseGameEngine para coordinación con módulos
+ * - Implementa solo la lógica específica de Trivia
+ * - BaseGameEngine maneja cuándo terminar rondas
+ * - RoundManager gestiona el flujo de rondas
+ *
  * Módulos utilizados:
- * - Turn System (modo: simultaneous)
- * - Round System (1 ronda = 1 pregunta)
- * - Scoring System (puntos + bonus por velocidad)
- * - Timer System (tiempo por pregunta)
+ * - SessionManager: Identificación de jugadores
+ * - RoundManager: Gestión de rondas (1 ronda = 1 pregunta)
+ * - TurnManager: Modo simultáneo (todos juegan al mismo tiempo)
+ * - ScoreManager: Puntos + bonus por velocidad
+ * - TimerService: Tiempo límite por pregunta
  *
  * Flujo del juego:
- * 1. Initialize: Cargar preguntas, inicializar módulos
- * 2. Question phase: Mostrar pregunta, jugadores responden
- * 3. Results phase: Mostrar respuesta correcta y puntos
- * 4. Repeat hasta completar todas las preguntas
- * 5. Final results: Mostrar ganador y ranking
+ * 1. initialize(): Cargar preguntas, inicializar módulos
+ * 2. processRoundAction(): Jugador responde pregunta
+ * 3. endCurrentRound(): Calcular puntos y mostrar resultados
+ * 4. startNewRound(): Siguiente pregunta
+ * 5. finalize(): Mostrar ganador y ranking final
  */
-class TriviaEngine implements GameEngineInterface
+class TriviaEngine extends BaseGameEngine
 {
     /**
      * Inicializar el juego.
@@ -160,51 +169,68 @@ class TriviaEngine implements GameEngineInterface
         ));
     }
 
-    /**
-     * Procesar una acción de un jugador.
-     */
-    public function processAction(GameMatch $match, Player $player, string $action, array $data): array
-    {
-        Log::info("Processing action", [
-            'match_id' => $match->id,
-            'player_id' => $player->id,
-            'action' => $action
-        ]);
+    // ========================================================================
+    // MÉTODOS IMPLEMENTADOS DE BaseGameEngine
+    // ========================================================================
 
-        return match ($action) {
-            'answer' => $this->handleAnswer($match, $player, $data),
-            default => ['success' => false, 'error' => 'Acción no soportada']
-        };
+    /**
+     * Procesar la acción de responder una pregunta.
+     *
+     * Este método NO decide si la ronda termina.
+     * Solo procesa la respuesta y retorna el resultado.
+     * BaseGameEngine se encargará de consultar a RoundManager.
+     *
+     * @param GameMatch $match
+     * @param Player $player
+     * @param array $data ['answer' => int]
+     * @return array
+     */
+    protected function processRoundAction(GameMatch $match, Player $player, array $data): array
+    {
+        return $this->handleAnswer($match, $player, $data);
     }
 
     /**
-     * Avanzar el juego a la siguiente fase.
+     * Obtener todos los resultados de jugadores en la ronda actual.
+     *
+     * @param GameMatch $match
+     * @return array [player_id => ['success' => bool, 'data' => array]]
      */
-    public function advancePhase(GameMatch $match): void
+    protected function getAllPlayerResults(GameMatch $match): array
     {
         $gameState = $match->game_state;
-        $currentPhase = $gameState['phase'];
+        $playerResults = [];
 
-        Log::info("Advancing phase", [
-            'match_id' => $match->id,
-            'current_phase' => $currentPhase
-        ]);
-
-        switch ($currentPhase) {
-            case 'question':
-                // Terminar pregunta, mostrar resultados
-                $this->endQuestion($match);
-                break;
-
-            case 'results':
-                // Ir a siguiente pregunta o finalizar juego
-                $this->nextQuestion($match);
-                break;
-
-            default:
-                Log::warning("Unknown phase", ['phase' => $currentPhase]);
-                break;
+        foreach ($gameState['player_answers'] ?? [] as $playerId => $answer) {
+            $playerResults[$playerId] = [
+                'success' => $answer['is_correct'] ?? false,
+                'data' => $answer,
+            ];
         }
+
+        return $playerResults;
+    }
+
+    /**
+     * Iniciar una nueva ronda (nueva pregunta).
+     *
+     * @param GameMatch $match
+     * @return void
+     */
+    protected function startNewRound(GameMatch $match): void
+    {
+        $this->nextQuestion($match);
+    }
+
+    /**
+     * Finalizar la ronda actual (pregunta actual).
+     *
+     * @param GameMatch $match
+     * @return void
+     */
+    protected function endCurrentRound(GameMatch $match): void
+    {
+        $this->endQuestion($match);
     }
 
     /**
@@ -224,7 +250,8 @@ class TriviaEngine implements GameEngineInterface
         // Obtener ranking final
         $scoreManager = ScoreManager::fromArray(
             playerIds: array_keys($gameState['scores']),
-            data: $gameState
+            data: $gameState,
+            calculator: new TriviaScoreCalculator()
         );
 
         $rawRanking = $scoreManager->getRanking();
@@ -264,6 +291,9 @@ class TriviaEngine implements GameEngineInterface
             'winner' => $winner ? $winner['player_name'] : 'None',
             'statistics' => $statistics
         ]);
+
+        // Broadcast game finished event
+        event(new GameFinishedEvent($match, $ranking, $statistics));
 
         return [
             'winner' => $winner,
@@ -329,45 +359,13 @@ class TriviaEngine implements GameEngineInterface
         // Broadcast respuesta
         event(new PlayerAnsweredEvent($match, $player, $isCorrect));
 
-        // Usar RoundManager para determinar si la ronda debe terminar
-        $roundManager = RoundManager::fromArray($gameState);
-
-        // Convertir player_answers a formato que entiende RoundManager
-        $playerResults = [];
-        foreach ($gameState['player_answers'] as $pid => $answer) {
-            $playerResults[$pid] = ['success' => $answer['is_correct']];
-        }
-
-        $roundStatus = $roundManager->shouldEndSimultaneousRound($playerResults);
-
-        if ($roundStatus['should_end']) {
-            // La ronda debe terminar
-            $this->endQuestion($match);
-
-            if ($roundStatus['reason'] === 'player_succeeded') {
-                return [
-                    'success' => true,
-                    'message' => $isCorrect ? '¡Correcto! Has ganado esta ronda' : 'Respuesta incorrecta. Otro jugador acertó.',
-                    'is_correct' => $isCorrect,
-                    'question_ended' => true,
-                ];
-            } else {
-                // all_failed
-                return [
-                    'success' => true,
-                    'message' => 'Respuesta incorrecta. Nadie acertó esta pregunta.',
-                    'is_correct' => false,
-                    'question_ended' => true,
-                ];
-            }
-        }
-
-        // La ronda continúa - aún hay jugadores que no han respondido
+        // Retornar resultado simple
+        // BaseGameEngine se encarga de coordinar con RoundManager
         return [
             'success' => true,
-            'message' => 'Respuesta incorrecta. Espera a que el resto responda.',
-            'is_correct' => false,
-            'question_ended' => false,
+            'player_id' => $player->id,
+            'is_correct' => $isCorrect,
+            'message' => $isCorrect ? '¡Correcto!' : 'Incorrecto',
         ];
     }
 
@@ -395,26 +393,44 @@ class TriviaEngine implements GameEngineInterface
 
         $questionResults = [];
 
-        foreach ($gameState['player_answers'] as $playerId => $answerData) {
-            $isCorrect = $answerData['answer'] === $correctAnswer;
+        // Obtener todos los jugadores activos del RoundManager
+        $roundManager = RoundManager::fromArray($gameState);
+        $activePlayers = $roundManager->getActivePlayers();
 
-            if ($isCorrect) {
-                // Otorgar puntos
-                $points = $scoreManager->awardPoints($playerId, 'correct_answer', [
-                    'seconds_elapsed' => $answerData['seconds_elapsed'],
-                    'time_limit' => $gameState['time_per_question']
-                ]);
+        // Procesar resultados de TODOS los jugadores (respondieron o no)
+        foreach ($activePlayers as $playerId) {
+            $answerData = $gameState['player_answers'][$playerId] ?? null;
 
-                $questionResults[$playerId] = [
-                    'correct' => true,
-                    'points_earned' => $points,
-                    'seconds_elapsed' => $answerData['seconds_elapsed']
-                ];
+            if ($answerData) {
+                // Jugador respondió
+                $isCorrect = $answerData['answer'] === $correctAnswer;
+
+                if ($isCorrect) {
+                    // Otorgar puntos
+                    $points = $scoreManager->awardPoints($playerId, 'correct_answer', [
+                        'seconds_elapsed' => $answerData['seconds_elapsed'],
+                        'time_limit' => $gameState['time_per_question']
+                    ]);
+
+                    $questionResults[$playerId] = [
+                        'correct' => true,
+                        'points_earned' => $points,
+                        'seconds_elapsed' => $answerData['seconds_elapsed']
+                    ];
+                } else {
+                    $questionResults[$playerId] = [
+                        'correct' => false,
+                        'points_earned' => 0,
+                        'seconds_elapsed' => $answerData['seconds_elapsed']
+                    ];
+                }
             } else {
+                // Jugador NO respondió - penalizar con 0 puntos
                 $questionResults[$playerId] = [
                     'correct' => false,
                     'points_earned' => 0,
-                    'seconds_elapsed' => $answerData['seconds_elapsed']
+                    'seconds_elapsed' => null,
+                    'did_not_answer' => true
                 ];
             }
         }
@@ -435,18 +451,7 @@ class TriviaEngine implements GameEngineInterface
             $gameState['scores']
         ));
 
-        // Usar RoundManager para programar el avance automático a la siguiente ronda
-        // Esto mantiene la responsabilidad en el módulo correcto
-        $roundManager = RoundManager::fromArray($gameState);
-        $matchId = $match->id;
-
-        $roundManager->scheduleNextRound(function () use ($matchId) {
-            $match = GameMatch::find($matchId);
-            if ($match && $match->game_state['phase'] === 'results') {
-                $engine = new TriviaEngine();
-                $engine->nextQuestion($match);
-            }
-        }, delaySeconds: 5);
+        // BaseGameEngine se encarga de programar la siguiente ronda vía RoundManager
     }
 
     /**

@@ -48,12 +48,18 @@ class PictionaryController extends Controller
         $currentDrawerId = $gameState['current_drawer_id'] ?? null;
         $role = ($player->id === $currentDrawerId) ? 'drawer' : 'guesser';
 
+        // Cargar event_config desde capabilities.json
+        $capabilitiesPath = base_path("games/{$room->game->slug}/capabilities.json");
+        $capabilities = json_decode(file_get_contents($capabilitiesPath), true);
+        $eventConfig = $capabilities['event_config'] ?? null;
+
         // Retornar la vista usando el namespace del juego
         return view('games.pictionary.canvas', [
             'room' => $room,
             'match' => $match,
             'playerId' => $player->id,
             'role' => $role,
+            'eventConfig' => $eventConfig,
         ]);
     }
 

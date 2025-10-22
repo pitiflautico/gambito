@@ -211,12 +211,16 @@
 @endsection
 
 @push('scripts')
+    @vite(['resources/js/pictionary-canvas.js'])
+
     <script>
         // Datos iniciales desde el servidor
         window.gameData = {
             matchId: {{ $match->id }},
             playerId: {{ $playerId ?? auth()->user()->id }},
             roomCode: '{{ $room->code }}',
+            gameSlug: 'pictionary',
+            eventConfig: @json($eventConfig ?? null),
             csrfToken: '{{ csrf_token() }}',
             isMaster: {{ auth()->check() && $room->master_id === auth()->id() ? 'true' : 'false' }},
             isGuest: {{ auth()->check() ? 'false' : 'true' }},
@@ -238,8 +242,23 @@
             @endif
         };
 
-        // El botón "YA LO SÉ" y su funcionalidad están manejados por pictionary-canvas.js
-        // que se compila con Vite y se carga automáticamente
+        // Inicializar PictionaryCanvas cuando el DOM esté listo
+        document.addEventListener('DOMContentLoaded', function() {
+            const canvas = document.getElementById('drawing-canvas');
+            if (!canvas) {
+                console.log('Pictionary canvas not found, skipping initialization');
+                return;
+            }
+
+            console.log('🚀 Initializing Pictionary Canvas...');
+            window.pictionaryCanvas = new window.PictionaryCanvas(window.gameData);
+
+            // Configurar rol inicial si está disponible en gameData
+            if (window.gameData?.role) {
+                const isDrawer = window.gameData.role === 'drawer';
+                const currentWord = window.gameData?.currentWord || null;
+                window.pictionaryCanvas.setRole(isDrawer, isDrawer ? currentWord : null);
+            }
+        });
     </script>
-    {{-- El canvas.js se carga a través de Vite en app.js --}}
 @endpush

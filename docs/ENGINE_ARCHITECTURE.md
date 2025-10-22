@@ -24,11 +24,13 @@ Establecer una arquitectura desacoplada y mantenible para los motores de juegos 
 │  │  - ¿Qué pasa cuando un jugador responde?          │    │
 │  │  - ¿Cómo se inicia una ronda?                     │    │
 │  │  - ¿Cómo se calculan los puntos?                  │    │
+│  │  - ¿Debe terminar el turno? (modo secuencial)    │    │
 │  └────────────────────────────────────────────────────┘    │
 │                         │                                    │
 │                         ▼                                    │
 │  ┌────────────────────────────────────────────────────┐    │
 │  │  COORDINACIÓN (BaseGameEngine)                     │    │
+│  │  - Detecta modo: simultáneo/secuencial            │    │
 │  │  - ¿Cuándo termina la ronda? → RoundManager       │    │
 │  │  - ¿Cuándo avanzar? → RoundManager                │    │
 │  │  - ¿Cómo gestionar turnos? → TurnManager          │    │
@@ -42,14 +44,36 @@ Establecer una arquitectura desacoplada y mantenible para los motores de juegos 
           │         MÓDULOS                    │
           ├───────────────────────────────────┤
           │  - RoundManager                   │
-          │  - TurnManager                    │
+          │  - TurnManager (simultaneous/sequential) │
           │  - ScoreManager                   │
           │  - TimerService                   │
           │  - SessionManager                 │
           └───────────────────────────────────┘
 ```
 
-### 2. Desacoplamiento
+### 2. Modos de Juego Soportados
+
+BaseGameEngine detecta automáticamente el modo del juego y adapta su coordinación:
+
+#### Modo Simultáneo (Trivia, Quiz)
+- **Característica**: Todos los jugadores actúan al mismo tiempo
+- **Finalización**: Automática vía `RoundManager->shouldEndSimultaneousRound()`
+- **Lógica**:
+  - Primer jugador en acertar → termina inmediatamente
+  - Todos respondieron → termina mostrando resultados
+
+#### Modo Secuencial (Pictionary, UNO)
+- **Característica**: Un jugador actúa por turno
+- **Finalización**: El Engine decide retornando `should_end_turn: true`
+- **Lógica**:
+  - El juego decide cuándo terminar (ej. respuesta correcta, timeout)
+  - BaseGameEngine programa el siguiente turno vía RoundManager
+
+#### Modo Equipos (futura implementación)
+- **Característica**: Grupos compiten
+- **Finalización**: Similar a simultáneo pero agrupado por equipo
+
+### 3. Desacoplamiento
 
 ❌ **NUNCA:**
 - El Engine NO decide cuándo terminar rondas (lo hace RoundManager)
@@ -271,7 +295,7 @@ $engine = new TriviaEngine();
 $engine->initialize($match);
 ```
 
-### 2. Jugador Actúa
+### 2. Jugador Actúa - Modo Simultáneo (Trivia)
 
 ```php
 $result = $engine->processAction($match, $player, 'answer', ['answer' => 2]);
@@ -287,19 +311,51 @@ $result = $engine->processAction($match, $player, 'answer', ['answer' => 2]);
    - Guarda resultado
    - Emite evento
    ↓
-3. getAllPlayerResults() [TriviaEngine]
+3. Detecta modo: 'simultaneous'
+   ↓
+4. getAllPlayerResults() [TriviaEngine]
    - Retorna todos los resultados
    ↓
-4. roundManager->shouldEndSimultaneousRound() [RoundManager]
+5. roundManager->shouldEndSimultaneousRound() [RoundManager]
    - DECIDE si terminar ronda
    ↓
-5. Si debe terminar:
+6. Si debe terminar:
    - endCurrentRound() [TriviaEngine - lógica específica]
    - roundManager->scheduleNextRound() [RoundManager]
      ↓
      (después de 5 segundos)
      ↓
    - startNewRound() [TriviaEngine - lógica específica]
+```
+
+### 3. Jugador Actúa - Modo Secuencial (Pictionary)
+
+```php
+$result = $engine->processAction($match, $player, 'confirm_answer', ['is_correct' => true]);
+```
+
+**Internamente (BaseGameEngine):**
+
+```
+1. processAction() [BaseGameEngine]
+   ↓
+2. processRoundAction() [PictionaryEngine - lógica específica]
+   - Verifica que sea el drawer
+   - Otorga puntos
+   - Emite evento
+   - Retorna ['success' => true, 'should_end_turn' => true]
+   ↓
+3. Detecta modo: 'sequential'
+   ↓
+4. Lee 'should_end_turn' del resultado
+   ↓
+5. Si debe terminar:
+   - endCurrentRound() [PictionaryEngine - lógica específica]
+   - roundManager->scheduleNextRound() [RoundManager]
+     ↓
+     (después de delay configurable)
+     ↓
+   - startNewRound() [PictionaryEngine - siguiente turno]
 ```
 
 ## 📦 Beneficios
