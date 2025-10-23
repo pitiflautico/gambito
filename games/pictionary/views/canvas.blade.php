@@ -194,7 +194,9 @@
     <div class="modal-content">
         <h2>¡Fin de la ronda!</h2>
         <div id="round-results"></div>
-        <button id="next-round-btn" class="btn-primary">Siguiente ronda</button>
+        <p class="text-gray-600 text-sm mt-4">
+            El siguiente turno comenzará automáticamente en <span id="countdown">3</span> segundos...
+        </p>
     </div>
 </div>
 

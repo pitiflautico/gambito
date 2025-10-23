@@ -38,8 +38,8 @@
                     @if($isMaster)
                     <!-- Controles del Master -->
                     <div class="space-y-4">
-                        <!-- Número de Equipos -->
-                        <div class="bg-white rounded-lg p-4">
+                        <!-- Número de Equipos - Solo visible si no hay equipos creados -->
+                        <div id="create-teams-panel" class="bg-white rounded-lg p-4">
                             <label class="block text-sm font-medium text-gray-700 mb-2">
                                 Número de Equipos
                             </label>
@@ -75,50 +75,67 @@
                             <p class="text-xs text-gray-500 mt-2">Crea los equipos para empezar a asignar jugadores</p>
                         </div>
 
+                        <!-- Panel cuando ya existen equipos -->
+                        <div id="teams-created-panel" class="bg-white rounded-lg p-4 hidden">
+                            <div class="flex items-center justify-between mb-3">
+                                <div>
+                                    <h4 class="font-semibold text-gray-900">Equipos Creados</h4>
+                                    <p class="text-xs text-gray-500">Arrastra jugadores a los equipos para asignarlos</p>
+                                </div>
+                                <button
+                                    onclick="resetTeams()"
+                                    class="text-sm text-red-600 hover:text-red-700 font-medium"
+                                >
+                                    🔄 Reiniciar
+                                </button>
+                            </div>
+                        </div>
+
                         <!-- Modo de Asignación -->
-                        <div class="bg-white rounded-lg p-4">
+                        <div id="assignment-mode-panel" class="bg-white rounded-lg p-4 hidden">
                             <label class="block text-sm font-medium text-gray-700 mb-3">
                                 Método de Asignación
                             </label>
                             <div class="space-y-2">
-                                <label class="flex items-start p-3 border-2 border-gray-200 rounded-lg cursor-pointer hover:border-purple-400">
-                                    <input
-                                        type="radio"
-                                        name="assignment_mode"
-                                        value="manual"
-                                        checked
-                                        class="mt-1 mr-3 text-purple-600"
-                                    >
-                                    <div>
-                                        <div class="font-medium">Manual</div>
-                                        <div class="text-xs text-gray-500">Arrastra jugadores a los equipos</div>
+                                <button
+                                    onclick="balanceTeams()"
+                                    class="w-full flex items-start p-3 border-2 border-purple-300 bg-purple-50 rounded-lg hover:border-purple-500 hover:bg-purple-100 transition"
+                                >
+                                    <div class="text-left">
+                                        <div class="font-medium text-purple-900">🎲 Balancear Equipos Ahora</div>
+                                        <div class="text-xs text-purple-700">Distribución automática equitativa de todos los jugadores</div>
                                     </div>
-                                </label>
-                                <label class="flex items-start p-3 border-2 border-gray-200 rounded-lg cursor-pointer hover:border-purple-400">
-                                    <input
-                                        type="radio"
-                                        name="assignment_mode"
-                                        value="random"
-                                        class="mt-1 mr-3 text-purple-600"
-                                    >
-                                    <div>
-                                        <div class="font-medium">Aleatorio Balanceado</div>
-                                        <div class="text-xs text-gray-500">Distribución automática equitativa</div>
-                                    </div>
-                                </label>
-                                <label class="flex items-start p-3 border-2 border-gray-200 rounded-lg cursor-pointer hover:border-purple-400">
-                                    <input
-                                        type="radio"
-                                        name="assignment_mode"
-                                        value="self"
-                                        class="mt-1 mr-3 text-purple-600"
-                                        onchange="toggleSelfSelection(this.checked)"
-                                    >
-                                    <div>
-                                        <div class="font-medium">Auto-selección</div>
-                                        <div class="text-xs text-gray-500">Cada jugador elige su equipo</div>
-                                    </div>
-                                </label>
+                                </button>
+
+                                <div class="border-t pt-2 mt-2">
+                                    <p class="text-xs text-gray-500 mb-2">O configura el modo de asignación:</p>
+                                    <label class="flex items-start p-3 border-2 border-gray-200 rounded-lg cursor-pointer hover:border-purple-400">
+                                        <input
+                                            type="radio"
+                                            name="assignment_mode"
+                                            value="manual"
+                                            checked
+                                            class="mt-1 mr-3 text-purple-600"
+                                        >
+                                        <div>
+                                            <div class="font-medium">Manual</div>
+                                            <div class="text-xs text-gray-500">Arrastra jugadores a los equipos</div>
+                                        </div>
+                                    </label>
+                                    <label class="flex items-start p-3 border-2 border-gray-200 rounded-lg cursor-pointer hover:border-purple-400">
+                                        <input
+                                            type="radio"
+                                            name="assignment_mode"
+                                            value="self"
+                                            class="mt-1 mr-3 text-purple-600"
+                                            onchange="toggleSelfSelection(this.checked)"
+                                        >
+                                        <div>
+                                            <div class="font-medium">Auto-selección</div>
+                                            <div class="text-xs text-gray-500">Cada jugador elige su equipo</div>
+                                        </div>
+                                    </label>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -157,7 +174,15 @@
                             @if($room->match && $room->match->players->count() > 0)
                                 <div class="space-y-2">
                                     @foreach($room->match->players as $player)
-                                        <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg" data-player-id="{{ $player->id }}">
+                                        <div
+                                            class="flex items-center justify-between p-3 bg-gray-50 rounded-lg {{ $isMaster ? 'cursor-move hover:bg-gray-100' : '' }}"
+                                            data-player-id="{{ $player->id }}"
+                                            @if($isMaster)
+                                            draggable="true"
+                                            ondragstart="handleDragStart(event)"
+                                            ondragend="handleDragEnd(event)"
+                                            @endif
+                                        >
                                             <div class="flex items-center space-x-3">
                                                 <div class="w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold">
                                                     {{ strtoupper(substr($player->name, 0, 1)) }}
@@ -311,6 +336,25 @@
             </div>
         </div>
     </div>
+
+    @push('styles')
+    <style>
+        .drop-zone {
+            transition: all 0.3s ease;
+        }
+        .drop-zone.dragging-over {
+            border-width: 4px;
+            border-color: #9333ea;
+            background-color: #faf5ff;
+        }
+        [draggable="true"] {
+            transition: opacity 0.3s ease;
+        }
+        [draggable="true"]:active {
+            cursor: grabbing;
+        }
+    </style>
+    @endpush
 
     @push('scripts')
     <script>
@@ -526,6 +570,7 @@
 
         function initializeTeams() {
             const count = parseInt(document.getElementById('team-count').value);
+            const mode = '{{ $gameConfig['modules']['teams_system']['default_mode'] ?? 'team_turns' }}';
 
             // Llamar a API para crear equipos
             fetch('/api/rooms/{{ $room->code }}/teams/enable', {
@@ -535,17 +580,23 @@
                     'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
                 },
                 body: JSON.stringify({
+                    mode: mode,
                     num_teams: count
                 })
             })
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
+                    // Ocultar panel de creación y mostrar paneles activos
+                    document.getElementById('create-teams-panel').classList.add('hidden');
+                    document.getElementById('teams-created-panel').classList.remove('hidden');
+                    document.getElementById('assignment-mode-panel').classList.remove('hidden');
+
                     // Mostrar área de equipos
                     document.getElementById('teams-area').classList.remove('hidden');
-                    renderTeams(data.teams);
+                    renderTeams(data.teams, false); // Al crear, auto-selección está deshabilitada por defecto
                 } else {
-                    alert('Error al crear equipos: ' + (data.message || 'Error desconocido'));
+                    alert('Error al crear equipos: ' + (data.error || 'Error desconocido'));
                 }
             })
             .catch(error => {
@@ -554,9 +605,15 @@
             });
         }
 
-        function renderTeams(teams) {
+        // Variable global para almacenar si la auto-selección está habilitada
+        let allowSelfSelection = false;
+        let currentPlayerId = {{ Auth::id() ?? 'null' }};
+
+        function renderTeams(teams, selfSelectionEnabled = false) {
+            allowSelfSelection = selfSelectionEnabled;
             const container = document.getElementById('teams-container');
             const colors = ['bg-red-100 border-red-300', 'bg-blue-100 border-blue-300', 'bg-green-100 border-green-300', 'bg-yellow-100 border-yellow-300'];
+            const isMaster = {{ $isMaster ? 'true' : 'false' }};
 
             container.innerHTML = teams.map((team, index) => `
                 <div class="border-2 rounded-lg p-4 ${colors[index % colors.length]}">
@@ -564,12 +621,34 @@
                         <h5 class="font-bold text-lg">${team.name}</h5>
                         <span class="text-sm font-medium px-2 py-1 bg-white rounded-full">${team.members.length} jugadores</span>
                     </div>
-                    <div id="team-${team.id}" class="space-y-2 min-h-[100px]">
+                    <div
+                        id="team-${team.id}"
+                        data-team-id="${team.id}"
+                        class="space-y-2 min-h-[100px] ${isMaster ? 'drop-zone' : ''}"
+                    >
                         ${team.members.length === 0 ? '<p class="text-sm text-gray-500 text-center py-4">Sin jugadores</p>' : ''}
                         ${team.members.map(memberId => renderPlayerInTeam(memberId)).join('')}
                     </div>
+                    ${allowSelfSelection && currentPlayerId && !team.members.includes(currentPlayerId) ? `
+                        <button
+                            onclick="joinTeam('${team.id}')"
+                            class="w-full mt-3 px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium rounded-lg transition"
+                        >
+                            Unirme a este equipo
+                        </button>
+                    ` : ''}
                 </div>
             `).join('');
+
+            // Agregar event listeners a las drop zones después de renderizar
+            if (isMaster) {
+                document.querySelectorAll('.drop-zone').forEach(dropZone => {
+                    dropZone.addEventListener('dragover', handleDragOver);
+                    dropZone.addEventListener('dragenter', handleDragEnter);
+                    dropZone.addEventListener('dragleave', handleDragLeave);
+                    dropZone.addEventListener('drop', handleDrop);
+                });
+            }
         }
 
         function renderPlayerInTeam(playerId) {
@@ -589,14 +668,231 @@
             return '';
         }
 
+        // =======================
+        // Drag & Drop para asignación manual
+        // =======================
+        let draggedPlayerId = null;
+
+        function handleDragStart(event) {
+            draggedPlayerId = event.target.dataset.playerId;
+            event.target.style.opacity = '0.4';
+            event.dataTransfer.effectAllowed = 'move';
+            event.dataTransfer.setData('text/html', event.target.innerHTML);
+        }
+
+        function handleDragEnd(event) {
+            event.target.style.opacity = '1';
+        }
+
+        function handleDragOver(event) {
+            if (event.preventDefault) {
+                event.preventDefault();
+            }
+            event.dataTransfer.dropEffect = 'move';
+            return false;
+        }
+
+        function handleDragEnter(event) {
+            const dropZone = event.currentTarget;
+            if (dropZone.classList.contains('drop-zone')) {
+                dropZone.classList.add('border-4', 'border-purple-500', 'bg-purple-50');
+            }
+        }
+
+        function handleDragLeave(event) {
+            const dropZone = event.currentTarget;
+            if (dropZone.classList.contains('drop-zone')) {
+                dropZone.classList.remove('border-4', 'border-purple-500', 'bg-purple-50');
+            }
+        }
+
+        function handleDrop(event) {
+            if (event.stopPropagation) {
+                event.stopPropagation();
+            }
+
+            const dropZone = event.currentTarget;
+            dropZone.classList.remove('border-4', 'border-purple-500', 'bg-purple-50');
+
+            if (!draggedPlayerId) return false;
+
+            const teamId = dropZone.dataset.teamId;
+
+            // Llamar al API para asignar el jugador
+            fetch('/api/rooms/{{ $room->code }}/teams/assign', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                },
+                body: JSON.stringify({
+                    player_id: parseInt(draggedPlayerId),
+                    team_id: teamId
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    console.log('Jugador asignado correctamente');
+                    // La actualización se hará automáticamente via WebSocket
+                } else {
+                    alert('Error: ' + (data.error || 'No se pudo asignar el jugador'));
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error al asignar jugador');
+            });
+
+            draggedPlayerId = null;
+            return false;
+        }
+
+        // =======================
+        // Fin Drag & Drop
+        // =======================
+
+        function joinTeam(teamId) {
+            if (!currentPlayerId) {
+                alert('Debes estar logueado para unirte a un equipo');
+                return;
+            }
+
+            fetch('/api/rooms/{{ $room->code }}/teams/assign', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                },
+                body: JSON.stringify({
+                    player_id: currentPlayerId,
+                    team_id: teamId
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    console.log('Unido al equipo exitosamente');
+                    // La actualización se hará automáticamente via WebSocket
+                } else {
+                    alert('Error: ' + (data.error || 'No se pudo unir al equipo'));
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error al unirse al equipo');
+            });
+        }
+
         function removeFromTeam(playerId) {
-            // Implementar lógica de remover jugador del equipo
-            console.log('Remover jugador:', playerId);
+            if (!confirm('¿Remover este jugador del equipo?')) {
+                return;
+            }
+
+            fetch('/api/rooms/{{ $room->code }}/teams/players/' + playerId, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    console.log('Jugador removido del equipo');
+                    // La actualización se hará automáticamente via WebSocket
+                } else {
+                    alert('Error: ' + (data.error || 'No se pudo remover el jugador'));
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error al remover jugador');
+            });
+        }
+
+        function balanceTeams() {
+            if (!confirm('¿Distribuir automáticamente todos los jugadores en los equipos de forma equitativa?')) {
+                return;
+            }
+
+            fetch('/api/rooms/{{ $room->code }}/teams/balance', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Actualizar vista de equipos
+                    loadExistingTeams(); // Recargar para obtener también allow_self_selection
+                    updatePlayerTeamBadges();
+                    alert('✓ Jugadores distribuidos en equipos');
+                } else {
+                    alert('Error: ' + (data.error || 'No se pudo balancear los equipos'));
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error al balancear equipos');
+            });
+        }
+
+        function resetTeams() {
+            if (!confirm('¿Estás seguro de reiniciar los equipos? Todos los jugadores serán desasignados.')) {
+                return;
+            }
+
+            fetch('/api/rooms/{{ $room->code }}/teams/disable', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Mostrar panel de creación
+                    document.getElementById('create-teams-panel').classList.remove('hidden');
+                    document.getElementById('teams-created-panel').classList.add('hidden');
+                    document.getElementById('assignment-mode-panel').classList.add('hidden');
+                    document.getElementById('teams-area').classList.add('hidden');
+                    alert('✓ Equipos reiniciados');
+                } else {
+                    alert('Error: ' + (data.error || 'No se pudo reiniciar'));
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error al reiniciar equipos');
+            });
         }
 
         function toggleSelfSelection(enabled) {
-            // Implementar lógica para habilitar/deshabilitar auto-selección
-            console.log('Auto-selección:', enabled);
+            fetch('/api/rooms/{{ $room->code }}/teams/self-selection', {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                },
+                body: JSON.stringify({
+                    allow_self_selection: enabled
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    console.log('Auto-selección actualizada:', enabled);
+                } else {
+                    alert('Error al actualizar configuración');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+            });
         }
 
         // Actualizar badges de equipo en la lista de jugadores
@@ -636,11 +932,82 @@
         }
 
         // Actualizar badges al cargar
+        // Cargar equipos existentes al inicio
+        function loadExistingTeams() {
+            console.log('Loading existing teams...');
+            fetch('/api/rooms/{{ $room->code }}/teams')
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Teams data received:', data);
+                    if (data.success && data.enabled && data.teams && data.teams.length > 0) {
+                        // Ocultar panel de creación y mostrar paneles activos (solo para master)
+                        const createPanel = document.getElementById('create-teams-panel');
+                        const teamsCreatedPanel = document.getElementById('teams-created-panel');
+                        const assignmentPanel = document.getElementById('assignment-mode-panel');
+
+                        if (createPanel) createPanel.classList.add('hidden');
+                        if (teamsCreatedPanel) teamsCreatedPanel.classList.remove('hidden');
+                        if (assignmentPanel) assignmentPanel.classList.remove('hidden');
+
+                        // Mostrar área de equipos
+                        document.getElementById('teams-area').classList.remove('hidden');
+                        console.log('Rendering teams:', data.teams);
+                        renderTeams(data.teams, data.allow_self_selection || false);
+
+                        // Sincronizar el estado del radio button
+                        if (data.allow_self_selection) {
+                            const selfRadio = document.querySelector('input[name="assignment_mode"][value="self"]');
+                            if (selfRadio) selfRadio.checked = true;
+                        } else {
+                            const manualRadio = document.querySelector('input[name="assignment_mode"][value="manual"]');
+                            if (manualRadio) manualRadio.checked = true;
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading teams:', error);
+                });
+        }
+
+        // Escuchar eventos de equipos vía WebSocket
+        function setupTeamsWebSocket() {
+            if (typeof Echo !== 'undefined') {
+                Echo.channel('lobby.{{ $room->code }}')
+                    .listen('.teams.balanced', (e) => {
+                        console.log('Equipos balanceados:', e);
+                        loadExistingTeams();
+                        updatePlayerTeamBadges();
+                    })
+                    .listen('.teams.config-updated', (e) => {
+                        console.log('Configuración de equipos actualizada:', e);
+                        loadExistingTeams();
+                    })
+                    .listen('.player.moved', (e) => {
+                        console.log('Jugador movido a equipo:', e);
+                        loadExistingTeams();
+                        updatePlayerTeamBadges();
+                    })
+                    .listen('.player.removed', (e) => {
+                        console.log('Jugador removido de equipo:', e);
+                        loadExistingTeams();
+                        updatePlayerTeamBadges();
+                    });
+            }
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
+            // DEBUG: Verificar si el drag está funcionando
+            console.log('Is Master:', {{ $isMaster ? 'true' : 'false' }});
+            console.log('Players with draggable:', document.querySelectorAll('[draggable="true"]').length);
+
+            // Cargar equipos si existen
+            loadExistingTeams();
+
+            // Actualizar badges de equipos
             updatePlayerTeamBadges();
 
-            // Actualizar cada 5 segundos
-            setInterval(updatePlayerTeamBadges, 5000);
+            // Configurar WebSocket para actualizaciones en tiempo real
+            setupTeamsWebSocket();
         });
     </script>
     @endpush

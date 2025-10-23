@@ -29,13 +29,6 @@ class EventManager {
 
         this.validateConfig();
 
-        console.log('[EventManager] Initialized', {
-            roomCode: this.roomCode,
-            gameSlug: this.gameSlug,
-            events: Object.keys(this.eventConfig.events || {}),
-            autoConnect: this.autoConnect
-        });
-
         if (this.autoConnect) {
             this.connect();
         }
@@ -46,19 +39,19 @@ class EventManager {
      */
     validateConfig() {
         if (!this.roomCode) {
-            console.error('[EventManager] roomCode is required');
+
             this.status = 'error';
             return false;
         }
 
         if (!this.gameSlug) {
-            console.error('[EventManager] gameSlug is required');
+
             this.status = 'error';
             return false;
         }
 
         if (!this.eventConfig || !this.eventConfig.channel || !this.eventConfig.events) {
-            console.error('[EventManager] Invalid eventConfig. Must have channel and events');
+
             this.status = 'error';
             return false;
         }
@@ -71,12 +64,12 @@ class EventManager {
      */
     connect() {
         if (this.status === 'error') {
-            console.error('[EventManager] Cannot connect due to configuration errors');
+
             return;
         }
 
         if (!window.Echo) {
-            console.error('[EventManager] Laravel Echo not available. Make sure it is loaded.');
+
             this.status = 'error';
             return;
         }
@@ -93,7 +86,6 @@ class EventManager {
             this.registerListeners();
 
             this.status = 'connected';
-            console.log('[EventManager] Connected to channel:', channelName);
 
             // Callback de conexión exitosa (si existe)
             if (this.handlers.onConnected) {
@@ -101,7 +93,7 @@ class EventManager {
             }
 
         } catch (error) {
-            console.error('[EventManager] Error connecting:', error);
+
             this.status = 'error';
 
             // Callback de error (si existe)
@@ -116,7 +108,7 @@ class EventManager {
      */
     registerListeners() {
         if (!this.channel) {
-            console.error('[EventManager] Cannot register listeners: channel not connected');
+
             return;
         }
 
@@ -124,18 +116,16 @@ class EventManager {
             const { name, handler } = config;
 
             if (!this.handlers[handler]) {
-                console.warn(`[EventManager] Handler not found: ${handler} for event ${name}`);
+
                 return;
             }
 
             // Registrar listener
             this.channel.listen(name, (event) => {
-                console.log(`[EventManager] Received: ${name}`, event);
 
                 try {
                     this.handlers[handler](event);
                 } catch (error) {
-                    console.error(`[EventManager] Error in handler ${handler}:`, error);
 
                     if (this.handlers.onError) {
                         this.handlers.onError(error, { eventName: name, event });
@@ -144,10 +134,9 @@ class EventManager {
             });
 
             this.listeners.push({ eventClass, name, handler });
-            console.log(`[EventManager] Registered listener: ${name} → ${handler}`);
+
         });
 
-        console.log(`[EventManager] Registered ${this.listeners.length} listeners`);
     }
 
     /**
@@ -162,7 +151,6 @@ class EventManager {
         }
 
         this.status = 'disconnected';
-        console.log('[EventManager] Disconnected');
 
         // Callback de desconexión (si existe)
         if (this.handlers.onDisconnected) {
@@ -209,8 +197,8 @@ class EventManager {
      * Nota: Actualmente los juegos usan HTTP API para enviar acciones al servidor
      */
     emit(eventName, payload) {
-        console.warn('[EventManager] emit() not implemented. Use HTTP API to send actions to server.');
-        console.log('[EventManager] Would emit:', eventName, payload);
+
+
     }
 }
 

@@ -264,7 +264,7 @@ class TeamsManager
             foreach ($state['teams_config']['teams'] as &$team) {
                 if ($team['id'] === $teamId) {
                     // Verificar límite de miembros
-                    $maxMembers = $state['teams_config']['max_members_per_team'];
+                    $maxMembers = $state['teams_config']['max_members_per_team'] ?? null;
                     if ($maxMembers !== null && count($team['members']) >= $maxMembers) {
                         return false; // Equipo lleno
                     }

@@ -265,7 +265,9 @@ class TimerService
         }
 
         return [
-            'timers' => $timersData,
+            'timer_system' => [
+                'timers' => $timersData,
+            ]
         ];
     }
 
@@ -279,9 +281,12 @@ class TimerService
     {
         $timers = [];
 
-        if (isset($data['timers'])) {
-            foreach ($data['timers'] as $name => $timerData) {
-                $timers[$name] = Timer::fromArray($timerData);
+        // Soporte para ambos formatos: nuevo (timer_system) y legacy (claves directas)
+        $timerData = $data['timer_system'] ?? $data;
+
+        if (isset($timerData['timers'])) {
+            foreach ($timerData['timers'] as $name => $timerInfo) {
+                $timers[$name] = Timer::fromArray($timerInfo);
             }
         }
 

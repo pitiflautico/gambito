@@ -344,6 +344,29 @@ class RoomService
     }
 
     /**
+     * Verificar si el master (creador) de la sala está conectado.
+     *
+     * @param Room $room La sala
+     * @return bool True si el master está conectado
+     */
+    public function isMasterConnected(Room $room): bool
+    {
+        if (!$room->match) {
+            return false;
+        }
+
+        $masterPlayer = $room->match->players()
+            ->where('user_id', $room->master_id)
+            ->first();
+
+        if (!$masterPlayer) {
+            return false;
+        }
+
+        return $masterPlayer->is_connected;
+    }
+
+    /**
      * Cerrar una sala (eliminar o marcar como inactiva).
      *
      * @param Room $room La sala

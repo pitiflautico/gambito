@@ -126,10 +126,10 @@ $roundManager->eliminatePlayer($playerId, permanent: true);
 ```
 
 ### Eliminación Temporal
-El jugador queda fuera solo de esta ronda. Se restaura automáticamente al comenzar la siguiente ronda.
+El jugador queda fuera temporalmente. Por defecto, se restaura automáticamente al comenzar la siguiente ronda.
 
-**Casos de uso:**
-- Pictionary (dibujante que nadie adivina)
+**Casos de uso estándar:**
+- Battle Royale (jugador fuera de una ronda)
 - Trivia (jugador que responde mal en esta ronda)
 
 ```php
@@ -141,6 +141,23 @@ if ($roundManager->isNewRound()) {
     // temporarilyEliminated se limpia automáticamente
 }
 ```
+
+**Casos de uso con lógica específica:**
+
+Algunos juegos necesitan limpiar eliminaciones temporales en cada TURNO, no solo al completar RONDA:
+
+- **Pictionary**: Cada turno es independiente. Los jugadores que respondieron incorrectamente pueden volver a responder en el siguiente turno (nuevo dibujante).
+
+```php
+// En PictionaryEngine::nextTurn()
+$roundManager->nextTurn();
+
+// IMPORTANTE: En Pictionary, limpiar en cada turno
+// (no esperar a que complete la ronda)
+$roundManager->clearTemporaryEliminations();
+```
+
+Esta flexibilidad permite que cada juego defina su propia lógica de eliminación temporal según sus reglas específicas.
 
 ---
 
@@ -257,9 +274,10 @@ $roundManager->isGameComplete();
 
 ### Pictionary
 - **Rondas:** 5 rondas configurables
-- **Eliminación:** Temporal (dibujante que nadie adivina)
+- **Eliminación:** Temporal por TURNO (jugadores que responden mal pueden volver a responder en el siguiente turno)
 - **Turnos:** Sequential (cada jugador dibuja en orden)
 - **Fin de juego:** Al completar todas las rondas
+- **Lógica especial:** Limpia eliminaciones temporales en cada turno (no al completar ronda)
 
 ### Battle Royale (futuro)
 - **Rondas:** Infinitas (totalRounds: 0)

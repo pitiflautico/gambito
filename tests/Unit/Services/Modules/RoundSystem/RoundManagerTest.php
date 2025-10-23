@@ -244,10 +244,11 @@ class RoundManagerTest extends TestCase
 
         $data = $roundManager->toArray();
 
-        $this->assertEquals(2, $data['current_round']);
-        $this->assertEquals(5, $data['total_rounds']);
-        $this->assertEquals([1], $data['permanently_eliminated']);
-        $this->assertEquals([2], $data['temporarily_eliminated']);
+        $this->assertArrayHasKey('round_system', $data);
+        $this->assertEquals(2, $data['round_system']['current_round']);
+        $this->assertEquals(5, $data['round_system']['total_rounds']);
+        $this->assertEquals([1], $data['round_system']['permanently_eliminated']);
+        $this->assertEquals([2], $data['round_system']['temporarily_eliminated']);
         $this->assertArrayHasKey('turn_system', $data);
     }
 

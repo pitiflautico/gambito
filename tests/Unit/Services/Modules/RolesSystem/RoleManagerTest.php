@@ -327,12 +327,14 @@ class RoleManagerTest extends TestCase
         $data = $manager->toArray();
 
         $this->assertEquals([
-            'player_roles' => [
-                1 => 'drawer',
-                2 => 'guesser',
-            ],
-            'available_roles' => ['drawer', 'guesser'],
-            'allow_multiple_roles' => false,
+            'roles_system' => [
+                'player_roles' => [
+                    1 => 'drawer',
+                    2 => 'guesser',
+                ],
+                'available_roles' => ['drawer', 'guesser'],
+                'allow_multiple_roles' => false,
+            ]
         ], $data);
     }
 
@@ -349,11 +351,13 @@ class RoleManagerTest extends TestCase
         $data = $manager->toArray();
 
         $this->assertEquals([
-            'player_roles' => [
-                1 => ['role1', 'role2'],
-            ],
-            'available_roles' => ['role1', 'role2'],
-            'allow_multiple_roles' => true,
+            'roles_system' => [
+                'player_roles' => [
+                    1 => ['role1', 'role2'],
+                ],
+                'available_roles' => ['role1', 'role2'],
+                'allow_multiple_roles' => true,
+            ]
         ], $data);
     }
 

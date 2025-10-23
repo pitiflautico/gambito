@@ -39,8 +39,7 @@ class PictionaryController extends Controller
         $player = SessionManager::getCurrentPlayer($match);
 
         if (!$player) {
-            return redirect()->route('rooms.lobby', ['code' => $roomCode])
-                ->with('error', 'Debes unirte a la partida primero');
+            abort(403, 'Debes unirte a la partida primero. Usa /rooms/' . $roomCode . ' para acceder.');
         }
 
         // Obtener el rol del jugador desde el motor del juego
@@ -54,7 +53,7 @@ class PictionaryController extends Controller
         $eventConfig = $capabilities['event_config'] ?? null;
 
         // Retornar la vista usando el namespace del juego
-        return view('games.pictionary.canvas', [
+        return view('pictionary::canvas', [
             'room' => $room,
             'match' => $match,
             'playerId' => $player->id,
@@ -85,9 +84,8 @@ class PictionaryController extends Controller
         // Crear ID de jugador según el rol
         $playerId = $role === 'drawer' ? 1 : 2;
 
-        // Por ahora cargamos la vista directamente desde el archivo
-        // TODO Task 6.0: Registrar el namespace de vistas del juego
-        return view('games.pictionary.canvas', compact('room', 'match', 'playerId', 'role'));
+        // Vista usando namespace del juego
+        return view('pictionary::canvas', compact('room', 'match', 'playerId', 'role'));
     }
 
     /**

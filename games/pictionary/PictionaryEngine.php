@@ -3,6 +3,8 @@
 namespace Games\Pictionary;
 
 use App\Contracts\BaseGameEngine;
+use App\Contracts\Strategies\EndRoundStrategy;
+use App\Contracts\Strategies\PictionaryPhaseStrategy;
 use App\Models\GameMatch;
 use App\Models\Player;
 use Illuminate\Support\Facades\Log;
@@ -37,11 +39,72 @@ class PictionaryEngine extends BaseGameEngine
      *
      * @return array Configuración del juego
      */
-    private function getGameConfig(): array
+    protected function getGameConfig(): array
     {
         $configPath = base_path('games/pictionary/config.json');
         return json_decode(file_get_contents($configPath), true);
     }
+
+    /**
+     * Determinar si se deben limpiar eliminaciones temporales.
+     *
+     * En Pictionary, cada turno es independiente - los jugadores eliminados
+     * temporalmente pueden volver a intentar en el siguiente turno.
+     *
+     * @return bool
+     */
+    protected function shouldClearTemporaryEliminations(): bool
+    {
+        return true;
+    }
+
+    /**
+     * Identificar roles complementarios.
+     *
+     * En Pictionary: 'guesser' es complementario de 'drawer'
+     *
+     * @param string $role
+     * @return bool
+     */
+    protected function isComplementaryRole(string $role): bool
+    {
+        return $role === 'guesser';
+    }
+
+    /**
+     * Obtener rol complementario.
+     *
+     * drawer -> guesser
+     *
+     * @param string $role
+     * @return string|null
+     */
+    protected function getComplementaryRole(string $role): ?string
+    {
+        return $role === 'drawer' ? 'guesser' : null;
+    }
+
+    /**
+     * Obtener estrategia de finalización basada en FASES.
+     *
+     * Pictionary usa una estrategia custom que cambia según la fase:
+     * - PLAYING: Termina cuando dibujante confirma respuesta
+     * - SCORING: No termina (Frontend controla timing)
+     * - RESULTS: Juego terminado
+     *
+     * @param string $turnMode
+     * @return EndRoundStrategy
+     */
+    protected function getEndRoundStrategy(string $turnMode): EndRoundStrategy
+    {
+        // Pictionary usa estrategia basada en fases, no en modo
+        return new PictionaryPhaseStrategy();
+    }
+
+    // ========================================================================
+    // NOTA: Los helpers getScores(), getTotalRounds(), getCurrentRound(),
+    // y getTemporarilyEliminated() ahora están en BaseGameEngine
+    // ========================================================================
 
     /**
      * Inicializar el juego cuando comienza una partida.
@@ -200,7 +263,7 @@ class PictionaryEngine extends BaseGameEngine
         }
 
         // Encontrar jugador con mayor puntuación
-        $scores = $gameState['scores'];
+        $scores = $this->getScores($gameState);
 
         if (empty($scores)) {
             return null;
@@ -233,38 +296,30 @@ class PictionaryEngine extends BaseGameEngine
         $gameState = $match->game_state;
 
         // ========================================================================
-        // TURN SYSTEM MODULE: Verificar si jugador está eliminado temporalmente
+        // Usar helpers de BaseGameEngine en lugar de ::fromArray()
         // ========================================================================
-        $roundManager = RoundManager::fromArray($gameState);
-        $isEliminated = $roundManager->isTemporarilyEliminated($player->id);
-
-        // ========================================================================
-        // ROLES SYSTEM MODULE: Verificar rol del jugador
-        // ========================================================================
-        $roleManager = RoleManager::fromArray($gameState);
-        $isDrawer = $roleManager->hasRole($player->id, 'drawer');
-        $currentDrawers = $roleManager->getPlayersWithRole('drawer');
+        $isEliminated = $this->isPlayerTemporarilyEliminated($match, $player->id);
+        $isDrawer = $this->playerHasRole($match, $player->id, 'drawer');
+        $currentDrawers = $this->getPlayersWithRole($match, 'drawer');
         $currentDrawerId = !empty($currentDrawers) ? $currentDrawers[0] : null;
 
-        // ========================================================================
-        // TIMER SYSTEM MODULE: Obtener tiempo restante del turno
-        // ========================================================================
-        $timerService = TimerService::fromArray($gameState);
+        // Timer: getTimerService() helper
         $timeRemaining = null;
-        if ($timerService->hasTimer('turn_timer') && $gameState['phase'] === 'playing') {
-            $timeRemaining = $timerService->getRemainingTime('turn_timer');
+        if ($gameState['phase'] === 'playing') {
+            $timerService = $this->getTimerService($match);
+            if ($timerService->hasTimer('turn_timer')) {
+                $timeRemaining = $timerService->getRemainingTime('turn_timer');
+            }
         }
 
-        // ========================================================================
-        // TURN SYSTEM MODULE: Obtener info del turno actual
-        // ========================================================================
-        $roundManager = RoundManager::fromArray($gameState);
+        // RoundManager: getRoundManager() helper
+        $roundManager = $this->getRoundManager($match);
 
         // Estado base para todos
         $state = [
             'phase' => $gameState['phase'],
             'round' => $roundManager->getCurrentRound(),
-            'rounds_total' => $gameState['total_rounds'],
+            'rounds_total' => $this->getTotalRounds($gameState),
             'is_drawer' => $isDrawer,
             'is_eliminated' => $isEliminated,
             'current_drawer_id' => $currentDrawerId,
@@ -355,7 +410,7 @@ class PictionaryEngine extends BaseGameEngine
                 $roundManager = RoundManager::fromArray($gameState);
 
                 // Verificar si estamos en la última ronda Y es el último turno
-                $isLastRound = ($roundManager->getCurrentRound() >= $gameState['total_rounds']);
+                $isLastRound = ($roundManager->getCurrentRound() >= $this->getTotalRounds($gameState));
                 $isLastTurn = ($roundManager->getCurrentTurnIndex() >= ($roundManager->getPlayerCount() - 1));
                 $gameEnded = $isLastRound && $isLastTurn;
 
@@ -367,7 +422,7 @@ class PictionaryEngine extends BaseGameEngine
                         'match_id' => $match->id,
                         'final_round' => $roundManager->getCurrentRound(),
                         'final_turn' => $roundManager->getCurrentTurnIndex(),
-                        'total_rounds' => $gameState['total_rounds'],
+                        'total_rounds' => $this->getTotalRounds($gameState),
                         'total_players' => $roundManager->getPlayerCount()
                     ]);
 
@@ -376,7 +431,7 @@ class PictionaryEngine extends BaseGameEngine
                     // ================================================================
                     $scoreCalculator = new PictionaryScoreCalculator();
                     $scoreManager = ScoreManager::fromArray(
-                        playerIds: array_keys($gameState['scores']),
+                        playerIds: array_keys($this->getScores($gameState)),
                         data: $gameState,
                         calculator: $scoreCalculator
                     );
@@ -399,7 +454,7 @@ class PictionaryEngine extends BaseGameEngine
                         ];
                     }
 
-                    $scores = $gameState['scores'];
+                    $scores = $this->getScores($gameState);
 
                     // Emitir evento de juego terminado
                     $roomCode = $match->room->code ?? 'UNKNOWN';
@@ -516,7 +571,7 @@ class PictionaryEngine extends BaseGameEngine
         // ========================================================================
         $scoreCalculator = new PictionaryScoreCalculator();
         $scoreManager = ScoreManager::fromArray(
-            playerIds: array_keys($gameState['scores']),
+            playerIds: array_keys($this->getScores($gameState)),
             data: $gameState,
             calculator: $scoreCalculator
         );
@@ -697,7 +752,7 @@ class PictionaryEngine extends BaseGameEngine
             // ========================================================================
             $scoreCalculator = new PictionaryScoreCalculator();
             $scoreManager = ScoreManager::fromArray(
-                playerIds: array_keys($gameState['scores']),
+                playerIds: array_keys($this->getScores($gameState)),
                 data: $gameState,
                 calculator: $scoreCalculator
             );
@@ -715,7 +770,11 @@ class PictionaryEngine extends BaseGameEngine
             ]);
 
             // Actualizar scores en game_state
-            $gameState['scores'] = $scoreManager->getScores();
+            if (isset($gameState['scoring_system'])) {
+                $gameState['scoring_system']['scores'] = $scoreManager->getScores();
+            } else {
+                $gameState['scores'] = $scoreManager->getScores();
+            }
 
             // Limpiar estado
             $gameState['pending_answer'] = null;
@@ -753,11 +812,14 @@ class PictionaryEngine extends BaseGameEngine
                 $guesserPlayerName,
                 $guesserPoints,
                 $drawerPoints,
-                $gameState['scores']
+                $this->getScores($gameState)
             ));
 
             // Broadcast actualización de estado (fase scoring, puntos actualizados)
             event(new GameStateUpdatedEvent($match, 'round_ended'));
+
+            // NOTA: El frontend detectará la fase 'scoring' y después de 3 segundos
+            // llamará automáticamente a advancePhase() para continuar el juego
 
             return [
                 'success' => true,
@@ -819,11 +881,14 @@ class PictionaryEngine extends BaseGameEngine
                     'Nadie',
                     0, // Sin puntos
                     0, // Sin puntos
-                    $gameState['scores']
+                    $this->getScores($gameState)
                 ));
 
                 // Broadcast actualización de estado
                 event(new GameStateUpdatedEvent($match, 'round_ended_no_winner'));
+
+                // NOTA: El frontend detectará la fase 'scoring' y después de 3 segundos
+                // llamará automáticamente a advancePhase() para continuar el juego
 
                 return [
                     'success' => true,
@@ -944,88 +1009,64 @@ class PictionaryEngine extends BaseGameEngine
     /**
      * Avanzar al siguiente turno.
      *
-     * Usa el módulo Turn System para gestionar el avance de turnos.
+     * Usa la rotación automática de BaseGameEngine + lógica específica de Pictionary.
      *
      * @param GameMatch $match
-     * @return void
+     * @return array Información del nuevo turno
      */
-    private function nextTurn(GameMatch $match): void
+    protected function nextTurn(GameMatch $match): array
     {
+        // Paso 1-4: Usa rotación automática de BaseGameEngine
+        // - Limpia eliminaciones temporales (shouldClearTemporaryEliminations() = true)
+        // - Avanza turno (RoundManager::nextTurn())
+        // - Rota roles automáticamente (drawer/guesser según configuración)
+        // - Reinicia timer del turno
+        $turnInfo = parent::nextTurn($match);
+
+        // Recargar gameState después de parent::nextTurn()
+        $match->refresh();
         $gameState = $match->game_state;
 
-        // ========================================================================
-        // TURN SYSTEM MODULE: Restaurar y avanzar turno
-        // ========================================================================
-        $roundManager = RoundManager::fromArray($gameState);
-        $turnInfo = $roundManager->nextTurn();
-
-        // ========================================================================
-        // TIMER SYSTEM MODULE: Reiniciar timer para el nuevo turno
-        // ========================================================================
-        $timerService = TimerService::fromArray($gameState);
-        $timerService->restartTimer('turn_timer');
-
-        // ========================================================================
-        // ROLES SYSTEM MODULE: Rotar rol de drawer al siguiente jugador
-        // ========================================================================
-        $roleManager = RoleManager::fromArray($gameState);
-        $newDrawerId = $roleManager->rotateRole('drawer', $roundManager->getTurnOrder());
-
-        // Reasignar guessers (todos excepto el nuevo drawer)
-        foreach ($roundManager->getTurnOrder() as $playerId) {
-            if ($playerId !== $newDrawerId) {
-                if (!$roleManager->hasRole($playerId, 'guesser')) {
-                    $roleManager->assignRole($playerId, 'guesser');
-                }
-            } else {
-                // Remover guesser del nuevo drawer si lo tenía
-                $roleManager->removeRole($playerId, 'guesser');
-            }
-        }
-
-        // Seleccionar nueva palabra
+        // Paso 5: Lógica específica de Pictionary - Seleccionar nueva palabra
         $newWord = $this->selectRandomWord($match, 'random');
-
-        // Actualizar estado específico de Pictionary
-        $gameState['current_drawer_id'] = $newDrawerId; // Mantener para compatibilidad (computed desde RoleManager)
         $gameState['current_word'] = $newWord;
         $gameState['pending_answer'] = null;
-        // Nota: Turn System limpia automáticamente temporarilyEliminated cuando completa ronda
+
+        // Mantener backward compatibility con current_drawer_id
+        $gameState['current_drawer_id'] = $turnInfo['player_id'];
 
         // Marcar palabra como usada
         if ($newWord) {
             $gameState['words_used'][] = $newWord;
         }
 
-        // Actualizar estado de los módulos en game_state
-        $gameState = array_merge($gameState, $roundManager->toArray(), $timerService->toArray(), $roleManager->toArray());
-
         $match->game_state = $gameState;
         $match->save();
 
-        // Get room code and new drawer info for the event
+        // Paso 6: Broadcast turn change event para Frontend (WebSockets)
         $roomCode = $match->room->code ?? 'UNKNOWN';
         $newDrawer = Player::find($turnInfo['player_id']);
         $newDrawerName = $newDrawer ? $newDrawer->name : "Player {$turnInfo['player_id']}";
 
-        // Broadcast turn change event
         event(new TurnChangedEvent(
             $roomCode,
             $turnInfo['player_id'],
             $newDrawerName,
-            $gameState['current_round'], // Desde RoundManager, no desde turnInfo
+            $this->getCurrentRound($gameState),
             $turnInfo['turn_index'],
-            $gameState['scores']
+            $this->getScores($gameState)
         ));
 
-        Log::info("Advanced to next turn", [
+        Log::info("Advanced to next turn (Pictionary)", [
             'match_id' => $match->id,
-            'round' => $gameState['current_round'], // Desde RoundManager
+            'round' => $this->getCurrentRound($gameState),
             'turn_index' => $turnInfo['turn_index'],
             'drawer_id' => $turnInfo['player_id'],
             'word' => $newWord,
-            'cycle_completed' => $turnInfo['cycle_completed'] // Actualizado de round_completed
+            'cycle_completed' => $turnInfo['cycle_completed']
         ]);
+
+        return $turnInfo;
     }
 
     // ============================================================================

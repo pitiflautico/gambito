@@ -289,9 +289,10 @@ class ScoreManagerTest extends TestCase
 
         $data = $manager->toArray();
 
-        $this->assertArrayHasKey('scores', $data);
-        $this->assertEquals(100, $data['scores'][1]);
-        $this->assertEquals(200, $data['scores'][2]);
+        $this->assertArrayHasKey('scoring_system', $data);
+        $this->assertArrayHasKey('scores', $data['scoring_system']);
+        $this->assertEquals(100, $data['scoring_system']['scores'][1]);
+        $this->assertEquals(200, $data['scoring_system']['scores'][2]);
     }
 
     /** @test */

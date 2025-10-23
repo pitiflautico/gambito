@@ -350,8 +350,10 @@ class ScoreManager
     public function toArray(): array
     {
         return [
-            'scores' => $this->scores,
-            'score_history' => $this->trackHistory ? $this->scoreHistory : [],
+            'scoring_system' => [
+                'scores' => $this->scores,
+                'score_history' => $this->trackHistory ? $this->scoreHistory : [],
+            ]
         ];
     }
 
@@ -372,12 +374,15 @@ class ScoreManager
     ): self {
         $instance = new self($playerIds, $calculator, $trackHistory);
 
-        if (isset($data['scores'])) {
-            $instance->scores = $data['scores'];
+        // Soporte para ambos formatos: nuevo (scoring_system) y legacy (claves directas)
+        $scoringData = $data['scoring_system'] ?? $data;
+
+        if (isset($scoringData['scores'])) {
+            $instance->scores = $scoringData['scores'];
         }
 
-        if ($trackHistory && isset($data['score_history'])) {
-            $instance->scoreHistory = $data['score_history'];
+        if ($trackHistory && isset($scoringData['score_history'])) {
+            $instance->scoreHistory = $scoringData['score_history'];
         }
 
         return $instance;

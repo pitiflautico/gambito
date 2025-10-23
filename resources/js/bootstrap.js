@@ -11,12 +11,6 @@ import Pusher from 'pusher-js';
 window.Pusher = Pusher;
 
 // Debug: Verificar variables de entorno
-console.log('🔧 Reverb Config:', {
-    key: import.meta.env.VITE_REVERB_APP_KEY,
-    host: import.meta.env.VITE_REVERB_HOST,
-    port: import.meta.env.VITE_REVERB_PORT,
-    scheme: import.meta.env.VITE_REVERB_SCHEME,
-});
 
 const echoConfig = {
     broadcaster: 'reverb',
@@ -45,11 +39,9 @@ const echoConfig = {
     },
 };
 
-console.log('🚀 Initializing Echo with config:', echoConfig);
-
 try {
     window.Echo = new Echo(echoConfig);
-    console.log('✅ Echo initialized successfully');
+
 } catch (error) {
-    console.error('❌ Error initializing Echo:', error);
+
 }

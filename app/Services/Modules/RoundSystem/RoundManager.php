@@ -412,11 +412,13 @@ class RoundManager
     public function toArray(): array
     {
         return [
-            'current_round' => $this->currentRound,
-            'total_rounds' => $this->totalRounds,
-            'permanently_eliminated' => $this->permanentlyEliminated,
-            'temporarily_eliminated' => $this->temporarilyEliminated,
-            // Incluir TurnManager serializado
+            'round_system' => [
+                'current_round' => $this->currentRound,
+                'total_rounds' => $this->totalRounds,
+                'permanently_eliminated' => $this->permanentlyEliminated,
+                'temporarily_eliminated' => $this->temporarilyEliminated,
+            ],
+            // TurnManager mantiene su propio namespace
             'turn_system' => $this->turnManager->toArray(),
         ];
     }
@@ -429,17 +431,20 @@ class RoundManager
      */
     public static function fromArray(array $data): self
     {
+        // Soporte para ambos formatos: nuevo (round_system) y legacy (claves directas)
+        $roundData = $data['round_system'] ?? $data;
+
         // Restaurar TurnManager primero
         $turnManager = TurnManager::fromArray($data['turn_system'] ?? []);
 
         $instance = new self(
             turnManager: $turnManager,
-            totalRounds: $data['total_rounds'] ?? 0,
-            currentRound: $data['current_round'] ?? 1
+            totalRounds: $roundData['total_rounds'] ?? 0,
+            currentRound: $roundData['current_round'] ?? 1
         );
 
-        $instance->permanentlyEliminated = $data['permanently_eliminated'] ?? [];
-        $instance->temporarilyEliminated = $data['temporarily_eliminated'] ?? [];
+        $instance->permanentlyEliminated = $roundData['permanently_eliminated'] ?? [];
+        $instance->temporarilyEliminated = $roundData['temporarily_eliminated'] ?? [];
 
         return $instance;
     }

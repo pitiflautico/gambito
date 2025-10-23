@@ -289,9 +289,11 @@ class RoleManager
     public function toArray(): array
     {
         return [
-            'player_roles' => $this->playerRoles,
-            'available_roles' => $this->availableRoles,
-            'allow_multiple_roles' => $this->allowMultipleRoles,
+            'roles_system' => [
+                'player_roles' => $this->playerRoles,
+                'available_roles' => $this->availableRoles,
+                'allow_multiple_roles' => $this->allowMultipleRoles,
+            ]
         ];
     }
 
@@ -303,10 +305,13 @@ class RoleManager
      */
     public static function fromArray(array $data): self
     {
+        // Soporte para ambos formatos: nuevo (roles_system) y legacy (claves directas)
+        $rolesData = $data['roles_system'] ?? $data;
+
         return new self(
-            availableRoles: $data['available_roles'] ?? [],
-            allowMultipleRoles: $data['allow_multiple_roles'] ?? false,
-            playerRoles: $data['player_roles'] ?? []
+            availableRoles: $rolesData['available_roles'] ?? [],
+            allowMultipleRoles: $rolesData['allow_multiple_roles'] ?? false,
+            playerRoles: $rolesData['player_roles'] ?? []
         );
     }
 }

@@ -236,6 +236,20 @@ class RoomController extends Controller
                 ->with('error', 'Esta sala ya ha terminado.');
         }
 
+        // IMPORTANTE: Verificar si el master (creador) está conectado
+        // Si el master no está conectado, cerrar la sala automáticamente
+        if (!$this->roomService->isMasterConnected($room)) {
+            \Log::warning("Lobby - master disconnected, closing room", [
+                'code' => $code,
+                'master_id' => $room->master_id,
+            ]);
+
+            $this->roomService->closeRoom($room);
+
+            return redirect()->route('home')
+                ->with('error', 'El creador de la sala se desconectó. La sala ha sido cerrada.');
+        }
+
         // Si la sala ya está jugando, redirigir a la sala activa
         if ($room->status === Room::STATUS_PLAYING) {
             \Log::info("Lobby redirecting to show - room playing", ['code' => $code]);
@@ -361,7 +375,10 @@ class RoomController extends Controller
         // Verificar si el usuario es el master
         $isMaster = Auth::check() && Auth::id() === $room->master_id;
 
-        return view('rooms.lobby', compact('room', 'stats', 'inviteUrl', 'qrCodeUrl', 'canStart', 'isMaster'));
+        // Cargar configuración del juego para equipos
+        $gameConfig = $room->game->config;
+
+        return view('rooms.lobby', compact('room', 'stats', 'inviteUrl', 'qrCodeUrl', 'canStart', 'isMaster', 'gameConfig'));
     }
 
     /**
@@ -493,6 +510,20 @@ class RoomController extends Controller
             return redirect()->route('rooms.results', ['code' => $code]);
         }
 
+        // IMPORTANTE: Verificar si el master (creador) está conectado
+        // Si el master no está conectado, cerrar la sala automáticamente
+        if (!$this->roomService->isMasterConnected($room)) {
+            \Log::warning("Show - master disconnected, closing room", [
+                'code' => $code,
+                'master_id' => $room->master_id,
+            ]);
+
+            $this->roomService->closeRoom($room);
+
+            return redirect()->route('home')
+                ->with('error', 'El creador de la sala se desconectó. La sala ha sido cerrada.');
+        }
+
         // Obtener el jugador actual (guest o autenticado)
         $player = null;
         if (Auth::check()) {
@@ -528,16 +559,28 @@ class RoomController extends Controller
             ];
         });
 
-        // Redirigir a la ruta específica del juego si existe
+        // Cargar event_config desde capabilities.json si el juego lo tiene
+        $eventConfig = null;
         $gameSlug = $room->game->slug;
-        $gameRouteName = "{$gameSlug}.game";
-
-        if (\Route::has($gameRouteName)) {
-            // El juego tiene su propia ruta, redirigir ahí
-            return redirect()->route($gameRouteName, ['roomCode' => $code]);
+        $capabilitiesPath = base_path("games/{$gameSlug}/capabilities.json");
+        if (file_exists($capabilitiesPath)) {
+            $capabilities = json_decode(file_get_contents($capabilitiesPath), true);
+            $eventConfig = $capabilities['event_config'] ?? null;
         }
 
-        // Cargar vista genérica si el juego no tiene ruta específica
+        // Renderizar vista específica del juego usando su namespace
+        $gameViewName = "{$gameSlug}::canvas";
+        if (view()->exists($gameViewName)) {
+            return view($gameViewName, [
+                'room' => $room,
+                'match' => $room->match,
+                'playerId' => $playerId,
+                'role' => $role,
+                'eventConfig' => $eventConfig,
+            ]);
+        }
+
+        // Fallback: Cargar vista genérica si el juego no tiene vista específica
         return view('rooms.show', compact('room', 'playerId', 'role', 'players'));
     }
 

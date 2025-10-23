@@ -33,7 +33,6 @@ class TriviaGame {
         this.setupEventListeners();
         this.syncInitialState(); // Sincronizar con el estado actual
 
-        console.log('🎮 ROOM:', this.roomCode, '| VERSION: 2024-10-22 09:32 | EventManager:', !!this.eventManager);
     }
 
     initializeElements() {

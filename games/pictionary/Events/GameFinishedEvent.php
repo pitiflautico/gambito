@@ -16,7 +16,7 @@ class GameFinishedEvent implements ShouldBroadcast
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
     public string $roomCode;
-    public int $winnerId;
+    public ?int $winnerId;
     public string $winnerName;
     public array $finalScores;
     public array $ranking;
@@ -26,7 +26,7 @@ class GameFinishedEvent implements ShouldBroadcast
      */
     public function __construct(
         string $roomCode,
-        int $winnerId,
+        ?int $winnerId,
         string $winnerName,
         array $finalScores,
         array $ranking

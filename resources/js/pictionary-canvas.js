@@ -33,6 +33,9 @@ class PictionaryCanvas {
         this.isDrawer = false;
         this.gameState = null;
         this.isConfirming = false; // Flag para prevenir doble clic en confirmación
+        this.currentPhase = null; // Para detectar cambios de fase
+        this.countdownInterval = null; // Para el countdown del modal
+        this.phaseAdvanceTimeout = null; // Para el avance automático de fase
 
         // Inicializar
         this.init();
@@ -45,11 +48,9 @@ class PictionaryCanvas {
         this.bindFormEvents();
         this.setupEventManager();
 
-        console.log('🎨 ROOM:', this.roomCode, '| VERSION: 2024-10-22 | EventManager:', !!this.eventManager);
-
         // Si el juego ya terminó, mostrar resultados automáticamente
         if (window.gameData?.phase === 'results') {
-            console.log('Game already finished, showing results');
+
             this.showFinalResultsFromServer();
         }
     }
@@ -59,12 +60,12 @@ class PictionaryCanvas {
      */
     setupEventManager() {
         if (!window.EventManager) {
-            console.error('EventManager no disponible');
+
             return;
         }
 
         if (!this.eventConfig) {
-            console.error('eventConfig no proporcionado');
+
             return;
         }
 
@@ -86,7 +87,7 @@ class PictionaryCanvas {
                 // Callbacks de conexión
                 onConnected: () => {},
                 onError: (error, context) => {
-                    console.error('Error WebSocket:', error);
+
                 },
                 onDisconnected: () => {}
             },
@@ -98,13 +99,12 @@ class PictionaryCanvas {
      * Manejar evento de jugador que respondió
      */
     handlePlayerAnswered(data) {
-        console.log('[PlayerAnswered] Event received:', data);
-        console.log('[PlayerAnswered] Current isDrawer:', this.isDrawer);
-        console.log('[PlayerAnswered] Current playerId:', window.gameData?.playerId);
+
+
 
         // Pausar el juego y mostrar panel de confirmación al dibujante
         if (this.isDrawer) {
-            console.log('[PlayerAnswered] Showing confirmation panel to drawer');
+
             const confirmationContainer = document.getElementById('confirmation-container');
             const pendingPlayerName = document.getElementById('pending-player-name');
 
@@ -114,15 +114,12 @@ class PictionaryCanvas {
 
                 // Guardar el player_id pendiente para la confirmación
                 confirmationContainer.dataset.pendingPlayerId = data.player_id;
-                console.log('[PlayerAnswered] Panel shown successfully');
+
             } else {
-                console.error('[PlayerAnswered] Elements not found:', {
-                    confirmationContainer: !!confirmationContainer,
-                    pendingPlayerName: !!pendingPlayerName
-                });
+
             }
         } else {
-            console.log('[PlayerAnswered] Not showing panel - player is guesser');
+
         }
 
         // Mostrar mensaje a todos
@@ -154,7 +151,6 @@ class PictionaryCanvas {
      * Manejar fin de ronda
      */
     handleRoundEnded(data) {
-        console.log('[RoundEnded] Ronda terminada:', data);
 
         // Mostrar mensaje de quién ganó
         this.showGameMessage(`¡${data.winner_name} acertó la palabra "${data.word}"!`);
@@ -187,7 +183,6 @@ class PictionaryCanvas {
      * Manejar fin del juego
      */
     handleGameFinished(data) {
-        console.log('[GameFinished] Juego terminado:', data);
 
         // Mostrar mensaje
         this.showGameMessage(`🏆 ¡Juego terminado! Ganador: ${data.winner_name}`);
@@ -217,7 +212,7 @@ class PictionaryCanvas {
      * Manejar respuesta confirmada por el dibujante
      */
     handleAnswerConfirmed(data) {
-        console.log('[AnswerConfirmed] Respuesta confirmada:', data);
+
         // La lógica se maneja en handleRoundEnded o handlePlayerEliminated
     }
 
@@ -225,7 +220,6 @@ class PictionaryCanvas {
      * Manejar cambio de turno (nuevo dibujante)
      */
     handleTurnChanged(data) {
-        console.log('[TurnChanged] Nuevo turno:', data);
 
         // Actualizar información de ronda
         this.updateRoundInfo(data.round, data.rounds_total || 5);
@@ -241,8 +235,6 @@ class PictionaryCanvas {
         // Actualizar rol del jugador
         const currentPlayerId = window.gameData?.playerId;
         this.isDrawer = (currentPlayerId === data.new_drawer_id);
-
-        console.log('[TurnChanged] Mi nuevo rol:', this.isDrawer ? 'Drawer' : 'Guesser');
 
         // Actualizar UI según el nuevo rol
         this.updateUIForRole();
@@ -269,13 +261,13 @@ class PictionaryCanvas {
 
         if (this.isDrawer) {
             // Soy dibujante
-            console.log('[UI] Mostrando UI de dibujante');
+
             if (wordDisplay) wordDisplay.classList.remove('hidden');
             if (yoSeContainer) yoSeContainer.classList.add('hidden');
             if (drawingTools) drawingTools.classList.remove('hidden');
         } else {
             // Soy adivinador
-            console.log('[UI] Mostrando UI de adivinador');
+
             if (wordDisplay) wordDisplay.classList.add('hidden');
             if (yoSeContainer) yoSeContainer.classList.remove('hidden');
             if (drawingTools) drawingTools.classList.add('hidden');
@@ -308,7 +300,6 @@ class PictionaryCanvas {
      * Obtener palabra secreta para el dibujante
      */
     fetchSecretWord() {
-        console.log('[FetchSecretWord] Obteniendo palabra secreta...');
 
         fetch(`/api/pictionary/get-word`, {
             method: 'POST',
@@ -324,17 +315,17 @@ class PictionaryCanvas {
         .then(response => response.json())
         .then(data => {
             if (data.success && data.word) {
-                console.log('[FetchSecretWord] Palabra recibida');
+
                 const secretWordElement = document.getElementById('secret-word');
                 if (secretWordElement) {
                     secretWordElement.textContent = data.word;
                 }
             } else {
-                console.error('[FetchSecretWord] Error:', data.error);
+
             }
         })
         .catch(error => {
-            console.error('[FetchSecretWord] Error fetching word:', error);
+
         });
     }
 
@@ -342,7 +333,6 @@ class PictionaryCanvas {
      * Manejar actualización del estado del juego
      */
     handleGameStateUpdate(data) {
-        console.log('Game state update type:', data.update_type);
 
         // Actualizar ronda
         this.updateRoundInfo(data.round, data.rounds_total);
@@ -357,8 +347,10 @@ class PictionaryCanvas {
             this.updateEliminatedPlayers(data.eliminated_this_round);
         }
 
-        // Si hay cambio de fase
-        if (data.update_type === 'phase_change') {
+        // Detectar cambios de fase (comparando con fase anterior)
+        if (data.phase && data.phase !== this.currentPhase) {
+
+            this.currentPhase = data.phase;
             this.handlePhaseChange(data.phase);
         }
 
@@ -423,15 +415,72 @@ class PictionaryCanvas {
      * Manejar cambio de fase
      */
     handlePhaseChange(newPhase) {
-        console.log('Phase changed to:', newPhase);
 
-        if (newPhase === 'drawing') {
-            // Limpiar canvas al iniciar nueva ronda
+        if (newPhase === 'playing') {
+            // Cerrar modal de resultados si está abierto
+            const modal = document.getElementById('round-results-modal');
+            if (modal && !modal.classList.contains('hidden')) {
+                modal.classList.add('hidden');
+
+            }
+
+            // Limpiar countdown interval si existe
+            if (this.countdownInterval) {
+                clearInterval(this.countdownInterval);
+                this.countdownInterval = null;
+            }
+
+            // Limpiar phase advance timeout si existe
+            if (this.phaseAdvanceTimeout) {
+                clearTimeout(this.phaseAdvanceTimeout);
+                this.phaseAdvanceTimeout = null;
+            }
+
+            // Limpiar canvas al iniciar nuevo turno
             this.clearCanvas();
+        } else if (newPhase === 'scoring') {
+            // Programar avance automático al siguiente turno después de 3 segundos
+
+            // Limpiar timeout anterior si existe
+            if (this.phaseAdvanceTimeout) {
+                clearTimeout(this.phaseAdvanceTimeout);
+            }
+
+            // Programar avance automático
+            this.phaseAdvanceTimeout = setTimeout(() => {
+
+                this.advancePhaseAuto();
+            }, 3000);
         } else if (newPhase === 'results') {
-            // Mostrar resultados
-            // TODO: Implementar modal de resultados
+            // Mostrar resultados finales
+            // TODO: Implementar modal de resultados finales
         }
+    }
+
+    /**
+     * Avanzar fase automáticamente (llamado por timeout)
+     */
+    advancePhaseAuto() {
+        fetch('/api/pictionary/advance-phase', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': window.gameData.csrfToken
+            },
+            body: JSON.stringify({
+                room_code: this.roomCode,
+                match_id: window.gameData.matchId
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (!data.success) {
+
+            }
+        })
+        .catch(error => {
+
+        });
     }
 
     /**
@@ -565,7 +614,7 @@ class PictionaryCanvas {
         const btnYoSe = document.getElementById('btn-yo-se');
         if (btnYoSe) {
             btnYoSe.addEventListener('click', () => {
-                console.log('¡YO SÉ! button clicked');
+
                 this.playerAnswered();
             });
         }
@@ -582,11 +631,8 @@ class PictionaryCanvas {
             btnIncorrect.addEventListener('click', () => this.confirmAnswer(false));
         }
 
-        // Botón siguiente ronda
-        const btnNextRound = document.getElementById('next-round-btn');
-        if (btnNextRound) {
-            btnNextRound.addEventListener('click', () => this.nextRound());
-        }
+        // Botón siguiente ronda eliminado - el avance es automático
+        // El modal se cerrará automáticamente cuando el backend avance la fase
     }
 
     /**
@@ -637,11 +683,9 @@ class PictionaryCanvas {
      */
     emitDrawEvent(strokeData) {
         if (!this.roomCode) {
-            console.warn('No room code, skipping draw event');
+
             return;
         }
-
-        console.log('Emitting draw event:', strokeData);
 
         // Enviar al backend para broadcasting
         fetch('/api/pictionary/draw', {
@@ -657,14 +701,14 @@ class PictionaryCanvas {
             })
         })
         .then(response => {
-            console.log('Draw event response:', response.status, response.statusText);
+
             return response.json();
         })
         .then(data => {
-            console.log('Draw event result:', data);
+
         })
         .catch(error => {
-            console.error('Error emitting draw event:', error);
+
         });
     }
 
@@ -699,7 +743,6 @@ class PictionaryCanvas {
         document.querySelectorAll('.tool-btn').forEach(btn => btn.classList.remove('active'));
         document.getElementById(`tool-${tool}`).classList.add('active');
 
-        console.log('Tool changed to:', tool);
     }
 
     /**
@@ -707,7 +750,7 @@ class PictionaryCanvas {
      */
     setColor(color) {
         this.currentColor = color;
-        console.log('Color changed to:', color);
+
     }
 
     /**
@@ -715,7 +758,7 @@ class PictionaryCanvas {
      */
     setSize(size) {
         this.currentSize = size;
-        console.log('Brush size changed to:', size);
+
     }
 
     /**
@@ -728,7 +771,6 @@ class PictionaryCanvas {
         // Emitir evento WebSocket de limpieza
         this.emitClearEvent();
 
-        console.log('Canvas cleared');
     }
 
     /**
@@ -749,7 +791,7 @@ class PictionaryCanvas {
                 match_id: window.gameData.matchId
             })
         }).catch(error => {
-            console.error('Error emitting clear event:', error);
+
         });
     }
 
@@ -772,27 +814,20 @@ class PictionaryCanvas {
     clearCanvasRemote() {
         this.ctx.fillStyle = '#FFFFFF';
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-        console.log('Canvas cleared remotely');
+
     }
 
     /**
      * Establecer rol del jugador
      */
     setRole(isDrawer, word = null) {
-        console.log('🎭 setRole called with isDrawer:', isDrawer, 'word:', word);
+
         this.isDrawer = isDrawer;
 
         const wordDisplay = document.getElementById('word-display');
         const secretWord = document.getElementById('secret-word');
         const drawingTools = document.querySelector('.drawing-tools');
         const yoSeContainer = document.getElementById('yo-se-container');
-
-        console.log('Elements found:', {
-            wordDisplay: !!wordDisplay,
-            secretWord: !!secretWord,
-            drawingTools: !!drawingTools,
-            yoSeContainer: !!yoSeContainer
-        });
 
         if (isDrawer) {
             // DIBUJANTE
@@ -809,7 +844,6 @@ class PictionaryCanvas {
             // Habilitar herramientas
             this.canvas.style.cursor = 'crosshair';
 
-            console.log('✅ Demo mode: Drawer (Dibujante)');
         } else {
             // ADIVINADOR
             // Ocultar palabra secreta
@@ -824,7 +858,6 @@ class PictionaryCanvas {
             // Deshabilitar dibujo
             this.canvas.style.cursor = 'default';
 
-            console.log('✅ Demo mode: Guesser (Adivinador)');
         }
     }
 
@@ -836,8 +869,6 @@ class PictionaryCanvas {
         const answer = input.value.trim();
 
         if (!answer) return;
-
-        console.log('Submitting answer:', answer);
 
         // TODO Task 6.0: Enviar al servidor vía AJAX
         // fetch('/api/pictionary/answer', {
@@ -867,8 +898,6 @@ class PictionaryCanvas {
 
         const playerName = `Jugador ${window.gameData.playerId}`;
 
-        console.log('Emitting player answered event:', playerName);
-
         // Enviar al servidor para broadcast
         fetch('/api/pictionary/player-answered', {
             method: 'POST',
@@ -885,7 +914,6 @@ class PictionaryCanvas {
         })
         .then(response => response.json())
         .then(data => {
-            console.log('Player answered result:', data);
 
             // Ocultar botón "YO SÉ" y mostrar mensaje de espera
             const yoSeContainer = document.getElementById('yo-se-container');
@@ -895,7 +923,7 @@ class PictionaryCanvas {
             if (waitingConfirmation) waitingConfirmation.classList.remove('hidden');
         })
         .catch(error => {
-            console.error('Error emitting player answered:', error);
+
         });
     }
 
@@ -905,7 +933,7 @@ class PictionaryCanvas {
     confirmAnswer(isCorrect) {
         // Prevenir doble clic
         if (this.isConfirming) {
-            console.log('Already confirming, ignoring duplicate click');
+
             return;
         }
 
@@ -914,10 +942,7 @@ class PictionaryCanvas {
         const pendingPlayerName = document.getElementById('pending-player-name')?.textContent;
 
         if (!pendingPlayerId || !this.roomCode) {
-            console.error('Missing required data:', {
-                pendingPlayerId,
-                roomCode: this.roomCode
-            });
+
             return;
         }
 
@@ -932,8 +957,6 @@ class PictionaryCanvas {
             is_correct: isCorrect
         };
 
-        console.log('Confirming answer as:', isCorrect ? 'correct' : 'incorrect', 'for player:', pendingPlayerName);
-        console.log('Sending confirm answer request:', payload);
 
         // Deshabilitar botones temporalmente
         const btnCorrect = document.getElementById('btn-correct');
@@ -951,11 +974,10 @@ class PictionaryCanvas {
             body: JSON.stringify(payload)
         })
         .then(response => {
-            console.log('Response status:', response.status);
 
             if (!response.ok) {
                 return response.text().then(text => {
-                    console.error('Error response body:', text.substring(0, 500));
+
                     throw new Error(`HTTP ${response.status}: ${text.substring(0, 200)}`);
                 });
             }
@@ -963,18 +985,16 @@ class PictionaryCanvas {
             return response.json();
         })
         .then(data => {
-            console.log('Confirm answer result:', data);
 
             if (data.success) {
-                console.log('Answer confirmed successfully', data.data);
 
                 if (data.data && data.data.round_ended) {
-                    console.log('Round ended! Showing results...');
+
                 } else if (data.data && !data.data.correct) {
-                    console.log('Player eliminated, game continues');
+
                 }
             } else {
-                console.error('Server returned error:', data.error);
+
                 alert('Error: ' + data.error);
             }
 
@@ -982,7 +1002,7 @@ class PictionaryCanvas {
             if (confirmationContainer) confirmationContainer.classList.add('hidden');
         })
         .catch(error => {
-            console.error('Error confirming answer:', error);
+
             alert('Error al confirmar respuesta: ' + error.message);
         })
         .finally(() => {
@@ -995,44 +1015,21 @@ class PictionaryCanvas {
 
     /**
      * Avanzar a la siguiente ronda
+     *
+     * NOTA: Este método ya NO se usa. En Pictionary, el cambio de fase es AUTOMÁTICO
+     * vía BaseGameEngine que programa startNewRound() con un delay de 3-5 segundos.
+     *
+     * Si se llama manualmente, causa problemas de sincronización.
      */
     nextRound() {
-        console.log('Next round button clicked');
 
-        // Ocultar modal de resultados
+        // Simplemente ocultar el modal si existe
         const modal = document.getElementById('round-results-modal');
         if (modal) {
             modal.classList.add('hidden');
         }
 
-        // Llamar al backend para avanzar la fase
-        fetch('/api/pictionary/advance-phase', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRF-TOKEN': window.gameData.csrfToken
-            },
-            body: JSON.stringify({
-                room_code: this.roomCode,
-                match_id: window.gameData.matchId
-            })
-        })
-        .then(response => response.json())
-        .then(data => {
-            console.log('Advance phase result:', data);
-
-            if (data.success) {
-                console.log('Phase advanced successfully');
-                // El evento game.state.updated se encargará de actualizar la UI
-            } else {
-                console.error('Error advancing phase:', data.error);
-                alert('Error al avanzar: ' + data.error);
-            }
-        })
-        .catch(error => {
-            console.error('Error calling advance phase:', error);
-            alert('Error al avanzar a la siguiente ronda: ' + error.message);
-        });
+        // NO llamar al backend - el cambio de fase es automático
     }
 
     /**
@@ -1154,6 +1151,33 @@ class PictionaryCanvas {
         `;
 
         modal.classList.remove('hidden');
+
+        // Iniciar countdown automático de 3 segundos
+        this.startRoundEndCountdown();
+    }
+
+    /**
+     * Iniciar countdown de 3 segundos antes de cerrar el modal automáticamente
+     */
+    startRoundEndCountdown() {
+        const countdownElement = document.getElementById('countdown');
+        if (!countdownElement) return;
+
+        let seconds = 3;
+        countdownElement.textContent = seconds;
+
+        const countdownInterval = setInterval(() => {
+            seconds--;
+            if (seconds > 0) {
+                countdownElement.textContent = seconds;
+            } else {
+                clearInterval(countdownInterval);
+                // El modal se cerrará cuando llegue el evento game.state.updated con phase='playing'
+            }
+        }, 1000);
+
+        // Guardar el interval para poder limpiarlo si es necesario
+        this.countdownInterval = countdownInterval;
     }
 
     /**
@@ -1161,7 +1185,7 @@ class PictionaryCanvas {
      */
     showFinalResultsFromServer() {
         if (!window.gameData?.gameResults?.scores) {
-            console.error('No game results data available');
+
             return;
         }
 

@@ -53,6 +53,14 @@ class PictionaryGameFlowTest extends TestCase
     }
 
     /**
+     * Helper para extraer scores (soporta ambos formatos)
+     */
+    private function getScores(array $gameState): array
+    {
+        return $gameState['scoring_system']['scores'] ?? $gameState['scores'] ?? [];
+    }
+
+    /**
      * Helper para crear 3 jugadores en un match
      */
     protected function createPlayersForMatch(GameMatch $match, int $count = 3): array
@@ -180,17 +188,18 @@ class PictionaryGameFlowTest extends TestCase
 
         // Verificar estado inicial
         $this->assertEquals('playing', $gameState['phase']);
-        $this->assertEquals(1, $gameState['current_round']); // Desde RoundManager
-        $this->assertEquals(3, $gameState['total_rounds']); // Desde RoundManager: 3 jugadores = 3 rondas (modo auto)
+        $this->assertEquals(1, $gameState['round_system']['current_round'] ?? $gameState['current_round']); // Desde RoundManager
+        $this->assertEquals(3, $gameState['round_system']['total_rounds'] ?? $gameState['total_rounds']); // Desde RoundManager: 3 jugadores = 3 rondas (modo auto)
         $this->assertEquals(0, $gameState['turn_system']['current_turn_index']); // Anidado en turn_system
         $this->assertNotNull($gameState['current_drawer_id']);
         $this->assertNotNull($gameState['current_word']);
         $this->assertIsArray($gameState['turn_system']['turn_order']); // Anidado en turn_system
         $this->assertCount(3, $gameState['turn_system']['turn_order']);
-        $this->assertArrayHasKey('scores', $gameState);
-        $this->assertEquals(0, $gameState['scores'][$player1->id]);
-        $this->assertEquals(0, $gameState['scores'][$player2->id]);
-        $this->assertEquals(0, $gameState['scores'][$player3->id]);
+        $scores = $this->getScores($gameState);
+        $this->assertArrayHasKey($player1->id, $scores);
+        $this->assertEquals(0, $scores[$player1->id]);
+        $this->assertEquals(0, $scores[$player2->id]);
+        $this->assertEquals(0, $scores[$player3->id]);
     }
 
     /** @test */
@@ -251,8 +260,9 @@ class PictionaryGameFlowTest extends TestCase
 
         // Verificar que se otorgaron puntos correctamente
         $match->refresh();
-        $this->assertGreaterThan(0, $match->game_state['scores'][$guesser->id]);
-        $this->assertGreaterThan(0, $match->game_state['scores'][$drawer->id]);
+        $scores = $this->getScores($match->game_state);
+        $this->assertGreaterThan(0, $scores[$guesser->id]);
+        $this->assertGreaterThan(0, $scores[$drawer->id]);
     }
 
     /** @test */
@@ -287,7 +297,8 @@ class PictionaryGameFlowTest extends TestCase
         $this->assertEquals("{$guesser->name} falló. El juego continúa.", $response['message']);
 
         $match->refresh();
-        $this->assertContains($guesser->id, $match->game_state['temporarily_eliminated']); // Actualizado de eliminated_this_round
+        $tempElim = $match->game_state['round_system']['temporarily_eliminated'] ?? $match->game_state['temporarily_eliminated'];
+        $this->assertContains($guesser->id, $tempElim); // Actualizado de eliminated_this_round
     }
 
     /** @test */
@@ -335,14 +346,15 @@ class PictionaryGameFlowTest extends TestCase
         // Forzar última ronda, último turno
         // Con 3 jugadores, modo auto = 3 rondas
         // Última ronda = 3, último turno = índice 2 (0-based)
-        // Cuando avanza, va a ronda 4, que excede total_rounds (3)
         $gameState = $match->game_state;
-        $gameState['current_round'] = 3; // Última ronda (3 jugadores = 3 rondas)
+        $gameState['round_system']['current_round'] = 3; // Última ronda (formato modular)
+        $gameState['round_system']['total_rounds'] = 3; // Total de rondas (3 jugadores = 3 rondas)
         $gameState['turn_system']['current_turn_index'] = 2; // Último turno (0-based, anidado en turn_system)
         $gameState['phase'] = 'scoring';
-        $gameState['scores'][$player1->id] = 500;
-        $gameState['scores'][$player2->id] = 300;
-        $gameState['scores'][$player3->id] = 200;
+        // Configurar scores en formato modular (tiene prioridad sobre legacy)
+        $gameState['scoring_system']['scores'][$player1->id] = 500;
+        $gameState['scoring_system']['scores'][$player2->id] = 300;
+        $gameState['scoring_system']['scores'][$player3->id] = 200;
         $match->game_state = $gameState;
         $match->save();
 
@@ -354,7 +366,7 @@ class PictionaryGameFlowTest extends TestCase
         $this->assertEquals('results', $match->game_state['phase']);
 
         // Verificar que hay un ganador calculado
-        $scores = $match->game_state['scores'];
+        $scores = $this->getScores($match->game_state);
         $this->assertNotEmpty($scores);
         $maxScore = max($scores);
         $this->assertEquals(500, $maxScore); // El jugador con más puntos
@@ -374,9 +386,10 @@ class PictionaryGameFlowTest extends TestCase
         $match->refresh();
 
         // Verificar scores iniciales
-        $this->assertEquals(0, $match->game_state['scores'][$drawer->id]);
-        $this->assertEquals(0, $match->game_state['scores'][$guesser1->id]);
-        $this->assertEquals(0, $match->game_state['scores'][$guesser2->id]);
+        $scores = $this->getScores($match->game_state);
+        $this->assertEquals(0, $scores[$drawer->id]);
+        $this->assertEquals(0, $scores[$guesser1->id]);
+        $this->assertEquals(0, $scores[$guesser2->id]);
 
         // Simular que guesser1 presiona "YO SÉ" y falla
         $response = $this->engine->processAction($match, $guesser1, 'answer', []);
@@ -411,13 +424,15 @@ class PictionaryGameFlowTest extends TestCase
         $this->assertNull($match->game_state['pending_answer']);
 
         // Verificar que NO se otorgaron puntos
-        $this->assertEquals(0, $match->game_state['scores'][$drawer->id]);
-        $this->assertEquals(0, $match->game_state['scores'][$guesser1->id]);
-        $this->assertEquals(0, $match->game_state['scores'][$guesser2->id]);
+        $scores = $this->getScores($match->game_state);
+        $this->assertEquals(0, $scores[$drawer->id]);
+        $this->assertEquals(0, $scores[$guesser1->id]);
+        $this->assertEquals(0, $scores[$guesser2->id]);
 
         // Verificar que ambos guessers fueron eliminados temporalmente
-        $this->assertContains($guesser1->id, $match->game_state['temporarily_eliminated']);
-        $this->assertContains($guesser2->id, $match->game_state['temporarily_eliminated']);
+        $tempElim = $match->game_state['round_system']['temporarily_eliminated'] ?? $match->game_state['temporarily_eliminated'];
+        $this->assertContains($guesser1->id, $tempElim);
+        $this->assertContains($guesser2->id, $tempElim);
     }
 
     /** @test */
@@ -457,9 +472,10 @@ class PictionaryGameFlowTest extends TestCase
         $this->assertNull($match->game_state['pending_answer']);
 
         // Verificar que guesser1 fue eliminado temporalmente
-        $this->assertContains($guesser1->id, $match->game_state['temporarily_eliminated']);
+        $tempElim = $match->game_state['round_system']['temporarily_eliminated'] ?? $match->game_state['temporarily_eliminated'];
+        $this->assertContains($guesser1->id, $tempElim);
 
         // Verificar que guesser2 NO está eliminado (puede seguir jugando)
-        $this->assertNotContains($guesser2->id, $match->game_state['temporarily_eliminated']);
+        $this->assertNotContains($guesser2->id, $tempElim);
     }
 }

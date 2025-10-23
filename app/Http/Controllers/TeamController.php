@@ -41,7 +41,7 @@ class TeamController extends Controller
                 return response()->json(['error' => 'Solo el organizador puede configurar equipos'], 403);
             }
 
-            $match = $room->matches()->whereNull('finished_at')->latest()->first();
+            $match = $room->match;
 
             if (!$match) {
                 return response()->json(['error' => 'No hay partida activa'], 404);
@@ -79,7 +79,7 @@ class TeamController extends Controller
                 return response()->json(['error' => 'Solo el organizador puede configurar equipos'], 403);
             }
 
-            $match = $room->matches()->whereNull('finished_at')->latest()->first();
+            $match = $room->match;
 
             if (!$match) {
                 return response()->json(['error' => 'No hay partida activa'], 404);
@@ -150,7 +150,7 @@ class TeamController extends Controller
                 return response()->json(['error' => 'Solo el organizador puede crear equipos'], 403);
             }
 
-            $match = $room->matches()->whereNull('finished_at')->latest()->first();
+            $match = $room->match;
 
             if (!$match) {
                 return response()->json(['error' => 'No hay partida activa'], 404);
@@ -189,7 +189,7 @@ class TeamController extends Controller
                 return response()->json(['error' => 'Solo el organizador puede eliminar equipos'], 403);
             }
 
-            $match = $room->matches()->whereNull('finished_at')->latest()->first();
+            $match = $room->match;
 
             if (!$match) {
                 return response()->json(['error' => 'No hay partida activa'], 404);
@@ -224,7 +224,7 @@ class TeamController extends Controller
 
         try {
             $room = $this->roomRepository->findByCodeOrFail($roomCode);
-            $match = $room->matches()->whereNull('finished_at')->latest()->first();
+            $match = $room->match;
 
             if (!$match) {
                 return response()->json(['error' => 'No hay partida activa'], 404);
@@ -276,7 +276,7 @@ class TeamController extends Controller
                 return response()->json(['error' => 'Solo el organizador puede remover jugadores'], 403);
             }
 
-            $match = $room->matches()->whereNull('finished_at')->latest()->first();
+            $match = $room->match;
 
             if (!$match) {
                 return response()->json(['error' => 'No hay partida activa'], 404);
@@ -314,7 +314,7 @@ class TeamController extends Controller
                 return response()->json(['error' => 'Solo el organizador puede balancear equipos'], 403);
             }
 
-            $match = $room->matches()->whereNull('finished_at')->latest()->first();
+            $match = $room->match;
 
             if (!$match) {
                 return response()->json(['error' => 'No hay partida activa'], 404);
@@ -326,8 +326,8 @@ class TeamController extends Controller
                 return response()->json(['error' => 'El modo equipos no está activado'], 400);
             }
 
-            // Obtener todos los jugadores de la sala
-            $playerIds = $room->players->pluck('id')->toArray();
+            // Obtener todos los jugadores de la partida
+            $playerIds = $match->players()->pluck('id')->toArray();
 
             $teamsManager->balanceTeams($playerIds);
 
@@ -360,7 +360,7 @@ class TeamController extends Controller
                 return response()->json(['error' => 'Solo el organizador puede cambiar esta configuración'], 403);
             }
 
-            $match = $room->matches()->whereNull('finished_at')->latest()->first();
+            $match = $room->match;
 
             if (!$match) {
                 return response()->json(['error' => 'No hay partida activa'], 404);
@@ -386,7 +386,7 @@ class TeamController extends Controller
     {
         try {
             $room = $this->roomRepository->findByCodeOrFail($roomCode);
-            $match = $room->matches()->whereNull('finished_at')->latest()->first();
+            $match = $room->match;
 
             if (!$match) {
                 return response()->json(['error' => 'No hay partida activa'], 404);
