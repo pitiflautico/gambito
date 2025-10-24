@@ -160,7 +160,11 @@ class TriviaEngine extends BaseGameEngine
             throw new \RuntimeException("No questions found in configuration");
         }
 
-        // 3. Setear estado inicial específico de Trivia
+        // 2. Iniciar timer de la primera pregunta
+        $timerService = TimerService::fromArray($match->game_state);
+        $timerService->startTimer('question_timer', $timePerQuestion);
+
+        // 3. Setear estado inicial específico de Trivia (todo junto en un solo save)
         $firstQuestion = $questions[0];
 
         $match->game_state = array_merge($match->game_state, [
@@ -170,15 +174,8 @@ class TriviaEngine extends BaseGameEngine
             'player_answers' => [],
             'question_start_time' => now()->timestamp,
             'question_results' => null,
-        ]);
+        ], $timerService->toArray());
 
-        $match->save();
-
-        // 4. Iniciar timer de la primera pregunta
-        $timerService = TimerService::fromArray($match->game_state);
-        $timerService->startTimer('question_timer', $timePerQuestion);
-
-        $match->game_state = array_merge($match->game_state, $timerService->toArray());
         $match->save();
 
         Log::info("Trivia - State set for first question", [
@@ -188,8 +185,22 @@ class TriviaEngine extends BaseGameEngine
             'question' => $firstQuestion['question']
         ]);
 
-        // BaseGameEngine::startGame() se encargará de emitir GameStartedEvent
-        // con el timing metadata automáticamente.
+        // 5. Emitir evento genérico RoundStartedEvent
+        // En Trivia, cada pregunta ES una ronda
+        $roundManager = RoundManager::fromArray($match->game_state);
+
+        event(new RoundStartedEvent(
+            match: $match,
+            currentRound: $roundManager->getCurrentRound(),
+            totalRounds: $roundManager->getTotalRounds(),
+            phase: 'question'
+        ));
+
+        Log::info("Trivia - RoundStartedEvent emitted for first question", [
+            'match_id' => $match->id,
+            'room_code' => $match->room->code,
+            'round' => $roundManager->getCurrentRound()
+        ]);
     }
 
     // ========================================================================

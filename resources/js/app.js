@@ -3,10 +3,12 @@ import './bootstrap';
 
 import Alpine from 'alpinejs';
 import EventManager from './modules/EventManager.js';
+import { BaseGameClient } from './core/BaseGameClient.js';
 
 // Global libraries available for all games
 window.Alpine = Alpine;
 window.EventManager = EventManager;
+window.BaseGameClient = BaseGameClient;
 
 Alpine.start();
 

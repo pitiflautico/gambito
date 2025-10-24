@@ -52,7 +52,7 @@
         "handler": "handleTurnChanged"
       },
       "GameFinishedEvent": {
-        "name": "trivia.game.finished",
+        "name": ".trivia.game.finished",
         "handler": "handleGameFinished"
       }
     }

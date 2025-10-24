@@ -830,68 +830,24 @@ class RoomController extends Controller
                 'connected_player_ids' => $connectedPlayers
             ]);
 
-            // Si todos los jugadores están conectados, transicionar
+            // Emitir evento WebSocket para actualizar a todos los clientes
+            event(new \App\Events\Game\PlayerConnectedToGameEvent(
+                $code,
+                $connectedCount,
+                $totalPlayers
+            ));
+
+            // Si todos los jugadores están conectados, iniciar transición
             if ($connectedCount >= $totalPlayers) {
-                \Log::info("✅✅✅ AHORA VAMOS A AVANZAR - All players connected ✅✅✅", [
+                \Log::info("✅✅✅ All players connected - Starting transition ✅✅✅", [
                     'room_code' => $code,
                     'total_players' => $totalPlayers,
                     'connected_count' => $connectedCount
                 ]);
 
-                // TODO: PASO A PASO - Comentado temporalmente para debug
-                // NO hacemos nada más por ahora, solo el log
-
-                // // Usar lock de Cache para evitar race conditions
-                // $lockKey = "room:{$code}:starting:transition_lock";
-                // $lockAcquired = \Illuminate\Support\Facades\Cache::add($lockKey, '1', now()->addSeconds(10));
-
-                // if ($lockAcquired) {
-                //     // Limpiar el contador de Cache ANTES de transicionar
-                //     \Illuminate\Support\Facades\Cache::forget($cacheKey);
-
-                //     // Responder inmediatamente al cliente
-                //     // La transición se hace en background
-                //     $match = $room->match;
-                //     $engine = app($room->match->room->game->getEngineClass());
-
-                //     // Ejecutar en background (fire-and-forget)
-                //     dispatch(function() use ($engine, $match, $code) {
-                //         try {
-                //             $engine->transitionFromStarting($match);
-
-                //             \Log::info("🎮 Transition complete", [
-                //                 'room_code' => $code,
-                //                 'new_phase' => $match->fresh()->game_state['phase'] ?? 'unknown'
-                //             ]);
-                //         } catch (\Exception $e) {
-                //             \Log::error("Error in transition", [
-                //                 'room_code' => $code,
-                //                 'error' => $e->getMessage()
-                            ]);
-                        } finally {
-                            \Illuminate\Support\Facades\Cache::forget("room:{$code}:starting:transition_lock");
-                        }
-                    })->afterResponse();
-
-                    return response()->json([
-                        'success' => true,
-                        'message' => 'All players connected, game starting',
-                        'data' => [
-                            'transitioned' => true,
-                            'connected_count' => $connectedCount,
-                            'total_players' => $totalPlayers
-                        ]
-                    ]);
-                } else {
-                    // Otro request ya está procesando la transición
-                    return response()->json([
-                        'success' => true,
-                        'message' => 'Another client is transitioning',
-                        'data' => [
-                            'waiting' => true
-                        ]
-                    ]);
-                }
+                // Llamar al engine para que emita GameStartedEvent con countdown
+                $engine = $room->game->getEngine();
+                $engine->transitionFromStarting($room->match);
             }
 
             return response()->json([

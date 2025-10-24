@@ -178,38 +178,43 @@ abstract class BaseGameEngine implements GameEngineInterface
             'room_code' => $match->room->code
         ]);
 
-        // TODO: PASO A PASO - Comentado temporalmente para debug
+        // 1. Emitir GameStartedEvent con timing metadata (countdown)
+        $timing = $this->getGameStartTiming($match);
 
-        // // 1. Emitir GameStartedEvent con timing metadata (countdown)
-        // $timing = $this->getGameStartTiming($match);
+        event(new \App\Events\Game\GameStartedEvent(
+            match: $match,
+            gameState: $match->game_state,
+            timing: $timing
+        ));
 
-        // event(new \App\Events\Game\GameStartedEvent(
-        //     match: $match,
-        //     gameState: $match->game_state,
-        //     timing: $timing
-        // ));
+        Log::info("[{$this->getGameSlug()}] GameStartedEvent emitted, waiting for frontend countdown", [
+            'match_id' => $match->id,
+            'timing' => $timing
+        ]);
 
-        // Log::info("[{$this->getGameSlug()}] GameStartedEvent emitted with countdown", [
-        //     'match_id' => $match->id,
-        //     'timing' => $timing
-        // ]);
+        // El frontend mostrará el countdown y notificará al backend cuando termine
+        // via endpoint /api/games/{match}/game-ready
+        // El backend ejecutará onGameStart() cuando reciba esa notificación
+    }
 
-        // // 2. Programar inicio del primer round después del countdown
-        // // El backend maneja el timing, el frontend solo muestra el countdown visualmente
-        // dispatch(function() use ($match) {
-        //     // Refrescar el match para obtener el estado más reciente
-        //     $match = $match->fresh();
+    /**
+     * Método público para iniciar el juego después del countdown.
+     *
+     * Este método es llamado por el GameController cuando el frontend
+     * notifica que el countdown ha terminado. Internamente llama al
+     * método protected onGameStart() que cada juego implementa.
+     *
+     * @param GameMatch $match
+     * @return void
+     */
+    public function triggerGameStart(GameMatch $match): void
+    {
+        Log::info("[{$this->getGameSlug()}] Triggering game start", [
+            'match_id' => $match->id,
+            'current_phase' => $match->game_state['phase'] ?? 'unknown'
+        ]);
 
-        //     // Verificar que seguimos en starting (por si acaso hubo algún cambio)
-        //     if (($match->game_state['phase'] ?? null) === 'starting') {
-        //         $this->onGameStart($match);
-        //     }
-        // })->delay(now()->addSeconds($timing['duration_seconds']));
-
-        // Log::info("[{$this->getGameSlug()}] Scheduled onGameStart() to run after countdown", [
-        //     'match_id' => $match->id,
-        //     'delay_seconds' => $timing['duration_seconds']
-        // ]);
+        $this->onGameStart($match);
     }
 
     // ========================================================================

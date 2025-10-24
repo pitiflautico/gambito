@@ -18,6 +18,8 @@ class TriviaGame extends BaseGameClient {
         // Llamar al constructor del padre (BaseGameClient)
         super(config);
 
+        console.log('🎮 [TriviaGame] Initialized');
+
         // Propiedades específicas de Trivia
         this.currentQuestion = null;
         this.hasAnswered = false;
@@ -44,6 +46,7 @@ class TriviaGame extends BaseGameClient {
 
     initializeElements() {
         // Panels
+        this.gameStarting = document.getElementById('game-starting');
         this.questionWaiting = document.getElementById('question-waiting');
         this.questionActive = document.getElementById('question-active');
         this.questionResults = document.getElementById('question-results');
@@ -111,6 +114,11 @@ class TriviaGame extends BaseGameClient {
 
         // Manejar diferentes fases del juego
         switch (phase) {
+            case 'starting':
+                // Esperando que todos los jugadores se conecten
+                this.showGameStarting();
+                break;
+
             case 'question':
                 // Hay una pregunta activa
                 const currentQuestion = this.gameState.current_question;
@@ -680,3 +688,19 @@ class TriviaGame extends BaseGameClient {
 
 // Export to window
 window.TriviaGame = TriviaGame;
+
+// Auto-initialize when window.gameConfig is available
+if (window.gameConfig) {
+    console.log('🎮 [Trivia] Auto-initializing with config:', window.gameConfig);
+    window.game = new TriviaGame(window.gameConfig);
+} else {
+    console.log('⏸️ [Trivia] Waiting for gameConfig...');
+    // Esperar a que gameConfig esté disponible
+    const checkConfig = setInterval(() => {
+        if (window.gameConfig) {
+            console.log('🎮 [Trivia] Config found, initializing...');
+            clearInterval(checkConfig);
+            window.game = new TriviaGame(window.gameConfig);
+        }
+    }, 100);
+}

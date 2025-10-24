@@ -15,6 +15,10 @@ return [
                 'name' => 'game.started',
                 'handler' => 'handleGameStarted'
             ],
+            'PlayerConnectedToGameEvent' => [
+                'name' => 'player.connected',
+                'handler' => 'handlePlayerConnected'
+            ],
             'RoundStartedEvent' => [
                 'name' => 'game.round.started',
                 'handler' => 'handleRoundStarted'

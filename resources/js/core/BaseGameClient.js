@@ -34,13 +34,8 @@ export class BaseGameClient {
         this.timing = new TimingModule();
         this.timing.configure(config.timing || {});
 
-        // 🔍 DEBUG: Mostrar estado inicial
-        console.log('🎮 [DEBUG] Game loaded - Current state:', {
-            phase: this.gameState?.phase || 'unknown',
-            roomCode: this.roomCode,
-            playerId: this.playerId,
-            totalPlayers: this.players.length
-        });
+        // Solo mostrar el estado
+        console.log('state:', this.gameState?.phase || 'unknown');
 
         // Notificar al backend que el jugador está conectado (fire-and-forget, no bloqueante)
         this.notifyPlayerConnected().catch(err => {
@@ -57,6 +52,7 @@ export class BaseGameClient {
         // Handlers por defecto que todos los juegos usan
         const defaultHandlers = {
             handleGameStarted: (event) => this.handleGameStarted(event),
+            handlePlayerConnected: (event) => this.handlePlayerConnected(event),
             handleRoundStarted: (event) => this.handleRoundStarted(event),
             handleRoundEnded: (event) => this.handleRoundEnded(event),
             handlePlayerAction: (event) => this.handlePlayerAction(event),
@@ -96,13 +92,28 @@ export class BaseGameClient {
 
             await this.timing.processTimingPoint(
                 event.timing,
-                () => console.log('⏰ Countdown finished, waiting for RoundStartedEvent...'),
+                () => this.notifyGameReady(),
                 this.getCountdownElement()
             );
         }
 
         // Los juegos específicos pueden sobrescribir este método
         // para hacer transiciones de UI, mostrar mensajes, etc.
+    }
+
+    /**
+     * Handler genérico: Jugador conectado
+     *
+     * Actualiza el contador de jugadores conectados en tiempo real
+     */
+    handlePlayerConnected(event) {
+        console.log('📱 [BaseGameClient] Player connected:', event);
+
+        // Actualizar el contador en la UI
+        const statusElement = document.getElementById('connection-status');
+        if (statusElement) {
+            statusElement.textContent = `(${event.connected_count}/${event.total_players})`;
+        }
     }
 
     /**
@@ -225,11 +236,6 @@ export class BaseGameClient {
      * transicionar de la fase "starting" al primer round.
      */
     async notifyPlayerConnected() {
-        console.log('🔌 [BaseGameClient] Notifying backend: player connected', {
-            roomCode: this.roomCode,
-            playerId: this.playerId
-        });
-
         try {
             const response = await fetch(`/api/rooms/${this.roomCode}/player-connected`, {
                 method: 'POST',
@@ -245,22 +251,58 @@ export class BaseGameClient {
             const data = await response.json();
 
             if (response.ok && data.success) {
-                console.log('✅ [DEBUG] Player connected notification sent:', {
-                    connected_count: data.data?.connected_count || '?',
-                    total_players: data.data?.total_players || '?',
-                    waiting_for: data.data?.waiting_for || 0
-                });
-            } else {
-                console.error('❌ [BaseGameClient] Error notifying player connected:', data.message);
+                // Silencioso, no mostrar nada
             }
         } catch (error) {
-            console.error('❌ [BaseGameClient] Error sending player connected notification:', error);
+            // Silencioso
         }
     }
 
     // ========================================================================
     // TIMING MODULE - Race Condition Protection
     // ========================================================================
+
+    /**
+     * Notificar al backend que el countdown de inicio ha terminado y el juego puede comenzar.
+     *
+     * Race Condition Protection:
+     * - Todos los jugadores llaman a este endpoint cuando el countdown de GameStarted termina
+     * - El backend usa un lock mechanism para que solo el primer cliente ejecute onGameStart()
+     * - Los demás clientes reciben 409 Conflict y esperan el evento del juego (ej: QuestionStartedEvent)
+     */
+    async notifyGameReady() {
+        console.log('📤 [BaseGameClient] Notifying backend: game ready, starting first round');
+
+        try {
+            const response = await fetch(`/api/games/${this.matchId}/game-ready`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                },
+                body: JSON.stringify({
+                    room_code: this.roomCode
+                })
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.success) {
+                if (data.already_processing) {
+                    // Otro cliente ya está iniciando el juego (normal, no es error)
+                    console.log('⏸️  [BaseGameClient] Another client is starting the game, waiting for first event...');
+                } else {
+                    console.log('✅ [BaseGameClient] Successfully started game');
+                }
+            } else {
+                console.error('❌ [BaseGameClient] Error starting game:', data.error);
+            }
+
+            // En todos los casos, el cliente se sincronizará con los eventos del juego
+        } catch (error) {
+            console.error('❌ [BaseGameClient] Network error notifying game ready:', error);
+        }
+    }
 
     /**
      * Notificar al backend que el frontend está listo para la siguiente ronda.

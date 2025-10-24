@@ -23,6 +23,8 @@ Route::prefix('games')->name('api.games.')->group(function () {
 });
 
 // API de Partidas (Match Control)
+Route::post('/games/{match}/game-ready', [GameController::class, 'gameReady'])
+    ->name('api.matches.game-ready');
 Route::post('/games/{match}/start-next-round', [GameController::class, 'startNextRound'])
     ->name('api.matches.start-next-round');
 
