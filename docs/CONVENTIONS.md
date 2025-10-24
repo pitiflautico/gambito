@@ -16,11 +16,10 @@ Los tests NO son simples verificaciones, son **contratos que definen el comporta
 ```
 tests/Feature/
 ├── RoomCreationFlowTest.php    # Contrato: Creación de salas (14 tests)
-├── LobbyJoinFlowTest.php       # Contrato: Entrada al lobby (18 tests)
-└── ModuleFlowTest.php          # Contrato: Sistema de módulos (27 tests)
+└── LobbyJoinFlowTest.php       # Contrato: Entrada al lobby (18 tests)
 ```
 
-**Total: 59 tests - Todos deben pasar siempre**
+**Total: 32 tests - Todos deben pasar siempre**
 
 ### 2. Código Genérico > Código Específico
 
@@ -342,7 +341,7 @@ tests/Feature/Games/MiJuegoGameFlowTest.php
 
 **Checklist:**
 
-- [ ] Todos los tests pasan (59/59)
+- [ ] Todos los tests pasan (32/32)
 - [ ] No hay código específico de juego en el core
 - [ ] Los módulos se usan correctamente
 - [ ] Los eventos se emiten en el orden correcto

@@ -107,9 +107,10 @@ games/trivia/
 
 La plataforma utiliza **tests como contratos**:
 
-1. **RoomCreationFlowTest**: Contrato inmutable para creación de salas
-2. **LobbyJoinFlowTest**: Contrato inmutable para entrada al lobby
-3. **ModuleFlowTest**: Contrato para el sistema de módulos
+1. **RoomCreationFlowTest** (14 tests): Contrato inmutable para creación de salas
+2. **LobbyJoinFlowTest** (18 tests): Contrato inmutable para entrada al lobby
+
+**Total: 32 tests - 100% pasando**
 
 Estos tests **no se pueden modificar sin aprobación explícita**.
 
