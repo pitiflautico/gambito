@@ -1,38 +1,44 @@
 /**
  * Trivia Game - Frontend Logic
  *
- * Maneja la lógica del juego de Trivia en el cliente:
+ * Extiende BaseGameClient y añade lógica específica de Trivia:
  * - Mostrar preguntas y opciones
  * - Enviar respuestas al servidor
- * - Recibir actualizaciones vía WebSocket (usando EventManager)
  * - Mostrar resultados y ranking
  * - Actualizar UI en tiempo real
  *
  * DEPENDENCIAS:
- * - window.EventManager (cargado en app.js)
- * - window.Echo (cargado en bootstrap.js)
+ * - BaseGameClient (gestiona eventos y conexión WebSocket)
  */
 
-class TriviaGame {
-    constructor(config) {
-        this.roomCode = config.roomCode;
-        this.playerId = config.playerId;
-        this.matchId = config.matchId;
-        this.gameSlug = config.gameSlug;
-        this.players = config.players || [];
-        this.scores = config.scores || {};
-        this.currentGameState = config.gameState || null;
-        this.eventConfig = config.eventConfig || null;
+import { BaseGameClient } from './core/BaseGameClient.js';
 
+class TriviaGame extends BaseGameClient {
+    constructor(config) {
+        // Llamar al constructor del padre (BaseGameClient)
+        super(config);
+
+        // Propiedades específicas de Trivia
         this.currentQuestion = null;
         this.hasAnswered = false;
         this.selectedOption = null;
+        this.lastRoundNumber = null;
 
+        // Inicializar UI de Trivia
         this.initializeElements();
-        this.setupEventManager();
         this.setupEventListeners();
-        this.syncInitialState(); // Sincronizar con el estado actual
 
+        // Configurar handlers de eventos específicos de Trivia
+        this.setupEventManager({
+            handleRoundStarted: (event) => this.handleRoundStartedTrivia(event),
+            handleRoundEnded: (event) => this.handleRoundEndedTrivia(event),
+            handlePlayerAction: (event) => this.handlePlayerActionTrivia(event),
+            handlePhaseChanged: (event) => this.handlePhaseChangedTrivia(event),
+            handleTurnChanged: (event) => this.handleTurnChangedTrivia(event),
+            handleGameFinished: (event) => this.handleGameFinishedTrivia(event),
+        });
+
+        this.syncInitialState(); // Sincronizar con el estado actual
     }
 
     initializeElements() {
@@ -64,37 +70,8 @@ class TriviaGame {
         this.gameMessages = document.getElementById('game-messages');
     }
 
-    setupEventManager() {
-        if (!window.EventManager) {
-            return;
-        }
-
-        if (!this.eventConfig) {
-            return;
-        }
-
-        // Inicializar EventManager con los handlers de este juego
-        this.eventManager = new window.EventManager({
-            roomCode: this.roomCode,
-            gameSlug: this.gameSlug,
-            eventConfig: this.eventConfig,
-            handlers: {
-                // Mapear handlers a métodos de esta clase
-                handleQuestionStarted: (event) => this.handleQuestionStarted(event),
-                handlePlayerAnswered: (event) => this.handlePlayerAnswered(event),
-                handleQuestionEnded: (event) => this.handleQuestionEnded(event),
-                handleGameFinished: (event) => this.handleGameFinished(event),
-
-                // Callbacks de conexión
-                onConnected: () => {},
-                onError: (error, context) => {
-                    this.showMessage('Error de conexión WebSocket', 'error');
-                },
-                onDisconnected: () => {}
-            },
-            autoConnect: true
-        });
-    }
+    // setupEventManager() ya no es necesario aquí
+    // Se hereda de BaseGameClient y se configura en el constructor
 
     setupEventListeners() {
         // Option buttons
@@ -120,43 +97,120 @@ class TriviaGame {
     }
 
     syncInitialState() {
-        // Si ya hay un game_state con una pregunta activa, mostrarla
-        if (this.currentGameState && this.currentGameState.phase === 'question') {
-            const currentQuestion = this.currentGameState.current_question;
-            const currentRound = this.currentGameState.current_question_index + 1;
-            const totalRounds = this.currentGameState.total_rounds || 10;
+        console.log('🔄 [Trivia] syncInitialState called');
+        console.log('   gameState:', this.gameState);
+        console.log('   phase:', this.gameState?.phase);
 
-            if (currentQuestion) {
-                this.handleQuestionStarted({
-                    question: currentQuestion.question,
-                    options: currentQuestion.options,
-                    current_round: currentRound,
-                    total_rounds: totalRounds
+        if (!this.gameState) {
+            console.log('   ❌ No hay gameState, mostrando espera');
+            this.showQuestionWaiting();
+            return;
+        }
+
+        const phase = this.gameState.phase;
+
+        // Manejar diferentes fases del juego
+        switch (phase) {
+            case 'question':
+                // Hay una pregunta activa
+                console.log('   ✅ Fase: question - mostrando pregunta');
+                const currentQuestion = this.gameState.current_question;
+                const currentRound = this.gameState.current_question_index + 1;
+                const totalRounds = this.gameState.total_rounds || 10;
+
+                if (currentQuestion) {
+                    this.handleRoundStartedTrivia({
+                        game_state: this.gameState,
+                        current_round: currentRound,
+                        total_rounds: totalRounds,
+                        phase: phase
+                    });
+                }
+                break;
+
+            case 'results':
+                // Mostrando resultados de la pregunta
+                console.log('   ⏳ Fase: results - mostrando resultados y esperando countdown');
+                const results = this.gameState.question_results || {};
+                const scores = this.gameState.scoring_system?.scores || {};
+                const roundNumber = this.gameState.round_system?.current_round || 1;
+
+                this.handleRoundEndedTrivia({
+                    round_number: roundNumber,
+                    results: results,
+                    scores: scores
                 });
-            }
+                break;
+
+            case 'final_results':
+                // Juego terminado
+                console.log('   🏁 Fase: final_results - juego terminado');
+                // TODO: Mostrar resultados finales
+                break;
+
+            default:
+                // Fase desconocida o esperando
+                console.log(`   ⚠️ Fase desconocida: ${phase}, mostrando espera`);
+                this.showQuestionWaiting();
         }
     }
 
-    handleQuestionStarted(event) {
+    /**
+     * Handler específico de Trivia para RoundStarted
+     *
+     * CONVENCIÓN: Cuando empieza una ronda en Trivia:
+     * 1. Resetear estados de respuesta (nadie ha respondido)
+     * 2. Mostrar la nueva pregunta
+     * 3. Resetear indicadores visuales de jugadores
+     * 4. Actualizar contador de rondas
+     * 5. Mostrar panel de pregunta activa
+     */
+    handleRoundStartedTrivia(event) {
+        console.log('🎯 [Trivia] RoundStartedEvent received:', event);
+
+        // Llamar al handler base primero (logging, estado base, etc.)
+        super.handleRoundStarted(event);
+
+        // Evento genérico: Nueva ronda = Nueva pregunta en Trivia
+        const gameState = event.game_state;
+        const currentQuestion = gameState.current_question;
+
+        console.log('📝 [Trivia] Current question:', currentQuestion);
+
         this.currentQuestion = {
-            question: event.question,
-            options: event.options,
+            question: currentQuestion.question,
+            options: currentQuestion.options,
             currentRound: event.current_round,
-            totalRounds: event.total_rounds
+            totalRounds: event.total_rounds,
+            category: currentQuestion.category,
+            difficulty: currentQuestion.difficulty
         };
 
+        // 1. Resetear estados de respuesta (CONVENCIÓN)
         this.hasAnswered = false;
         this.selectedOption = null;
 
+        // 2-5. Renderizar UI
         this.showQuestionActive();
         this.renderQuestion();
         this.updateProgress(0);
         this.resetPlayerStatuses();
+        this.updateRoundCounter();
+
+        console.log('✅ [Trivia] Question rendered');
     }
 
-    handlePlayerAnswered(event) {
-        // Actualizar contador de respuestas
-        this.updateProgress(event.answered_count);
+    /**
+     * Handler específico de Trivia para PlayerAction
+     */
+    handlePlayerActionTrivia(event) {
+        console.log('👤 [Trivia] PlayerActionEvent received:', event);
+
+        // Llamar al handler base
+        super.handlePlayerAction(event);
+
+        // Evento genérico: Acción de jugador
+        if (event.action_type !== 'answer') return;
 
         // Marcar jugador como respondido
         this.markPlayerAsAnswered(event.player_id);
@@ -167,22 +221,67 @@ class TriviaGame {
         }
     }
 
-    handleQuestionEnded(event) {
+    /**
+     * Handler específico de Trivia para RoundEnded
+     *
+     * CONVENCIÓN: Cuando termina una ronda:
+     * 1. Actualizar scores de todos los jugadores
+     * 2. Mostrar resultados de la ronda
+     * 3. Iniciar countdown para próxima pregunta
+     */
+    handleRoundEndedTrivia(event) {
+        console.log('🏁 [Trivia] RoundEndedEvent received:', event);
+
+        // Llamar al handler base
+        super.handleRoundEnded(event);
+
+        // Evento genérico: Fin de ronda
         this.scores = event.scores;
 
-        // Mostrar respuesta correcta
-        this.showCorrectAnswer(event.correct_answer);
+        // Guardar el índice de pregunta actual para enviar después del countdown
+        this.lastQuestionIndex = this.gameState?.current_question_index ?? 0;
 
-        // Actualizar puntuaciones
+        // Los resultados vienen con player_id como key
+        const results = event.results;
+
+        console.log('📊 [Trivia] Results:', results);
+        console.log('💯 [Trivia] Scores:', event.scores);
+        console.log('🔢 [Trivia] Question index:', this.lastQuestionIndex);
+
+        // Actualizar puntuaciones en tiempo real (datos vienen del evento)
         this.updateScores(event.scores);
 
-        // Mostrar resultados después de 2 segundos
-        setTimeout(() => {
-            this.showResults(event.correct_answer, event.results);
-        }, 2000);
+        // Mostrar quién ganó esta ronda
+        this.showRoundResults(results);
+
+        console.log('✅ [Trivia] Results displayed');
     }
 
-    handleGameFinished(event) {
+    /**
+     * Handler específico de Trivia para PhaseChanged
+     */
+    handlePhaseChangedTrivia(event) {
+        console.log('🔄 [Trivia] PhaseChangedEvent received:', event);
+        // TODO: Implementar cambios de fase si es necesario
+    }
+
+    /**
+     * Handler específico de Trivia para TurnChanged
+     */
+    handleTurnChangedTrivia(event) {
+        console.log('🔁 [Trivia] TurnChangedEvent received:', event);
+        // En Trivia no hay turnos (es simultáneo), pero dejamos el handler
+    }
+
+    /**
+     * Handler específico de Trivia para GameFinished
+     */
+    handleGameFinishedTrivia(event) {
+        console.log('🎊 [Trivia] GameFinishedEvent received:', event);
+
+        // Llamar al handler base
+        super.handleGameFinished(event);
+
         // Mostrar resultados finales
         this.showFinalResults(event.ranking, event.statistics);
     }
@@ -318,20 +417,29 @@ class TriviaGame {
         }
     }
 
-    showResults(correctIndex, results) {
+    showRoundResults(results) {
         this.questionActive.classList.add('hidden');
         this.questionResults.classList.remove('hidden');
 
-        // Correct answer
+        // Mantener contador de rondas visible
+        this.updateRoundCounter();
+
+        // Encontrar al ganador de esta ronda
+        const winner = Object.entries(results).find(([_, result]) => result.correct);
+        const winnerName = winner ? this.players.find(p => String(p.id) === String(winner[0]))?.name : 'Nadie';
+
+        // Mostrar mensaje del ganador
         const correctAnswerText = document.getElementById('correct-answer-text');
-        correctAnswerText.textContent = this.currentQuestion.options[correctIndex];
+        correctAnswerText.textContent = winner
+            ? `${winnerName} respondió correctamente primero!`
+            : 'Nadie respondió correctamente';
 
         // Players results
         const playersResults = document.getElementById('players-results');
         playersResults.innerHTML = '';
 
         Object.entries(results).forEach(([playerId, result]) => {
-            const player = this.players.find(p => p.id == playerId);
+            const player = this.players.find(p => String(p.id) === String(playerId));
             if (!player) return;
 
             const resultDiv = document.createElement('div');
@@ -357,7 +465,8 @@ class TriviaGame {
             playersResults.appendChild(resultDiv);
         });
 
-        // Countdown to next question
+        // ✅ Iniciar countdown local de 5 segundos
+        // Después del countdown, enviar señal al backend
         this.startNextQuestionCountdown();
     }
 
@@ -372,8 +481,47 @@ class TriviaGame {
             if (seconds <= 0) {
                 clearInterval(interval);
                 this.showQuestionWaiting();
+                // Enviar señal al backend (el primero que llega inicia la ronda)
+                this.notifyCountdownEnded();
             }
         }, 1000);
+    }
+
+    async notifyCountdownEnded() {
+        console.log('⏰ [Trivia] Countdown ended - notifying backend...', {
+            questionIndex: this.lastQuestionIndex
+        });
+
+        try {
+            const response = await fetch(`/api/trivia/countdown-ended`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                },
+                body: JSON.stringify({
+                    room_code: this.roomCode,
+                    question_index: this.lastQuestionIndex // Enviar índice de pregunta que terminó
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                if (data.already_started) {
+                    console.log('✅ [Trivia] Round already started by another player');
+                } else {
+                    console.log('✅ [Trivia] We started the next round');
+                }
+                // El evento RoundStartedEvent llegará por WebSocket
+            } else if (data.game_complete) {
+                console.log('🏁 [Trivia] Game is complete');
+            } else {
+                console.error('❌ [Trivia] Error notifying countdown:', data.error);
+            }
+        } catch (error) {
+            console.error('❌ [Trivia] Network error notifying countdown:', error);
+        }
     }
 
     showQuestionWaiting() {
@@ -411,6 +559,13 @@ class TriviaGame {
         if (statusIndicator) {
             statusIndicator.classList.add('answered');
         }
+    }
+
+    updateRoundCounter() {
+        if (!this.currentQuestion) return;
+
+        this.currentQuestionSpan.textContent = this.currentQuestion.currentRound;
+        this.totalQuestionsSpan.textContent = this.currentQuestion.totalRounds;
     }
 
     showMessage(message, type = 'info') {
