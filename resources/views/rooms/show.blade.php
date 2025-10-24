@@ -8,23 +8,25 @@
     $gamePath = $room->game->path;
 
     // Construir path de la vista del juego
-    // Ejemplo: games/pictionary/views/canvas.blade.php
-    $gameViewPath = base_path("{$gamePath}/views/canvas.blade.php");
+    // Convención: games/{slug}/views/game.blade.php
+    $gameViewPath = base_path("{$gamePath}/views/game.blade.php");
 
     // Registrar el namespace de vistas del juego si no está registrado
     $viewNamespace = "game-{$gameSlug}";
-    if (!view()->exists("{$viewNamespace}::canvas")) {
+    if (!view()->exists("{$viewNamespace}::game")) {
         view()->addNamespace($viewNamespace, base_path("{$gamePath}/views"));
     }
 @endphp
 
 @if(file_exists($gameViewPath))
     {{-- Cargar la vista del juego con los datos necesarios --}}
-    @include("{$viewNamespace}::canvas", [
+    @include("{$viewNamespace}::game", [
         'room' => $room,
         'match' => $room->match,
         'playerId' => $playerId ?? null,
         'role' => $role ?? 'guesser',
+        'players' => $players ?? [],
+        'eventConfig' => $eventConfig ?? null,
     ])
 @else
     {{-- Fallback si no existe vista específica del juego --}}

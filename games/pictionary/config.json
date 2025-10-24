@@ -84,7 +84,8 @@
   "modules": {
     "turn_system": {
       "enabled": true,
-      "mode": "sequential"
+      "mode": "sequential",
+      "round_per_turn": true
     },
     "scoring_system": {
       "enabled": true,
@@ -97,6 +98,12 @@
     "round_system": {
       "enabled": true,
       "total_rounds": "auto"
+    },
+    "roles_system": {
+      "enabled": true,
+      "roles": ["drawer", "guesser"],
+      "allow_multiple_roles": false,
+      "description": "Sistema de roles: drawer dibuja la palabra, guessers intentan adivinar"
     },
     "teams_system": {
       "enabled": false,

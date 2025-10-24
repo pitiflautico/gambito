@@ -52,7 +52,7 @@ class PlayerAnsweredEvent implements ShouldBroadcast
      */
     public function broadcastAs(): string
     {
-        return 'trivia.player.answered';
+        return '.trivia.player.answered';
     }
 
     /**

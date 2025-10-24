@@ -61,7 +61,7 @@ class GameStateUpdatedEvent implements ShouldBroadcast
      */
     public function broadcastAs(): string
     {
-        return 'pictionary.game.state.updated';
+        return '.pictionary.game.state.updated';
     }
 
     /**

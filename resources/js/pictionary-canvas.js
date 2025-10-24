@@ -60,14 +60,20 @@ class PictionaryCanvas {
      */
     setupEventManager() {
         if (!window.EventManager) {
-
+            console.error('❌ EventManager no disponible');
             return;
         }
 
         if (!this.eventConfig) {
-
+            console.error('❌ eventConfig no disponible');
             return;
         }
+
+        console.log('✅ Inicializando EventManager', {
+            roomCode: this.roomCode,
+            gameSlug: this.gameSlug,
+            eventConfig: this.eventConfig
+        });
 
         // Inicializar EventManager con los handlers de este juego
         this.eventManager = new window.EventManager({
@@ -85,14 +91,20 @@ class PictionaryCanvas {
                 handleAnswerConfirmed: (event) => this.handleAnswerConfirmed(event),
 
                 // Callbacks de conexión
-                onConnected: () => {},
-                onError: (error, context) => {
-
+                onConnected: () => {
+                    console.log('🟢 EventManager conectado');
                 },
-                onDisconnected: () => {}
+                onError: (error, context) => {
+                    console.error('🔴 EventManager error:', error, context);
+                },
+                onDisconnected: () => {
+                    console.log('🔴 EventManager desconectado');
+                }
             },
             autoConnect: true
         });
+
+        console.log('✅ EventManager inicializado', this.eventManager);
     }
 
     /**
@@ -220,6 +232,19 @@ class PictionaryCanvas {
      * Manejar cambio de turno (nuevo dibujante)
      */
     handleTurnChanged(data) {
+        // ========================================================================
+        // CERRAR MODAL DE RESULTADOS SI ESTÁ ABIERTO
+        // ========================================================================
+        const roundModal = document.getElementById('round-results-modal');
+        if (roundModal && !roundModal.classList.contains('hidden')) {
+            roundModal.classList.add('hidden');
+        }
+
+        // Limpiar countdown interval si existe
+        if (this.countdownInterval) {
+            clearInterval(this.countdownInterval);
+            this.countdownInterval = null;
+        }
 
         // Actualizar información de ronda
         this.updateRoundInfo(data.round, data.rounds_total || 5);
@@ -232,9 +257,34 @@ class PictionaryCanvas {
         // Mostrar mensaje de cambio de turno
         this.showGameMessage(`🎨 Turno de ${data.new_drawer_name}`);
 
-        // Actualizar rol del jugador
+        // ========================================================================
+        // ACTUALIZAR ROL DESDE EL BACKEND (SOURCE OF TRUTH)
+        // ========================================================================
         const currentPlayerId = window.gameData?.playerId;
-        this.isDrawer = (currentPlayerId === data.new_drawer_id);
+
+        // El backend envía TODOS los roles de TODOS los jugadores
+        const playerRoles = data.player_roles || {};
+        const myRole = playerRoles[currentPlayerId] || 'guesser';
+
+        // Actualizar rol basado en lo que el backend dice
+        this.isDrawer = (myRole === 'drawer');
+
+        // ========================================================================
+        // DEBUG: Mostrar estado de roles en consola
+        // ========================================================================
+        console.log('='.repeat(80));
+        console.log('📊 CAMBIO DE TURNO - Roles desde Backend');
+        console.log('='.repeat(80));
+        console.log('🎮 Mi Player ID:', currentPlayerId);
+        console.log('🎨 Nuevo Drawer ID:', data.new_drawer_id);
+        console.log('🎨 Nuevo Drawer Name:', data.new_drawer_name);
+        console.log('📋 Todos los roles del backend:', playerRoles);
+        console.log('👤 Mi Rol desde backend:', myRole);
+        console.log('👤 isDrawer:', this.isDrawer);
+        console.log('📍 Ronda:', data.round);
+        console.log('📍 Turno:', data.turn);
+        console.log('📊 Puntuaciones:', data.scores);
+        console.log('='.repeat(80));
 
         // Actualizar UI según el nuevo rol
         this.updateUIForRole();
@@ -442,46 +492,21 @@ class PictionaryCanvas {
             // Programar avance automático al siguiente turno después de 3 segundos
 
             // Limpiar timeout anterior si existe
-            if (this.phaseAdvanceTimeout) {
-                clearTimeout(this.phaseAdvanceTimeout);
-            }
-
-            // Programar avance automático
-            this.phaseAdvanceTimeout = setTimeout(() => {
-
-                this.advancePhaseAuto();
-            }, 3000);
+            // ========================================================================
+            // NOTA: NO llamamos a advancePhase() manualmente
+            // El backend lo hace automáticamente después del delay configurado
+            // Frontend solo muestra el countdown visual
+            // ========================================================================
         } else if (newPhase === 'results') {
             // Mostrar resultados finales
             // TODO: Implementar modal de resultados finales
         }
     }
 
-    /**
-     * Avanzar fase automáticamente (llamado por timeout)
-     */
-    advancePhaseAuto() {
-        fetch('/api/pictionary/advance-phase', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRF-TOKEN': window.gameData.csrfToken
-            },
-            body: JSON.stringify({
-                room_code: this.roomCode,
-                match_id: window.gameData.matchId
-            })
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (!data.success) {
-
-            }
-        })
-        .catch(error => {
-
-        });
-    }
+    // ========================================================================
+    // NOTA: advancePhaseAuto() eliminado - Backend controla el timing ahora
+    // Backend usa scheduleNextRound() para avanzar automáticamente
+    // ========================================================================
 
     /**
      * Manejar cambio de dibujante
@@ -957,6 +982,20 @@ class PictionaryCanvas {
             is_correct: isCorrect
         };
 
+        // ========================================================================
+        // DEBUG: Mostrar intento de confirmación
+        // ========================================================================
+        console.log('='.repeat(80));
+        console.log('✅ CONFIRMANDO RESPUESTA');
+        console.log('='.repeat(80));
+        console.log('🎮 Mi Player ID:', window.gameData.playerId);
+        console.log('🎨 Drawer ID (payload):', payload.drawer_id);
+        console.log('🤔 Guesser ID (payload):', payload.guesser_id);
+        console.log('👤 Mi Rol (frontend):', this.isDrawer ? '🎨 DIBUJANTE' : '🤔 ADIVINADOR');
+        console.log('✔️ Respuesta correcta?:', isCorrect);
+        console.log('📦 Payload completo:', payload);
+        console.log('='.repeat(80));
+
 
         // Deshabilitar botones temporalmente
         const btnCorrect = document.getElementById('btn-correct');
@@ -1152,18 +1191,21 @@ class PictionaryCanvas {
 
         modal.classList.remove('hidden');
 
-        // Iniciar countdown automático de 3 segundos
-        this.startRoundEndCountdown();
+        // Iniciar countdown automático (lee delay_seconds del backend)
+        const delaySeconds = results.delay_seconds || 3; // Default 3 si no está definido
+        this.startRoundEndCountdown(delaySeconds);
     }
 
     /**
-     * Iniciar countdown de 3 segundos antes de cerrar el modal automáticamente
+     * Iniciar countdown antes de que el backend lance el siguiente turno automáticamente
+     *
+     * @param {number} delaySeconds - Segundos a esperar (viene del backend)
      */
-    startRoundEndCountdown() {
+    startRoundEndCountdown(delaySeconds = 3) {
         const countdownElement = document.getElementById('countdown');
         if (!countdownElement) return;
 
-        let seconds = 3;
+        let seconds = delaySeconds;
         countdownElement.textContent = seconds;
 
         const countdownInterval = setInterval(() => {

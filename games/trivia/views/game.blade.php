@@ -151,7 +151,8 @@
 </div>
 
 @push('scripts')
-    @vite(['resources/js/trivia-game.js'])
+    {{-- Cargar BaseGameClient y luego TriviaGame --}}
+    @vite(['resources/js/core/BaseGameClient.js', 'resources/js/trivia-game.js'])
 
     <script>
         // Configuración inicial del juego
@@ -161,7 +162,7 @@
             matchId: {{ $match->id ?? 'null' }},
             gameSlug: 'trivia',
             players: @json($players ?? []),
-            scores: @json($match->game_state['scores'] ?? []),
+            scores: @json($match->game_state['scoring_system']['scores'] ?? []),
             gameState: @json($match->game_state ?? null),
             eventConfig: @json($eventConfig ?? null),
         };

@@ -23,6 +23,7 @@ class RoundEndedEvent implements ShouldBroadcast
     public int $guesserPoints;
     public int $drawerPoints;
     public array $scores;
+    public int $delaySeconds; // Segundos antes del siguiente turno
 
     /**
      * Create a new event instance.
@@ -35,7 +36,8 @@ class RoundEndedEvent implements ShouldBroadcast
         string $winnerName,
         int $guesserPoints,
         int $drawerPoints,
-        array $scores
+        array $scores,
+        int $delaySeconds = 3 // Delay antes del siguiente turno (default 3s)
     ) {
         $this->roomCode = $roomCode;
         $this->round = $round;
@@ -45,6 +47,7 @@ class RoundEndedEvent implements ShouldBroadcast
         $this->guesserPoints = $guesserPoints;
         $this->drawerPoints = $drawerPoints;
         $this->scores = $scores;
+        $this->delaySeconds = $delaySeconds;
     }
 
     /**
@@ -62,7 +65,7 @@ class RoundEndedEvent implements ShouldBroadcast
      */
     public function broadcastAs(): string
     {
-        return 'pictionary.round.ended';
+        return '.pictionary.round.ended';
     }
 
     /**
@@ -78,6 +81,7 @@ class RoundEndedEvent implements ShouldBroadcast
             'guesser_points' => $this->guesserPoints,
             'drawer_points' => $this->drawerPoints,
             'scores' => $this->scores,
+            'delay_seconds' => $this->delaySeconds, // ← Frontend usa esto para el countdown
             'timestamp' => now()->toIso8601String(),
         ];
     }

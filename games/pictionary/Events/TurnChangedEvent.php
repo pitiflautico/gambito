@@ -21,6 +21,7 @@ class TurnChangedEvent implements ShouldBroadcast
     public int $round;
     public int $turn;
     public array $scores;
+    public array $playerRoles; // ['player_id' => 'role']
 
     /**
      * Create a new event instance.
@@ -31,7 +32,8 @@ class TurnChangedEvent implements ShouldBroadcast
         string $newDrawerName,
         int $round,
         int $turn,
-        array $scores
+        array $scores,
+        array $playerRoles = []
     ) {
         $this->roomCode = $roomCode;
         $this->newDrawerId = $newDrawerId;
@@ -39,6 +41,7 @@ class TurnChangedEvent implements ShouldBroadcast
         $this->round = $round;
         $this->turn = $turn;
         $this->scores = $scores;
+        $this->playerRoles = $playerRoles;
     }
 
     /**
@@ -56,7 +59,7 @@ class TurnChangedEvent implements ShouldBroadcast
      */
     public function broadcastAs(): string
     {
-        return 'pictionary.turn.changed';
+        return '.pictionary.turn.changed';
     }
 
     /**
@@ -70,6 +73,7 @@ class TurnChangedEvent implements ShouldBroadcast
             'round' => $this->round,
             'turn' => $this->turn,
             'scores' => $this->scores,
+            'player_roles' => $this->playerRoles, // Roles completos del backend
             'timestamp' => now()->toIso8601String(),
         ];
     }

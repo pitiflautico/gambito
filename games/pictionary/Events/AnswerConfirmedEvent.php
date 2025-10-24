@@ -46,7 +46,7 @@ class AnswerConfirmedEvent implements ShouldBroadcast
      */
     public function broadcastAs(): string
     {
-        return 'pictionary.answer.confirmed';
+        return '.pictionary.answer.confirmed';
     }
 
     /**

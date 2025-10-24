@@ -60,7 +60,7 @@ class PlayerEliminatedEvent implements ShouldBroadcast
      */
     public function broadcastAs(): string
     {
-        return 'pictionary.player.eliminated';
+        return '.pictionary.player.eliminated';
     }
 
     /**

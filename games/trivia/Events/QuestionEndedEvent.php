@@ -46,7 +46,7 @@ class QuestionEndedEvent implements ShouldBroadcast
      */
     public function broadcastAs(): string
     {
-        return 'trivia.question.ended';
+        return '.trivia.question.ended';
     }
 
     /**

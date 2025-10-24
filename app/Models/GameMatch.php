@@ -120,20 +120,32 @@ class GameMatch extends Model
 
         $engine = app($engineClass);
 
-        // Inicializar el juego (crea estado inicial)
+        // 1. Inicializar configuración (se llama UNA VEZ al crear match)
         $engine->initialize($this);
 
-        // Marcar partida como iniciada
+        // 2. Iniciar el juego (resetea módulos y empieza desde 0)
+        $engine->startGame($this);
+
+        // 3. Marcar partida como iniciada
         $this->update([
             'started_at' => now(),
         ]);
 
-        \Log::info("Match initialized with game engine", [
+        // 4. Refrescar para obtener el estado actualizado
+        $this->refresh();
+
+        \Log::info("Match started with game engine", [
             'match_id' => $this->id,
             'game' => $game->slug,
             'engine' => $engineClass,
-            'initial_state' => $this->fresh()->game_state,
+            'state' => $this->game_state,
         ]);
+
+        // 5. Emitir evento GameStartedEvent para notificar a todos los jugadores
+        event(new \App\Events\Game\GameStartedEvent(
+            match: $this,
+            gameState: $this->game_state
+        ));
     }
 
     /**

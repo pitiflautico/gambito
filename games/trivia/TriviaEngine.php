@@ -9,10 +9,10 @@ use App\Services\Modules\ScoringSystem\ScoreManager;
 use App\Services\Modules\TimerSystem\TimerService;
 use App\Services\Modules\RoundSystem\RoundManager;
 use App\Services\Modules\TurnSystem\TurnManager;
+use App\Events\Game\RoundStartedEvent;
+use App\Events\Game\RoundEndedEvent;
+use App\Events\Game\PlayerActionEvent;
 use Games\Trivia\Events\GameFinishedEvent;
-use Games\Trivia\Events\QuestionStartedEvent;
-use Games\Trivia\Events\PlayerAnsweredEvent;
-use Games\Trivia\Events\QuestionEndedEvent;
 use Games\Trivia\TriviaScoreCalculator;
 use Illuminate\Support\Facades\Log;
 
@@ -45,11 +45,14 @@ use Illuminate\Support\Facades\Log;
 class TriviaEngine extends BaseGameEngine
 {
     /**
-     * Inicializar el juego.
+     * Inicializar el juego - SOLO guarda configuración.
+     *
+     * Este método se llama UNA VEZ al crear la partida.
+     * NO resetea scores ni inicia el juego - eso lo hace startGame().
      */
     public function initialize(GameMatch $match): void
     {
-        Log::info("Initializing Trivia game", ['match_id' => $match->id]);
+        Log::info("Initializing Trivia configuration", ['match_id' => $match->id]);
 
         // Verificar que hay suficientes jugadores
         $players = $match->players;
@@ -96,82 +99,170 @@ class TriviaEngine extends BaseGameEngine
         }
 
         // ========================================================================
-        // MÓDULO: Turn System (modo simultaneous)
+        // GUARDAR CONFIGURACIÓN EN _config
         // ========================================================================
         $playerIds = $players->pluck('id')->toArray();
 
-        $turnManager = new TurnManager(
-            playerIds: $playerIds,
-            mode: 'simultaneous' // Todos juegan a la vez
-        );
-
-        // ========================================================================
-        // MÓDULO: Round System
-        // ========================================================================
-        $roundManager = new RoundManager(
-            turnManager: $turnManager,
-            totalRounds: count($selectedQuestions), // 1 ronda por pregunta
-            currentRound: 1
-        );
-
-        // ========================================================================
-        // MÓDULO: Scoring System
-        // ========================================================================
-        $scoreCalculator = new TriviaScoreCalculator();
-        $scoreManager = new ScoreManager(
-            playerIds: $playerIds,
-            calculator: $scoreCalculator,
-            trackHistory: true
-        );
-
-        // ========================================================================
-        // MÓDULO: Timer System
-        // ========================================================================
-        $timerService = new TimerService();
-
-        // Obtener primera pregunta
-        $firstQuestion = $selectedQuestions[0];
-
-        // Estado inicial del juego
-        $match->game_state = array_merge([
-            'phase' => 'question',
+        $match->game_state = [
+            '_config' => [
+                'questions_per_game' => $questionsPerGame,
+                'time_per_question' => $timePerQuestion,
+                'difficulty' => $difficulty,
+                'category' => $category,
+                'questions' => $selectedQuestions,
+                'player_ids' => $playerIds,
+            ],
+            // Estado vacío (se llenará en startGame)
+            'phase' => 'waiting',
             'questions' => $selectedQuestions,
-            'current_question_index' => 0,
-            'current_question' => $firstQuestion,
             'time_per_question' => $timePerQuestion,
-            'player_answers' => [], // {player_id: {answer: 0, seconds_elapsed: 5.2}}
-            'question_start_time' => now()->timestamp,
-        ], $roundManager->toArray(), $scoreManager->toArray(), $timerService->toArray());
+        ];
 
         $match->save();
 
-        // Iniciar timer de la pregunta
+        // ========================================================================
+        // INICIALIZAR MÓDULOS AUTOMÁTICAMENTE
+        // ========================================================================
+        // Lee config.json y crea solo los módulos que están enabled
+        $this->initializeModules($match, [
+            'round_system' => [
+                'total_rounds' => count($selectedQuestions)
+            ],
+            'scoring_system' => [
+                'calculator' => new TriviaScoreCalculator()
+            ],
+        ]);
+
+        Log::info("Trivia configuration saved", [
+            'match_id' => $match->id,
+            'players' => count($playerIds),
+            'questions' => count($selectedQuestions),
+            'time_per_question' => $timePerQuestion
+        ]);
+    }
+
+    /**
+     * Iniciar/Reiniciar el juego - Resetea todo y comienza desde la pregunta 1.
+     *
+     * Este método se llama cada vez que se quiere empezar/reiniciar el juego.
+     * Lee la configuración guardada en initialize() y resetea TODO a 0.
+     */
+    public function startGame(GameMatch $match): void
+    {
+        Log::info("Starting/Restarting Trivia game", ['match_id' => $match->id]);
+
+        // 1. ⭐ Resetear módulos automáticamente según config.json
+        $this->resetModules($match);
+        // Alternativamente, si quisieras empezar desde la ronda 5:
+        // $this->resetModules($match, ['round_system' => ['current_round' => 5]]);
+
+        // 2. Leer configuración guardada
+        $config = $match->game_state['_config'] ?? [];
+        $questions = $config['questions'] ?? [];
+        $timePerQuestion = $config['time_per_question'] ?? 15;
+
+        if (empty($questions)) {
+            throw new \RuntimeException("No questions found in configuration");
+        }
+
+        // 3. Setear estado inicial específico de Trivia
+        $firstQuestion = $questions[0];
+
+        $match->game_state = array_merge($match->game_state, [
+            'phase' => 'question',
+            'current_question_index' => 0,
+            'current_question' => $firstQuestion,
+            'player_answers' => [],
+            'question_start_time' => now()->timestamp,
+            'question_results' => null,
+        ]);
+
+        $match->save();
+
+        // 4. Iniciar timer de la primera pregunta
         $timerService = TimerService::fromArray($match->game_state);
         $timerService->startTimer('question_timer', $timePerQuestion);
 
         $match->game_state = array_merge($match->game_state, $timerService->toArray());
         $match->save();
 
-        Log::info("Trivia initialized successfully", [
+        Log::info("Trivia game started", [
             'match_id' => $match->id,
-            'players' => count($playerIds),
-            'questions' => count($selectedQuestions),
-            'time_per_question' => $timePerQuestion
+            'question_index' => 0,
+            'phase' => 'question'
         ]);
 
-        // Broadcast inicio de pregunta
-        event(new QuestionStartedEvent(
-            $match,
-            $firstQuestion['question'],
-            $firstQuestion['options'],
-            1,
-            count($selectedQuestions)
+        // 5. Broadcast inicio de ronda (primera pregunta)
+        event(new RoundStartedEvent(
+            match: $match,
+            currentRound: 1,
+            totalRounds: count($questions),
+            phase: 'question'
         ));
     }
 
     // ========================================================================
     // MÉTODOS IMPLEMENTADOS DE BaseGameEngine
     // ========================================================================
+
+    /**
+     * Sobrescribir processAction para controlar el flujo completo automáticamente.
+     *
+     * Flujo en Trivia:
+     * 1. Jugador envía respuesta
+     * 2. Backend procesa y decide si es correcta
+     * 3. Si correcta → Terminar ronda + Iniciar siguiente ronda AUTOMÁTICAMENTE
+     * 4. Si incorrecta → Bloquear jugador + Continuar con resto
+     *
+     * NO se usa frontend para iniciar siguientes rondas (evita race conditions).
+     */
+    public function processAction(GameMatch $match, Player $player, string $action, array $data): array
+    {
+        Log::info("[trivia] Processing action", [
+            'match_id' => $match->id,
+            'player_id' => $player->id,
+            'action' => $action
+        ]);
+
+        // 1. Procesar acción (respuesta del jugador)
+        $data['action'] = $action;
+        $actionResult = $this->processRoundAction($match, $player, $data);
+
+        // 2. Obtener RoundManager
+        $roundManager = $this->getRoundManager($match);
+        $turnMode = $roundManager->getTurnManager()->getMode();
+
+        // 3. Obtener estrategia de finalización
+        $strategy = $this->getEndRoundStrategy($turnMode);
+
+        // 4. Consultar si debe terminar la ronda
+        $roundStatus = $strategy->shouldEnd(
+            $match,
+            $actionResult,
+            $roundManager,
+            fn($match) => $this->getAllPlayerResults($match)
+        );
+
+        // 5. Si debe terminar la ronda (alguien respondió correctamente)
+        if ($roundStatus['should_end']) {
+            Log::info("[trivia] Round ending - player succeeded", [
+                'match_id' => $match->id,
+                'player_id' => $player->id,
+                'reason' => $roundStatus['reason'] ?? 'player_succeeded'
+            ]);
+
+            // Finalizar ronda actual (emite RoundEndedEvent)
+            // Frontend mostrará resultados y hará countdown local
+            // Después del countdown, el primer frontend que envíe señal iniciará siguiente ronda
+            $this->endCurrentRound($match);
+        }
+
+        // 6. Retornar resultado
+        return array_merge($actionResult, [
+            'round_status' => $roundStatus,
+            'turn_mode' => $turnMode,
+        ]);
+    }
 
     /**
      * Procesar la acción de responder una pregunta.
@@ -248,8 +339,9 @@ class TriviaEngine extends BaseGameEngine
         $match->save();
 
         // Obtener ranking final
+        $scores = $this->getScores($gameState);
         $scoreManager = ScoreManager::fromArray(
-            playerIds: array_keys($gameState['scores']),
+            playerIds: array_keys($scores),
             data: $gameState,
             calculator: new TriviaScoreCalculator()
         );
@@ -276,13 +368,14 @@ class TriviaEngine extends BaseGameEngine
         // Obtener Round Manager para estadísticas
         $roundManager = RoundManager::fromArray($gameState);
 
+        $finalScores = $this->getScores($gameState);
         $statistics = [
             'total_questions' => $roundManager->getTotalRounds(),
             'questions_answered' => $roundManager->getCurrentRound() - 1,
-            'players_count' => count($gameState['scores']),
+            'players_count' => count($finalScores),
             'highest_score' => $winner ? $winner['score'] : 0,
-            'average_score' => !empty($gameState['scores'])
-                ? round(array_sum($gameState['scores']) / count($gameState['scores']), 2)
+            'average_score' => !empty($finalScores)
+                ? round(array_sum($finalScores) / count($finalScores), 2)
                 : 0,
         ];
 
@@ -356,8 +449,14 @@ class TriviaEngine extends BaseGameEngine
             'seconds_elapsed' => $secondsElapsed
         ]);
 
-        // Broadcast respuesta
-        event(new PlayerAnsweredEvent($match, $player, $isCorrect));
+        // Broadcast acción del jugador
+        event(new PlayerActionEvent(
+            match: $match,
+            player: $player,
+            actionType: 'answer',
+            actionData: ['is_correct' => $isCorrect, 'answer' => $answerIndex],
+            success: true
+        ));
 
         // Retornar resultado simple
         // BaseGameEngine se encarga de coordinar con RoundManager
@@ -386,7 +485,7 @@ class TriviaEngine extends BaseGameEngine
 
         // Calcular puntos para cada jugador
         $scoreManager = ScoreManager::fromArray(
-            playerIds: array_keys($gameState['scores']),
+            playerIds: array_keys($gameState['scoring_system']['scores'] ?? []),
             data: $gameState,
             calculator: new TriviaScoreCalculator()
         );
@@ -435,20 +534,27 @@ class TriviaEngine extends BaseGameEngine
             }
         }
 
-        // Actualizar scores en game_state
-        $gameState['scores'] = $scoreManager->getScores();
+        // ✅ CORRECTO: Guardar ScoreManager usando el helper
+        $this->saveScoreManager($match, $scoreManager);
+
+        // Actualizar datos específicos de Trivia (no de módulos)
+        $match->refresh();
+        $gameState = $match->game_state;
         $gameState['question_results'] = $questionResults;
         $gameState['phase'] = 'results';
 
         $match->game_state = $gameState;
         $match->save();
 
-        // Broadcast resultados de pregunta
-        event(new QuestionEndedEvent(
-            $match,
-            $correctAnswer,
-            $questionResults,
-            $gameState['scores']
+        // Broadcast fin de ronda (pregunta)
+        $scores = $this->getScores($gameState);
+        $roundManager = $this->getRoundManager($match);
+
+        event(new RoundEndedEvent(
+            match: $match,
+            roundNumber: $roundManager->getCurrentRound(),
+            results: $questionResults,
+            scores: $scores
         ));
 
         // BaseGameEngine se encarga de programar la siguiente ronda vía RoundManager
@@ -509,13 +615,12 @@ class TriviaEngine extends BaseGameEngine
             'round' => $roundManager->getCurrentRound()
         ]);
 
-        // Broadcast nueva pregunta
-        event(new QuestionStartedEvent(
-            $match,
-            $nextQuestion['question'],
-            $nextQuestion['options'],
-            $roundManager->getCurrentRound(),
-            $roundManager->getTotalRounds()
+        // Broadcast nueva ronda (pregunta)
+        event(new RoundStartedEvent(
+            match: $match,
+            currentRound: $roundManager->getCurrentRound(),
+            totalRounds: $roundManager->getTotalRounds(),
+            phase: 'question'
         ));
     }
 
@@ -578,8 +683,8 @@ class TriviaEngine extends BaseGameEngine
             return null; // Aún quedan preguntas
         }
 
-        // Encontrar jugador con mayor puntuación
-        $scores = $gameState['scores'];
+        // Encontrar jugador con mayor puntuación usando helper
+        $scores = $this->getScores($gameState);
 
         if (empty($scores)) {
             return null;
@@ -606,7 +711,7 @@ class TriviaEngine extends BaseGameEngine
             'current_question' => $gameState['current_question'] ?? null,
             'question_index' => $gameState['question_index'] ?? 0,
             'total_questions' => count($gameState['questions'] ?? []),
-            'scores' => $gameState['scores'] ?? [],
+            'scores' => $this->getScores($gameState),
             'has_answered' => isset($gameState['player_answers'][$player->id]) ?? false,
             'timer' => $gameState['timer'] ?? null,
         ];
@@ -640,5 +745,33 @@ class TriviaEngine extends BaseGameEngine
         // Al reconectarse, el jugador puede ver el estado actual
         // Si ya respondió la pregunta actual, no puede cambiar su respuesta
         // Si no ha respondido, puede hacerlo si aún hay tiempo
+    }
+
+    // ========================================================================
+    // API PÚBLICA para Controllers
+    // ========================================================================
+
+    /**
+     * Método público para que el Controller inicie la siguiente ronda.
+     * Wrapper del método protegido startNewRound().
+     *
+     * @param GameMatch $match
+     * @return void
+     */
+    public function advanceToNextRound(GameMatch $match): void
+    {
+        $this->startNewRound($match);
+    }
+
+    /**
+     * Método público para que el Controller verifique si el juego terminó.
+     * Wrapper del método protegido isGameComplete().
+     *
+     * @param GameMatch $match
+     * @return bool
+     */
+    public function checkIfGameComplete(GameMatch $match): bool
+    {
+        return $this->isGameComplete($match);
     }
 }

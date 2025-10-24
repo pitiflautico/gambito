@@ -53,7 +53,7 @@ class GameFinishedEvent implements ShouldBroadcast
      */
     public function broadcastAs(): string
     {
-        return 'pictionary.game.finished';
+        return '.pictionary.game.finished';
     }
 
     /**

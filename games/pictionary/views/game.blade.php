@@ -13,17 +13,19 @@
         <div class="room-info">
             <h1>{{ $room->name }}</h1>
             <p class="room-code">Código: <strong>{{ $room->code }}</strong></p>
-            @if(isset($players) && isset($playerId))
-                @php
-                    $currentPlayer = collect($players)->firstWhere('id', $playerId);
-                @endphp
-                @if($currentPlayer)
-                    <p class="player-name-indicator">
-                        <span style="font-size: 0.9em; color: #666;">Jugando como:</span>
-                        <strong style="color: #4F46E5; font-size: 1.1em;">{{ $currentPlayer['name'] }}</strong>
-                    </p>
-                @endif
-            @endif
+            <div id="player-info-badge" style="margin-top: 0.5rem; padding: 0.75rem 1.25rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; display: inline-block; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                <div style="display: flex; align-items: center; gap: 1rem;">
+                    <div>
+                        <div style="font-size: 0.75em; color: rgba(255,255,255,0.7); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.25rem;">Tu jugador</div>
+                        <div style="color: #fff; font-size: 1.3em; font-weight: bold; text-shadow: 0 2px 4px rgba(0,0,0,0.2);" id="current-player-name">Cargando...</div>
+                        <div style="font-size: 0.7em; color: rgba(255,255,255,0.6); margin-top: 0.15rem;" id="current-player-id">ID: --</div>
+                    </div>
+                    <div style="border-left: 2px solid rgba(255,255,255,0.3); padding-left: 1rem;">
+                        <div style="font-size: 0.75em; color: rgba(255,255,255,0.7); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.25rem;">Rol</div>
+                        <div style="color: #fff; font-size: 1.1em; font-weight: bold; text-shadow: 0 2px 4px rgba(0,0,0,0.2);" id="current-player-role">...</div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div class="game-status">
@@ -220,6 +222,20 @@
         window.gameData = {
             matchId: {{ $match->id }},
             playerId: {{ $playerId ?? auth()->user()->id }},
+            @php
+                $currentPlayer = collect($players ?? [])->firstWhere('id', $playerId ?? 0);
+                $playerName = $currentPlayer['name'] ?? null;
+
+                // Fallback: obtener desde el modelo Player si no está en la lista
+                if (!$playerName && isset($playerId)) {
+                    $playerModel = \App\Models\Player::find($playerId);
+                    $playerName = $playerModel ? $playerModel->name : null;
+                }
+
+                // Último fallback: usar el nombre del usuario autenticado
+                $playerName = $playerName ?? (auth()->check() ? auth()->user()->name : 'Invitado');
+            @endphp
+            playerName: '{{ $playerName }}',
             roomCode: '{{ $room->code }}',
             gameSlug: 'pictionary',
             eventConfig: @json($eventConfig ?? null),
@@ -261,6 +277,36 @@
                 const currentWord = window.gameData?.currentWord || null;
                 window.pictionaryCanvas.setRole(isDrawer, isDrawer ? currentWord : null);
             }
+
+            // Actualizar info del jugador (nombre y rol)
+            updatePlayerInfo();
         });
+
+        // Función para actualizar la información del jugador
+        function updatePlayerInfo() {
+            const playerId = window.gameData?.playerId;
+            const playerName = window.gameData?.playerName || `Jugador ${playerId}`;
+            const role = window.gameData?.role;
+
+            // Actualizar nombre
+            document.getElementById('current-player-name').textContent = playerName;
+
+            // Actualizar ID
+            document.getElementById('current-player-id').textContent = `ID: ${playerId}`;
+
+            // Actualizar rol
+            const roleText = role === 'drawer' ? '🎨 DIBUJANTE' : '🤔 ADIVINADOR';
+            document.getElementById('current-player-role').textContent = roleText;
+        }
+
+        // Actualizar rol cuando cambie
+        if (window.pictionaryCanvas) {
+            const originalSetRole = window.pictionaryCanvas.setRole.bind(window.pictionaryCanvas);
+            window.pictionaryCanvas.setRole = function(isDrawer, word) {
+                originalSetRole(isDrawer, word);
+                const roleText = isDrawer ? '🎨 DIBUJANTE' : '🤔 ADIVINADOR';
+                document.getElementById('current-player-role').textContent = roleText;
+            };
+        }
     </script>
 @endpush

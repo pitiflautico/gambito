@@ -28,6 +28,12 @@ Route::prefix('rooms')->name('api.rooms.')->group(function () {
     Route::post('/{code}/leave', [RoomController::class, 'apiLeave'])->name('leave');
 });
 
+// API de Jugadores
+Route::get('/players/{id}', function($id) {
+    $player = \App\Models\Player::find($id);
+    return response()->json($player ? $player->only(['id', 'name']) : ['id' => $id, 'name' => null]);
+});
+
 // API de Equipos
 Route::prefix('rooms/{roomCode}/teams')->name('api.teams.')->middleware(['web'])->group(function () {
     // Configuración
@@ -48,3 +54,4 @@ Route::prefix('rooms/{roomCode}/teams')->name('api.teams.')->middleware(['web'])
     // Configuración avanzada
     Route::put('/self-selection', [TeamController::class, 'updateSelfSelection'])->name('self-selection');
 });
+Route::get('/game/player/{id}', function($id) { return response()->json(['player' => App\Models\Player::find($id)]); });

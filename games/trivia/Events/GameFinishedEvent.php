@@ -43,7 +43,7 @@ class GameFinishedEvent implements ShouldBroadcast
      */
     public function broadcastAs(): string
     {
-        return 'trivia.game.finished';
+        return '.trivia.game.finished';
     }
 
     /**

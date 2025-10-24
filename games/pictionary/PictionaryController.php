@@ -53,7 +53,7 @@ class PictionaryController extends Controller
         $eventConfig = $capabilities['event_config'] ?? null;
 
         // Retornar la vista usando el namespace del juego
-        return view('pictionary::canvas', [
+        return view('pictionary::game', [
             'room' => $room,
             'match' => $match,
             'playerId' => $player->id,
@@ -85,7 +85,7 @@ class PictionaryController extends Controller
         $playerId = $role === 'drawer' ? 1 : 2;
 
         // Vista usando namespace del juego
-        return view('pictionary::canvas', compact('room', 'match', 'playerId', 'role'));
+        return view('pictionary::game', compact('room', 'match', 'playerId', 'role'));
     }
 
     /**
@@ -366,8 +366,18 @@ class PictionaryController extends Controller
             $match = GameMatch::findOrFail($matchId);
             $gameState = $match->game_state;
 
-            // Verificar que el jugador es el dibujante actual
-            if ($gameState['current_drawer_id'] !== $playerId) {
+            // Verificar que el jugador es el dibujante actual usando roles_system (source of truth)
+            $playerRoles = $gameState['roles_system']['player_roles'] ?? [];
+            $playerRole = $playerRoles[$playerId] ?? 'guesser';
+
+            if ($playerRole !== 'drawer') {
+                \Log::warning("Player tried to get word but is not drawer", [
+                    'player_id' => $playerId,
+                    'player_role' => $playerRole,
+                    'all_roles' => $playerRoles,
+                    'current_drawer_id' => $gameState['current_drawer_id'] ?? 'not set'
+                ]);
+
                 return response()->json([
                     'success' => false,
                     'error' => 'Solo el dibujante puede ver la palabra'

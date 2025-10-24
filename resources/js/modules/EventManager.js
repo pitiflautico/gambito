@@ -17,6 +17,8 @@ class EventManager {
      * @param {boolean} config.autoConnect - Conectar automáticamente (default: true)
      */
     constructor(config) {
+        console.log('🔧 [EventManager] Constructor called with config:', config);
+
         this.roomCode = config.roomCode;
         this.gameSlug = config.gameSlug;
         this.eventConfig = config.eventConfig || {};
@@ -26,6 +28,9 @@ class EventManager {
         this.channel = null;
         this.status = 'disconnected';
         this.listeners = [];
+
+        console.log('📋 [EventManager] eventConfig:', this.eventConfig);
+        console.log('🎯 [EventManager] handlers:', Object.keys(this.handlers));
 
         this.validateConfig();
 
@@ -64,12 +69,12 @@ class EventManager {
      */
     connect() {
         if (this.status === 'error') {
-
+            console.error('❌ [EventManager] Cannot connect - status is error');
             return;
         }
 
         if (!window.Echo) {
-
+            console.error('❌ [EventManager] window.Echo is not available');
             this.status = 'error';
             return;
         }
@@ -78,9 +83,11 @@ class EventManager {
 
         // Reemplazar {roomCode} en el nombre del canal
         const channelName = this.eventConfig.channel.replace('{roomCode}', this.roomCode);
+        console.log('🔌 [EventManager] Connecting to channel:', channelName);
 
         try {
             this.channel = window.Echo.channel(channelName);
+            console.log('✅ [EventManager] Channel connected:', channelName);
 
             // Registrar listeners automáticamente desde la configuración
             this.registerListeners();
@@ -93,7 +100,7 @@ class EventManager {
             }
 
         } catch (error) {
-
+            console.error('❌ [EventManager] Connection error:', error);
             this.status = 'error';
 
             // Callback de error (si existe)
@@ -108,24 +115,30 @@ class EventManager {
      */
     registerListeners() {
         if (!this.channel) {
-
+            console.log('❌ [EventManager] No channel available to register listeners');
             return;
         }
+
+        console.log('📡 [EventManager] Registering listeners for events:', this.eventConfig.events);
 
         Object.entries(this.eventConfig.events).forEach(([eventClass, config]) => {
             const { name, handler } = config;
 
             if (!this.handlers[handler]) {
-
+                console.warn(`⚠️ [EventManager] No handler found for ${handler} (${name})`);
                 return;
             }
 
             // Registrar listener
-            this.channel.listen(name, (event) => {
+            // Laravel Echo requiere un punto inicial para eventos personalizados
+            const eventName = name.startsWith('.') ? name : `.${name}`;
+            this.channel.listen(eventName, (event) => {
+                console.log(`🎯 [EventManager] EVENT RECEIVED: ${eventName}`, event);
 
                 try {
                     this.handlers[handler](event);
                 } catch (error) {
+                    console.error(`❌ [EventManager] Error handling ${name}:`, error);
 
                     if (this.handlers.onError) {
                         this.handlers.onError(error, { eventName: name, event });
@@ -134,9 +147,11 @@ class EventManager {
             });
 
             this.listeners.push({ eventClass, name, handler });
+            console.log(`✅ [EventManager] Registered listener: ${name} → ${handler}`);
 
         });
 
+        console.log(`✅ [EventManager] Total listeners registered: ${this.listeners.length}`);
     }
 
     /**

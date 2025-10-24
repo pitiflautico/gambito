@@ -14,13 +14,11 @@
   },
   "provides": {
     "events": [
-      "QuestionStartedEvent",
-      "PlayerAnsweredEvent",
-      "QuestionEndedEvent",
       "GameFinishedEvent"
     ],
     "routes": [
-      "/api/trivia/answer"
+      "/api/trivia/answer",
+      "/api/trivia/countdown-ended"
     ],
     "views": [
       "games/trivia/game"
@@ -29,20 +27,28 @@
   "event_config": {
     "channel": "room.{roomCode}",
     "events": {
-      "QuestionStartedEvent": {
-        "name": ".trivia.question.started",
-        "handler": "handleQuestionStarted"
+      "RoundStartedEvent": {
+        "name": "game.round.started",
+        "handler": "handleRoundStarted"
       },
-      "PlayerAnsweredEvent": {
-        "name": ".trivia.player.answered",
-        "handler": "handlePlayerAnswered"
+      "RoundEndedEvent": {
+        "name": "game.round.ended",
+        "handler": "handleRoundEnded"
       },
-      "QuestionEndedEvent": {
-        "name": ".trivia.question.ended",
-        "handler": "handleQuestionEnded"
+      "PlayerActionEvent": {
+        "name": "game.player.action",
+        "handler": "handlePlayerAction"
+      },
+      "PhaseChangedEvent": {
+        "name": "game.phase.changed",
+        "handler": "handlePhaseChanged"
+      },
+      "TurnChangedEvent": {
+        "name": "game.turn.changed",
+        "handler": "handleTurnChanged"
       },
       "GameFinishedEvent": {
-        "name": ".trivia.game.finished",
+        "name": "trivia.game.finished",
         "handler": "handleGameFinished"
       }
     }

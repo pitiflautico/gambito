@@ -46,7 +46,7 @@ class PlayerAnsweredEvent implements ShouldBroadcast
      */
     public function broadcastAs(): string
     {
-        return 'pictionary.player.answered';
+        return '.pictionary.player.answered';
     }
 
     /**

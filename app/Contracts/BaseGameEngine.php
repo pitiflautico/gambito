@@ -181,19 +181,9 @@ abstract class BaseGameEngine implements GameEngineInterface
             // Finalizar ronda/turno actual
             $this->endCurrentRound($match);
 
-            // Programar siguiente ronda vía RoundManager
-            $matchId = $match->id;
-            $delaySeconds = $roundStatus['delay_seconds'] ?? 5;
-
-            // Recargar roundManager después de endCurrentRound (puede haber cambiado el state)
-            $roundManager = $this->getRoundManager($match);
-
-            $roundManager->scheduleNextRound(function () use ($matchId) {
-                $match = GameMatch::find($matchId);
-                if ($match && !$this->isGameComplete($match)) {
-                    $this->startNewRound($match);
-                }
-            }, delaySeconds: $delaySeconds);
+            // NOTA: No programamos automáticamente la siguiente ronda aquí.
+            // Cada juego decide cómo avanzar (algunos usan delay en backend, otros en frontend).
+            // Los juegos pueden sobrescribir processAction para custom behavior.
         }
 
         // 6. Retornar resultado con información adicional
@@ -214,6 +204,266 @@ abstract class BaseGameEngine implements GameEngineInterface
     public function advancePhase(GameMatch $match): void
     {
         $this->startNewRound($match);
+    }
+
+    // ========================================================================
+    // INICIALIZACIÓN Y RESET DE MÓDULOS
+    // ========================================================================
+
+    /**
+     * Inicializar módulos según la configuración del juego.
+     *
+     * Lee el config.json del juego para ver qué módulos están habilitados
+     * y los crea con su configuración inicial.
+     *
+     * Este método se llama desde initialize() para crear los módulos por primera vez.
+     *
+     * @param GameMatch $match
+     * @param array $moduleOverrides Configuración custom para módulos específicos
+     * @return void
+     */
+    protected function initializeModules(GameMatch $match, array $moduleOverrides = []): void
+    {
+        // Cargar config.json del juego
+        $gameSlug = $match->room->game->slug;
+        $configPath = base_path("games/{$gameSlug}/config.json");
+
+        if (!file_exists($configPath)) {
+            throw new \RuntimeException("Game config.json not found for: {$gameSlug}");
+        }
+
+        $gameConfig = json_decode(file_get_contents($configPath), true);
+        $modules = $gameConfig['modules'] ?? [];
+        $playerIds = $match->players->pluck('id')->toArray();
+
+        Log::info("Initializing modules for game", [
+            'match_id' => $match->id,
+            'game' => $gameSlug,
+            'enabled_modules' => array_keys(array_filter($modules, fn($m) => $m['enabled'] ?? false))
+        ]);
+
+        $gameState = [];
+
+        // ========================================================================
+        // MÓDULO: Turn System
+        // ========================================================================
+        if ($modules['turn_system']['enabled'] ?? false) {
+            $turnConfig = $modules['turn_system'];
+            $mode = $moduleOverrides['turn_system']['mode'] ?? $turnConfig['mode'] ?? 'sequential';
+
+            $turnManager = new \App\Services\Modules\TurnSystem\TurnManager(
+                playerIds: $playerIds,
+                mode: $mode
+            );
+
+            Log::debug("Turn system initialized", ['mode' => $mode]);
+        }
+
+        // ========================================================================
+        // MÓDULO: Round System
+        // ========================================================================
+        if ($modules['round_system']['enabled'] ?? false) {
+            $roundConfig = $modules['round_system'];
+            $totalRounds = $moduleOverrides['round_system']['total_rounds'] ?? $roundConfig['total_rounds'] ?? 10;
+
+            $roundManager = new RoundManager(
+                turnManager: $turnManager ?? null,
+                totalRounds: $totalRounds,
+                currentRound: 1
+            );
+
+            $gameState = array_merge($gameState, $roundManager->toArray());
+            Log::debug("Round system initialized", ['total_rounds' => $totalRounds]);
+        }
+
+        // ========================================================================
+        // MÓDULO: Scoring System
+        // ========================================================================
+        if ($modules['scoring_system']['enabled'] ?? false) {
+            $scoringConfig = $modules['scoring_system'];
+            $trackHistory = $scoringConfig['track_history'] ?? true;
+            $allowNegative = $scoringConfig['allow_negative_scores'] ?? false;
+
+            // El calculator debe ser proporcionado por el juego específico
+            $calculator = $moduleOverrides['scoring_system']['calculator'] ?? null;
+
+            if (!$calculator) {
+                throw new \RuntimeException("Scoring calculator must be provided in moduleOverrides");
+            }
+
+            $scoreManager = new ScoreManager(
+                playerIds: $playerIds,
+                calculator: $calculator,
+                trackHistory: $trackHistory
+            );
+
+            $gameState = array_merge($gameState, $scoreManager->toArray());
+            Log::debug("Scoring system initialized", [
+                'track_history' => $trackHistory,
+                'allow_negative' => $allowNegative
+            ]);
+        }
+
+        // ========================================================================
+        // MÓDULO: Timer System
+        // ========================================================================
+        if ($modules['timer_system']['enabled'] ?? false) {
+            $timerService = new TimerService();
+            $gameState = array_merge($gameState, $timerService->toArray());
+            Log::debug("Timer system initialized");
+        }
+
+        // ========================================================================
+        // MÓDULO: Teams System
+        // ========================================================================
+        if ($modules['teams_system']['enabled'] ?? false) {
+            // Los equipos se crean en el lobby antes de iniciar
+            // Aquí solo registramos que está enabled
+            Log::debug("Teams system enabled", ['config' => $modules['teams_system']]);
+        }
+
+        // Guardar módulos inicializados
+        $match->game_state = array_merge($match->game_state ?? [], $gameState);
+        $match->save();
+
+        Log::info("Modules initialized successfully", [
+            'match_id' => $match->id,
+            'game' => $gameSlug
+        ]);
+    }
+
+    /**
+     * Resetear módulos según la configuración del juego.
+     *
+     * Lee el config.json del juego para ver qué módulos están habilitados
+     * y los resetea automáticamente según su configuración.
+     *
+     * @param GameMatch $match
+     * @param array $overrides Parámetros específicos para override (ej: ['round_system' => ['current_round' => 5]])
+     * @return void
+     */
+    protected function resetModules(GameMatch $match, array $overrides = []): void
+    {
+        $gameState = $match->game_state;
+        $savedConfig = $gameState['_config'] ?? [];
+
+        if (empty($savedConfig)) {
+            throw new \RuntimeException("No game configuration found. Call initialize() first.");
+        }
+
+        // Cargar config.json del juego para saber qué módulos están enabled
+        $gameSlug = $match->room->game->slug;
+        $configPath = base_path("games/{$gameSlug}/config.json");
+
+        if (!file_exists($configPath)) {
+            throw new \RuntimeException("Game config.json not found for: {$gameSlug}");
+        }
+
+        $gameConfig = json_decode(file_get_contents($configPath), true);
+        $modules = $gameConfig['modules'] ?? [];
+
+        Log::info("Resetting modules for game", [
+            'match_id' => $match->id,
+            'game' => $gameSlug,
+            'enabled_modules' => array_keys(array_filter($modules, fn($m) => $m['enabled'] ?? false))
+        ]);
+
+        // Obtener IDs de jugadores
+        $playerIds = $match->players->pluck('id')->toArray();
+
+        // ========================================================================
+        // RESETEAR ROUND SYSTEM
+        // ========================================================================
+        if (($modules['round_system']['enabled'] ?? false) && isset($gameState['round_system'])) {
+            $roundManager = RoundManager::fromArray($gameState);
+
+            // Aplicar override si existe
+            if (isset($overrides['round_system']['current_round'])) {
+                $roundManager->setCurrentRound($overrides['round_system']['current_round']);
+            } else {
+                $roundManager->reset(); // Vuelve a ronda 1
+            }
+
+            $gameState = array_merge($gameState, $roundManager->toArray());
+            Log::debug("Round system reset", ['current_round' => $roundManager->getCurrentRound()]);
+        }
+
+        // ========================================================================
+        // RESETEAR SCORING SYSTEM
+        // ========================================================================
+        if (($modules['scoring_system']['enabled'] ?? false) && isset($gameState['scoring_system'])) {
+            $scoreManager = ScoreManager::fromArray($gameState);
+
+            // Aplicar overrides si existen
+            if (isset($overrides['scoring_system']['scores'])) {
+                foreach ($overrides['scoring_system']['scores'] as $playerId => $score) {
+                    $scoreManager->setScore($playerId, $score);
+                }
+            } else {
+                $scoreManager->resetAll(); // Todos los scores a 0
+            }
+
+            $gameState = array_merge($gameState, $scoreManager->toArray());
+            Log::debug("Scoring system reset", ['scores' => $scoreManager->getScores()]);
+        }
+
+        // ========================================================================
+        // RESETEAR TURN SYSTEM
+        // ========================================================================
+        if (($modules['turn_system']['enabled'] ?? false) && isset($gameState['turn_system'])) {
+            $roundManager = RoundManager::fromArray($gameState);
+
+            // Aplicar override si existe
+            if (isset($overrides['turn_system']['current_turn_index'])) {
+                $roundManager->setCurrentTurnIndex($overrides['turn_system']['current_turn_index']);
+            } else {
+                $roundManager->resetToFirstTurn(); // Vuelve al primer jugador
+            }
+
+            $gameState = array_merge($gameState, $roundManager->toArray());
+            $turnManager = $roundManager->getTurnManager();
+            Log::debug("Turn system reset", [
+                'current_turn_index' => $turnManager->getCurrentTurnIndex(),
+                'mode' => $turnManager->getMode()
+            ]);
+        }
+
+        // ========================================================================
+        // RESETEAR TIMER SYSTEM
+        // ========================================================================
+        if (($modules['timer_system']['enabled'] ?? false)) {
+            // Limpiar todos los timers
+            $timerService = new TimerService();
+            $gameState = array_merge($gameState, $timerService->toArray());
+            Log::debug("Timer system reset", ['timers_cleared' => true]);
+        }
+
+        // ========================================================================
+        // RESETEAR TEAMS SYSTEM (si está enabled)
+        // ========================================================================
+        if (($modules['teams_system']['enabled'] ?? false) && isset($gameState['teams_system'])) {
+            // Los equipos ya están formados, solo resetear sus scores si es necesario
+            // (esto podría ser más complejo dependiendo del juego)
+            Log::debug("Teams system detected", ['enabled' => true]);
+        }
+
+        // ========================================================================
+        // RESETEAR ROLES SYSTEM (si existe)
+        // ========================================================================
+        if (isset($gameState['roles_system'])) {
+            // Los roles se resetean en el método específico del juego
+            // porque dependen de la lógica del juego
+            Log::debug("Roles system detected", ['will_reset_in_game_logic' => true]);
+        }
+
+        // Guardar estado reseteado
+        $match->game_state = $gameState;
+        $match->save();
+
+        Log::info("Modules reset complete", [
+            'match_id' => $match->id,
+            'game' => $gameSlug
+        ]);
     }
 
     // ========================================================================
@@ -577,10 +827,26 @@ abstract class BaseGameEngine implements GameEngineInterface
         }
 
         // Paso 2: Avanzar turno
-        $turnInfo = $roundManager->nextTurn();
+        // En round-per-turn mode, cada turno avanza la ronda automáticamente
+        // Esto implica cambios coordinados en: ronda, turno, player Y rol
+        $config = $this->getGameConfig();
+        $roundPerTurn = $config['modules']['turn_system']['round_per_turn'] ?? false;
+
+        if ($roundPerTurn) {
+            $turnInfo = $roundManager->nextTurnWithRoundAdvance();
+        } else {
+            $turnInfo = $roundManager->nextTurn();
+        }
 
         // Paso 3: Rotar roles automáticamente (si aplica)
-        if ($this->shouldAutoRotateRoles($match)) {
+        $shouldRotate = $this->shouldAutoRotateRoles($match);
+        Log::info("🔍 Checking if should rotate roles", [
+            'match_id' => $match->id,
+            'should_rotate' => $shouldRotate,
+            'turn_mode' => $roundManager->getTurnManager()->getMode()
+        ]);
+
+        if ($shouldRotate) {
             $this->autoRotateRoles($match, $roundManager);
         }
 
@@ -634,7 +900,16 @@ abstract class BaseGameEngine implements GameEngineInterface
     {
         $rotatableRoles = $this->getRotatableRoles();
 
+        Log::info("🔄 autoRotateRoles called", [
+            'match_id' => $match->id,
+            'rotatable_roles' => $rotatableRoles,
+            'game_config_modules' => $this->getGameConfig()['modules'] ?? 'NO CONFIG'
+        ]);
+
         if (empty($rotatableRoles)) {
+            Log::warning("⚠️ No rotatable roles found - skipping rotation", [
+                'match_id' => $match->id
+            ]);
             return; // Sin roles que rotar
         }
 
@@ -643,12 +918,32 @@ abstract class BaseGameEngine implements GameEngineInterface
 
         // Rotar cada rol
         foreach ($rotatableRoles as $roleName) {
-            $newRolePlayerId = $this->rotateRole($match, $roleName, $turnOrder);
+            Log::info("🔄 Rotating role", [
+                'role' => $roleName,
+                'turn_order' => $turnOrder,
+                'roles_before' => $roleManager->toArray()['player_roles'] ?? []
+            ]);
+
+            // Rotar el rol usando el roleManager local (NO crear nueva instancia)
+            $newRolePlayerId = $roleManager->rotateRole($roleName, $turnOrder);
+
+            Log::info("✅ Role rotated", [
+                'role' => $roleName,
+                'new_player_id' => $newRolePlayerId,
+                'roles_after_rotate' => $roleManager->toArray()['player_roles'] ?? []
+            ]);
 
             // Si hay roles complementarios (ej: drawer/guesser en Pictionary)
             $complementaryRole = $this->getComplementaryRole($roleName);
 
             if ($complementaryRole) {
+                Log::info("🔄 Assigning complementary roles", [
+                    'main_role' => $roleName,
+                    'complementary_role' => $complementaryRole,
+                    'main_role_player' => $newRolePlayerId,
+                    'other_players' => array_diff($turnOrder, [$newRolePlayerId])
+                ]);
+
                 // Asignar rol complementario a todos excepto el que tiene el rol principal
                 foreach ($turnOrder as $playerId) {
                     if ($playerId !== $newRolePlayerId) {
@@ -663,13 +958,20 @@ abstract class BaseGameEngine implements GameEngineInterface
             }
         }
 
+        Log::info("💾 Saving roles after rotation", [
+            'final_roles' => $roleManager->toArray()['player_roles'] ?? []
+        ]);
+
         $this->saveRoleManager($match, $roleManager);
     }
 
     /**
      * Obtener lista de roles que deben rotarse automáticamente.
      *
-     * Por defecto, lee del config.json si existe configuración de roles.
+     * IMPORTANTE: roles_system es OBLIGATORIO en todos los config.json
+     * Incluso si solo es ["player"], debe estar definido para mantener consistencia.
+     *
+     * Por defecto lee del config.json en modules.roles_system.roles y filtra los complementarios.
      * Los juegos pueden sobrescribir para control custom.
      *
      * @return array Lista de nombres de roles a rotar
@@ -678,17 +980,28 @@ abstract class BaseGameEngine implements GameEngineInterface
     {
         $config = $this->getGameConfig();
 
-        // Buscar roles en la configuración de módulos
-        if (isset($config['modules']['roles']['enabled']) && $config['modules']['roles']['enabled']) {
-            $roles = $config['modules']['roles']['roles'] ?? [];
+        // roles_system es OBLIGATORIO - siempre debe existir en config.json
+        $rolesConfig = $config['modules']['roles_system'] ?? null;
 
-            // Filtrar roles que no son complementarios (ej: 'drawer' sí, 'guesser' no)
-            return array_filter($roles, function($role) {
-                return !$this->isComplementaryRole($role);
-            });
+        if (!$rolesConfig) {
+            Log::warning("⚠️ roles_system NOT found in config.json - this is required!", [
+                'game' => $this->getGameSlug(),
+                'config_modules' => array_keys($config['modules'] ?? [])
+            ]);
+            return [];
         }
 
-        return [];
+        if (!($rolesConfig['enabled'] ?? false)) {
+            // roles_system existe pero está deshabilitado
+            return [];
+        }
+
+        $roles = $rolesConfig['roles'] ?? [];
+
+        // Filtrar roles que no son complementarios (ej: 'drawer' sí, 'guesser' no)
+        return array_filter($roles, function($role) {
+            return !$this->isComplementaryRole($role);
+        });
     }
 
     /**

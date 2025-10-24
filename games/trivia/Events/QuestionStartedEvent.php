@@ -18,6 +18,7 @@ class QuestionStartedEvent implements ShouldBroadcast
     public array $options;
     public int $currentRound;
     public int $totalRounds;
+    public string $phase;
 
     /**
      * Create a new event instance.
@@ -34,6 +35,7 @@ class QuestionStartedEvent implements ShouldBroadcast
         $this->options = $options;
         $this->currentRound = $currentRound;
         $this->totalRounds = $totalRounds;
+        $this->phase = 'question'; // Siempre 'question' cuando empieza una pregunta
     }
 
     /**
@@ -49,7 +51,7 @@ class QuestionStartedEvent implements ShouldBroadcast
      */
     public function broadcastAs(): string
     {
-        return 'trivia.question.started';
+        return '.trivia.question.started';
     }
 
     /**
@@ -62,6 +64,7 @@ class QuestionStartedEvent implements ShouldBroadcast
             'options' => $this->options,
             'current_round' => $this->currentRound,
             'total_rounds' => $this->totalRounds,
+            'phase' => $this->phase,
         ];
     }
 }

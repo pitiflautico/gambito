@@ -15,15 +15,32 @@ use App\Models\Player;
 interface GameEngineInterface
 {
     /**
-     * Inicializar el juego cuando comienza una partida.
+     * Inicializar el juego cuando se crea la partida.
      *
-     * Este método se llama una sola vez al inicio de la partida.
-     * Debe configurar el estado inicial del juego en $match->game_state.
+     * Este método se llama una sola vez al CREAR el match.
+     * SOLO debe guardar la CONFIGURACIÓN del juego (settings, opciones, etc.)
+     * NO debe resetear scores ni estados - eso lo hace startGame().
      *
-     * @param GameMatch $match La partida que se está iniciando
+     * @param GameMatch $match La partida que se está creando
      * @return void
      */
     public function initialize(GameMatch $match): void;
+
+    /**
+     * Iniciar/Reiniciar el juego desde cero.
+     *
+     * Este método se llama cada vez que se quiere empezar o reiniciar el juego.
+     * - Lee la configuración guardada en initialize()
+     * - Resetea TODOS los estados: scores a 0, ronda a 1, turno a 1
+     * - Prepara el estado inicial del juego
+     * - Emite el primer evento (ej: RoundStartedEvent con la primera pregunta)
+     *
+     * Puede llamarse múltiples veces (ej: botón "Reiniciar partida").
+     *
+     * @param GameMatch $match La partida que se está iniciando/reiniciando
+     * @return void
+     */
+    public function startGame(GameMatch $match): void;
 
     /**
      * Procesar una acción de un jugador.

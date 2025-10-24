@@ -75,6 +75,6 @@ class GameServiceProviderTest extends TestCase
     public function test_game_views_are_registered()
     {
         // Verificar que el namespace de vistas de Pictionary está registrado
-        $this->assertTrue(view()->exists('pictionary::canvas'));
+        $this->assertTrue(view()->exists('pictionary::game'));
     }
 }

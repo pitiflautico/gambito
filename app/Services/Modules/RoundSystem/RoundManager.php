@@ -110,6 +110,31 @@ class RoundManager
     }
 
     /**
+     * Avanzar al siguiente turno Y avanzar la ronda (round-per-turn mode).
+     *
+     * En este modo, cada turno es una ronda completa.
+     * Usado en juegos como Pictionary donde cada dibujante = 1 ronda.
+     *
+     * @return array Info del turno actual
+     */
+    public function nextTurnWithRoundAdvance(): array
+    {
+        $this->roundJustCompleted = false;
+
+        // Delegar al TurnManager
+        $turnInfo = $this->turnManager->nextTurn();
+
+        // En round-per-turn mode, SIEMPRE avanzamos la ronda
+        $this->currentRound++;
+        $this->roundJustCompleted = true;
+
+        // Auto-limpiar eliminaciones temporales
+        $this->clearTemporaryEliminations();
+
+        return $turnInfo;
+    }
+
+    /**
      * Verificar si se acaba de completar una ronda.
      *
      * @return bool True si el último nextTurn() completó una ronda
@@ -461,7 +486,7 @@ class RoundManager
      */
     public function scheduleNextRound(callable $callback, int $delaySeconds = 5): void
     {
-        dispatch($callback)->delay(now()->addSeconds($delaySeconds));
+        \App\Jobs\StartNextRoundJob::dispatch($callback)->delay(now()->addSeconds($delaySeconds));
     }
 
     /**

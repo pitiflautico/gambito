@@ -559,14 +559,32 @@ class RoomController extends Controller
             ];
         });
 
-        // Cargar event_config desde capabilities.json si el juego lo tiene
-        $eventConfig = null;
+        // Cargar event_config mergeando base events con eventos del juego
         $gameSlug = $room->game->slug;
         $capabilitiesPath = base_path("games/{$gameSlug}/capabilities.json");
+
+        // Cargar base events
+        $baseEventsPath = config_path('game-events.php');
+        $baseEventsConfig = require $baseEventsPath;
+        $baseEvents = $baseEventsConfig['base_events'] ?? [];
+
+        // Cargar eventos del juego
+        $gameEvents = [];
+        $channel = 'room.{roomCode}';
         if (file_exists($capabilitiesPath)) {
             $capabilities = json_decode(file_get_contents($capabilitiesPath), true);
-            $eventConfig = $capabilities['event_config'] ?? null;
+            $gameEvents = $capabilities['event_config']['events'] ?? [];
+            $channel = $capabilities['event_config']['channel'] ?? 'room.{roomCode}';
         }
+
+        // Merge eventos base + eventos del juego
+        $eventConfig = [
+            'channel' => $channel,
+            'events' => array_merge(
+                $baseEvents['events'] ?? [],
+                $gameEvents
+            ),
+        ];
 
         // Renderizar vista específica del juego usando su namespace
         $gameViewName = "{$gameSlug}::canvas";
@@ -581,7 +599,7 @@ class RoomController extends Controller
         }
 
         // Fallback: Cargar vista genérica si el juego no tiene vista específica
-        return view('rooms.show', compact('room', 'playerId', 'role', 'players'));
+        return view('rooms.show', compact('room', 'playerId', 'role', 'players', 'eventConfig'));
     }
 
     /**

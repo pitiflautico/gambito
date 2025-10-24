@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Route;
 // API Routes - Para acciones del juego
 Route::prefix('api/trivia')->name('api.trivia.')->middleware('api')->group(function () {
     Route::post('/answer', [TriviaController::class, 'answer'])->name('answer');
+    Route::post('/countdown-ended', [TriviaController::class, 'countdownEnded'])->name('countdown-ended');
 });
 
 // Web Routes - Para vistas del juego

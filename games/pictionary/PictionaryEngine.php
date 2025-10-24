@@ -802,6 +802,7 @@ class PictionaryEngine extends BaseGameEngine
 
             // Obtener room code para el evento
             $roomCode = $match->room->code ?? 'UNKNOWN';
+            $delaySeconds = 3; // Delay antes del siguiente turno
 
             // Broadcast fin de ronda con detalles de puntos
             event(new RoundEndedEvent(
@@ -812,21 +813,32 @@ class PictionaryEngine extends BaseGameEngine
                 $guesserPlayerName,
                 $guesserPoints,
                 $drawerPoints,
-                $this->getScores($gameState)
+                $this->getScores($gameState),
+                $delaySeconds  // ← Frontend lo usa para el countdown
             ));
 
             // Broadcast actualización de estado (fase scoring, puntos actualizados)
             event(new GameStateUpdatedEvent($match, 'round_ended'));
 
-            // NOTA: El frontend detectará la fase 'scoring' y después de 3 segundos
-            // llamará automáticamente a advancePhase() para continuar el juego
+            // ========================================================================
+            // PROGRAMAR SIGUIENTE TURNO AUTOMÁTICAMENTE
+            // Backend controla el timing - Frontend solo muestra countdown
+            // ========================================================================
+            $matchId = $match->id;
+            $roundManager->scheduleNextRound(function () use ($matchId) {
+                $match = GameMatch::find($matchId);
+                if ($match && $match->game_state['phase'] === 'scoring') {
+                    // Avanzar de 'scoring' a 'playing' (siguiente turno)
+                    $this->advancePhase($match);
+                }
+            }, delaySeconds: $delaySeconds);
 
             return [
                 'success' => true,
                 'correct' => true,
                 'round_ended' => true,
                 'should_end_turn' => true, // Señal para BaseGameEngine
-                'delay_seconds' => 3, // Delay antes del siguiente turno
+                'delay_seconds' => $delaySeconds,
                 'guesser_points' => $guesserPoints,
                 'drawer_points' => $drawerPoints,
                 'seconds_elapsed' => $secondsElapsed,
@@ -871,6 +883,7 @@ class PictionaryEngine extends BaseGameEngine
 
                 // Obtener room code para el evento
                 $roomCode = $match->room->code ?? 'UNKNOWN';
+                $delaySeconds = 3; // Delay antes del siguiente turno
 
                 // Broadcast fin de ronda sin ganador
                 event(new RoundEndedEvent(
@@ -881,14 +894,25 @@ class PictionaryEngine extends BaseGameEngine
                     'Nadie',
                     0, // Sin puntos
                     0, // Sin puntos
-                    $this->getScores($gameState)
+                    $this->getScores($gameState),
+                    $delaySeconds  // ← Frontend lo usa para el countdown
                 ));
 
                 // Broadcast actualización de estado
                 event(new GameStateUpdatedEvent($match, 'round_ended_no_winner'));
 
-                // NOTA: El frontend detectará la fase 'scoring' y después de 3 segundos
-                // llamará automáticamente a advancePhase() para continuar el juego
+                // ========================================================================
+                // PROGRAMAR SIGUIENTE TURNO AUTOMÁTICAMENTE
+                // Backend controla el timing - Frontend solo muestra countdown
+                // ========================================================================
+                $matchId = $match->id;
+                $roundManager->scheduleNextRound(function () use ($matchId) {
+                    $match = GameMatch::find($matchId);
+                    if ($match && $match->game_state['phase'] === 'scoring') {
+                        // Avanzar de 'scoring' a 'playing' (siguiente turno)
+                        $this->advancePhase($match);
+                    }
+                }, delaySeconds: $delaySeconds);
 
                 return [
                     'success' => true,
@@ -1016,11 +1040,40 @@ class PictionaryEngine extends BaseGameEngine
      */
     protected function nextTurn(GameMatch $match): array
     {
-        // Paso 1-4: Usa rotación automática de BaseGameEngine
+        // =====================================================================
+        // ROUND-PER-TURN MODE
+        // =====================================================================
+        // En Pictionary, cada turno (cada dibujante) es una ronda completa.
+        // Esto se maneja automáticamente por RoundManager:
+        //
+        // 1. TurnManager::nextTurn() avanza al siguiente jugador
+        // 2. TurnManager::isCycleComplete() detecta si completó el ciclo
+        // 3. RoundManager::nextTurn() incrementa current_round si detecta ciclo
+        //
+        // En modo sequential con 3 jugadores:
+        // - Turno 0 → Turno 1 (dentro de ronda 1)
+        // - Turno 1 → Turno 2 (dentro de ronda 1)
+        // - Turno 2 → Turno 0 (ciclo completo, avanza a ronda 2)
+        //
+        // PERO en round-per-turn, cada turno debería completar el ciclo:
+        // - Turno 0 → Turno 1 (ciclo completo, ronda 2)
+        // - Turno 1 → Turno 2 (ciclo completo, ronda 3)
+        //
+        // TODO: Implementar auto_complete_cycle en TurnManager para que
+        // marque el ciclo como completo en cada llamada cuando round_per_turn=true
+        //
+        // Por ahora, el comportamiento actual funciona porque:
+        // - Cada respuesta correcta termina la ronda
+        // - Se llama a nextTurn() que avanza al siguiente jugador
+        // - El ciclo se completa naturalmente cuando se completa una vuelta
+        // =====================================================================
+
+        // Paso 1-4: Usa BaseGameEngine para gestión de turnos/rondas/roles
         // - Limpia eliminaciones temporales (shouldClearTemporaryEliminations() = true)
-        // - Avanza turno (RoundManager::nextTurn())
-        // - Rota roles automáticamente (drawer/guesser según configuración)
+        // - Avanza turno usando RoundManager::nextTurn()
+        // - Rota roles automáticamente usando RoleManager (drawer → siguiente jugador)
         // - Reinicia timer del turno
+        // - GUARDA TODO usando saveRoundManager(), saveRoleManager(), etc.
         $turnInfo = parent::nextTurn($match);
 
         // Recargar gameState después de parent::nextTurn()
@@ -1048,14 +1101,27 @@ class PictionaryEngine extends BaseGameEngine
         $newDrawer = Player::find($turnInfo['player_id']);
         $newDrawerName = $newDrawer ? $newDrawer->name : "Player {$turnInfo['player_id']}";
 
+        // Obtener roles del backend (source of truth)
+        $playerRoles = $gameState['roles_system']['player_roles'] ?? [];
+
         event(new TurnChangedEvent(
             $roomCode,
             $turnInfo['player_id'],
             $newDrawerName,
             $this->getCurrentRound($gameState),
             $turnInfo['turn_index'],
-            $this->getScores($gameState)
+            $this->getScores($gameState),
+            $playerRoles  // Roles completos desde el backend
         ));
+
+        Log::info("🎨 TurnChangedEvent emitted", [
+            'room_code' => $roomCode,
+            'new_drawer_id' => $turnInfo['player_id'],
+            'new_drawer_name' => $newDrawerName,
+            'round' => $this->getCurrentRound($gameState),
+            'turn_index' => $turnInfo['turn_index'],
+            'player_roles' => $playerRoles  // Ver qué roles se están enviando
+        ]);
 
         Log::info("Advanced to next turn (Pictionary)", [
             'match_id' => $match->id,
