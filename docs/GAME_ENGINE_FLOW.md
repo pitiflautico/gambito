@@ -19,8 +19,36 @@ RoomController::apiStart()
 ↓
 GameMatch::start()
   ├─ $engine->initialize()     → Guarda configuración
-  ├─ $engine->startGame()       → Resetea módulos y comienza
-  └─ emit GameStartedEvent      → Notifica a frontends
+  ├─ Phase → 'starting'         → Estado inicial
+  └─ Redirige jugadores a /rooms/{code}
+```
+
+### 1.5. Fase "Starting" (Sincronización)
+```
+Cada jugador carga /rooms/{code}
+↓
+BaseGameClient auto-ejecuta notifyPlayerConnected()
+↓
+POST /api/rooms/{code}/player-connected
+  ├─ Trackea conexión en Cache
+  ├─ emit PlayerConnectedToGameEvent → Actualiza contador (X/Y)
+  └─ Si todos conectados:
+     └─ $engine->transitionFromStarting()
+        ├─ emit GameStartedEvent (con countdown)
+        └─ Frontend muestra 3-2-1
+↓
+Countdown termina → notifyGameReady()
+↓
+POST /api/games/{match}/game-ready (con lock protection)
+  ├─ Solo el primer cliente ejecuta
+  ├─ $engine->triggerGameStart()
+  │   └─ Llama a onGameStart() protegido
+  │      ├─ Resetea módulos automáticamente
+  │      ├─ Setea estado inicial del juego
+  │      └─ emit RoundStartedEvent (primer round)
+  └─ Otros clientes reciben 200 OK con flag
+↓
+Frontend renderiza primera ronda
 ```
 
 ### 2. Métodos del Engine
@@ -29,6 +57,7 @@ GameMatch::start()
 **Propósito**: Guardar la configuración del juego.
 **Se llama**: UNA VEZ al crear el match.
 **NO debe**: Resetear scores, iniciar rondas, o emitir eventos.
+**Fase resultante**: `starting`
 
 **Responsabilidades**:
 - Validar jugadores mínimos
@@ -57,20 +86,16 @@ GameMatch::start()
 ]
 ```
 
-#### `startGame(GameMatch $match): void`
-**Propósito**: Iniciar/Reiniciar el juego desde cero.
-**Se llama**: Cada vez que se quiere empezar o reiniciar.
-**Puede llamarse múltiples veces** (ej: botón "Reiniciar Partida").
+#### `onGameStart(GameMatch $match): void` [NUEVO]
+**Propósito**: Hook protegido que se ejecuta cuando el frontend está listo.
+**Se llama**: Desde `triggerGameStart()` después del countdown de GameStartedEvent.
+**Método**: `protected` - No debe llamarse directamente, usar `triggerGameStart()`.
+
+**IMPORTANTE**: Este método reemplaza la lógica que antes estaba en `startGame()`.
+BaseGameEngine ya resetó los módulos automáticamente antes de llamar a este hook.
 
 **Responsabilidades**:
-1. Llamar a `$this->resetModules($match)` para resetear automáticamente:
-   - Lee `config.json` del juego para saber qué módulos están enabled
-   - Resetea SOLO los módulos que el juego usa
-   - Scores a 0
-   - Ronda a 1
-   - Turno al primer jugador
-   - Timers eliminados
-   - Acepta overrides opcionales: `$this->resetModules($match, ['round_system' => ['current_round' => 5]])`
+1. **NO llamar a `resetModules()`** - Ya está hecho por BaseGameEngine
 
 2. Leer configuración desde `game_state['_config']`
 
@@ -83,14 +108,45 @@ GameMatch::start()
        'player_answers' => [],
        // ...estado específico del juego
    ]);
+   $match->save();
    ```
 
-4. Iniciar timers si es necesario
+4. Iniciar timers si es necesario:
+   ```php
+   $timerService = TimerService::fromArray($match->game_state);
+   $timerService->startTimer('question_timer', $timePerQuestion);
+   $match->game_state = array_merge($match->game_state, $timerService->toArray());
+   $match->save();
+   ```
 
 5. Emitir primer evento del juego:
    ```php
-   event(new RoundStartedEvent(...));
+   $roundManager = RoundManager::fromArray($match->game_state);
+   event(new RoundStartedEvent(
+       match: $match,
+       currentRound: $roundManager->getCurrentRound(),
+       totalRounds: $roundManager->getTotalRounds(),
+       phase: 'question'
+   ));
    ```
+
+#### `triggerGameStart(GameMatch $match): void` [NUEVO]
+**Propósito**: Wrapper público para iniciar el juego desde controladores.
+**Se llama**: Desde `GameController::gameReady()` tras countdown.
+**Método**: `public`
+
+**Responsabilidades**:
+1. Llamar a `$this->resetModules($match)` automáticamente
+2. Llamar al hook protegido `onGameStart($match)`
+
+**Ejemplo**:
+```php
+// En GameController
+$engine->triggerGameStart($match);  // ✅ Correcto
+
+// NO llamar directamente
+$engine->onGameStart($match);  // ❌ Error: método protegido
+```
 
 ---
 
@@ -301,21 +357,28 @@ public function initialize(GameMatch $match): void
 }
 ```
 
-### 2. `startGame()` - Resetear y Comenzar
+### 2. `onGameStart()` - Hook de Inicio [NUEVO]
 
 ```php
-public function startGame(GameMatch $match): void
+protected function onGameStart(GameMatch $match): void
 {
-    // 1. ⭐ Resetear módulos automáticamente según config.json
-    //    Lee qué módulos están enabled y los resetea
-    $this->resetModules($match);
+    Log::info("Trivia - onGameStart hook", ['match_id' => $match->id]);
 
-    // 2. ⭐ Leer configuración guardada
+    // 1. ⭐ Leer configuración guardada
+    // NOTA: BaseGameEngine ya resetó los módulos antes de llamar a este hook
     $config = $match->game_state['_config'];
     $questions = $config['questions'];
     $timePerQuestion = $config['time_per_question'];
 
-    // 3. Setear estado inicial específico de Trivia
+    if (empty($questions)) {
+        throw new \RuntimeException("No questions found in configuration");
+    }
+
+    // 2. Iniciar timer de la primera pregunta
+    $timerService = TimerService::fromArray($match->game_state);
+    $timerService->startTimer('question_timer', $timePerQuestion);
+
+    // 3. Setear estado inicial específico de Trivia (todo junto en un solo save)
     $firstQuestion = $questions[0];
 
     $match->game_state = array_merge($match->game_state, [
@@ -324,24 +387,34 @@ public function startGame(GameMatch $match): void
         'current_question' => $firstQuestion,
         'player_answers' => [],
         'question_start_time' => now()->timestamp,
+        'question_results' => null,
+    ], $timerService->toArray());
+
+    $match->save();
+
+    Log::info("Trivia - State set for first question", [
+        'match_id' => $match->id,
+        'question_index' => 0,
+        'phase' => 'question',
+        'question' => $firstQuestion['question']
     ]);
 
-    $match->save();
+    // 4. ⭐ Emitir evento genérico RoundStartedEvent
+    // En Trivia, cada pregunta ES una ronda
+    $roundManager = RoundManager::fromArray($match->game_state);
 
-    // 4. Iniciar timer
-    $timerService = TimerService::fromArray($match->game_state);
-    $timerService->startTimer('question_timer', $timePerQuestion);
-
-    $match->game_state = array_merge($match->game_state, $timerService->toArray());
-    $match->save();
-
-    // 5. ⭐ Emitir primer evento
     event(new RoundStartedEvent(
         match: $match,
-        currentRound: 1,
-        totalRounds: count($questions),
+        currentRound: $roundManager->getCurrentRound(),
+        totalRounds: $roundManager->getTotalRounds(),
         phase: 'question'
     ));
+
+    Log::info("Trivia - RoundStartedEvent emitted for first question", [
+        'match_id' => $match->id,
+        'room_code' => $match->room->code,
+        'round' => $roundManager->getCurrentRound()
+    ]);
 }
 ```
 
@@ -503,13 +576,16 @@ public function startGame(GameMatch $match): void
 
 ### Reglas del Sistema
 
-**REGLA 1**: `initialize()` SOLO guarda configuración en `_config` y llama a `initializeModules()`
+**REGLA 1**: `initialize()` SOLO guarda configuración en `_config` y llama a `initializeModules()`, setea phase='starting'
 **REGLA 2**: `initializeModules()` lee `config.json` y crea SOLO los módulos enabled
-**REGLA 3**: `startGame()` SIEMPRE llama a `$this->resetModules($match)` primero
-**REGLA 4**: `resetModules()` lee `config.json` y resetea SOLO los módulos enabled
-**REGLA 5**: `startGame()` SIEMPRE lee desde `_config`, nunca recalcula
-**REGLA 6**: `GameMatch::start()` llama a ambos: `initialize()` + `startGame()`
-**REGLA 7**: Los frontends se sincronizan con `GameStartedEvent`
+**REGLA 3**: Frontend auto-ejecuta `notifyPlayerConnected()` al cargar la página
+**REGLA 4**: Backend trackea conexiones y emite `PlayerConnectedToGameEvent` en tiempo real
+**REGLA 5**: Cuando todos conectados → `transitionFromStarting()` emite `GameStartedEvent` con countdown
+**REGLA 6**: Frontend muestra countdown y llama `notifyGameReady()` al terminar
+**REGLA 7**: `GameController::gameReady()` llama `triggerGameStart()` con lock protection
+**REGLA 8**: `triggerGameStart()` resetea módulos y llama `onGameStart()` protegido
+**REGLA 9**: `onGameStart()` setea estado inicial y emite `RoundStartedEvent`
+**REGLA 10**: `onGameStart()` SIEMPRE lee desde `_config`, nunca recalcula
 
 ### Ventajas del Sistema
 
@@ -524,16 +600,35 @@ Con este flujo, cualquier juego puede:
 ### Flujo Completo
 
 ```
-Usuario presiona "Iniciar Juego"
+Usuario presiona "Iniciar Juego" en Lobby
 ↓
 GameMatch::start()
 ├─ 1. $engine->initialize()
 │   ├─ Guardar config en _config
-│   └─ $this->initializeModules()  → Crear módulos según config.json
-├─ 2. $engine->startGame()
-│   ├─ $this->resetModules()       → Resetear módulos a 0
-│   ├─ Leer _config
-│   ├─ Setear estado inicial
-│   └─ Emitir RoundStartedEvent
-└─ 3. emit GameStartedEvent        → Notificar frontends
+│   ├─ $this->initializeModules()  → Crear módulos según config.json
+│   └─ Phase = 'starting'
+└─ 2. Redirigir a /rooms/{code}
+↓
+Jugadores cargan página
+├─ BaseGameClient auto-ejecuta notifyPlayerConnected()
+├─ Backend trackea conexiones → emit PlayerConnectedToGameEvent
+└─ Cuando todos conectados:
+    └─ transitionFromStarting()
+        └─ emit GameStartedEvent (con countdown)
+↓
+Frontend muestra countdown 3-2-1
+↓
+Countdown termina → notifyGameReady()
+↓
+GameController::gameReady() (con lock protection)
+├─ Solo el primer cliente ejecuta:
+│   └─ $engine->triggerGameStart()
+│       ├─ $this->resetModules()    → Resetear módulos a 0
+│       └─ onGameStart()             → Hook protegido
+│           ├─ Leer _config
+│           ├─ Setear estado inicial
+│           └─ emit RoundStartedEvent
+└─ Otros clientes reciben 200 OK con flag
+↓
+Todos los jugadores sincronizan con RoundStartedEvent
 ```

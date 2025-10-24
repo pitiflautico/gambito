@@ -8,7 +8,37 @@
 
 Ubicación: `app/Events/Game/`
 
-### 1. `RoundStartedEvent`
+### 1. `PlayerConnectedToGameEvent`
+**Cuándo emitir:** Cuando un jugador se conecta a la sala (fase starting)
+**Datos incluidos:**
+- `connected_count`: Número de jugadores conectados
+- `total_players`: Total de jugadores esperados
+
+**Ejemplo de uso en el juego:**
+```javascript
+handlePlayerConnected(event) {
+    // Actualizar contador en tiempo real
+    document.getElementById('connection-status').textContent =
+        `(${event.connected_count}/${event.total_players})`;
+}
+```
+
+### 2. `GameStartedEvent`
+**Cuándo emitir:** Cuando todos los jugadores están conectados y el juego va a empezar
+**Datos incluidos:**
+- `game_name`: Nombre del juego
+- `total_players`: Total de jugadores
+- `timing`: Metadata de countdown (opcional)
+
+**Ejemplo de uso en el juego:**
+```javascript
+handleGameStarted(event) {
+    // BaseGameClient lo maneja automáticamente
+    // Muestra countdown 3-2-1 y llama notifyGameReady()
+}
+```
+
+### 3. `RoundStartedEvent`
 **Cuándo emitir:** Cuando empieza una nueva ronda
 **Datos incluidos:**
 - `current_round`: Número de ronda actual
@@ -26,14 +56,14 @@ handleRoundStarted(event) {
 }
 ```
 
-### 2. `RoundEndedEvent`
+### 4. `RoundEndedEvent`
 **Cuándo emitir:** Cuando termina una ronda
 **Datos incluidos:**
 - `round_number`: Número de ronda que terminó
 - `results`: Resultados de la ronda (quién ganó, quién perdió, etc.)
 - `scores`: Puntuaciones actualizadas
 
-### 3. `TurnChangedEvent`
+### 5. `TurnChangedEvent`
 **Cuándo emitir:** Cuando cambia el turno del jugador actual
 **Datos incluidos:**
 - `current_player_id`: ID del jugador con el turno
@@ -43,7 +73,7 @@ handleRoundStarted(event) {
 - `cycle_completed`: Si se completó un ciclo completo
 - `player_roles`: Roles actuales de los jugadores (drawer, guesser, etc.)
 
-### 4. `PhaseChangedEvent`
+### 6. `PhaseChangedEvent`
 **Cuándo emitir:** Cuando cambia la fase del juego
 **Datos incluidos:**
 - `new_phase`: Nueva fase
@@ -57,13 +87,13 @@ handleRoundStarted(event) {
 - `results`: Mostrando resultados
 - `finished`: Juego terminado
 
-### 5. `GameStateUpdatedEvent`
+### 7. `GameStateUpdatedEvent`
 **Cuándo emitir:** Actualización completa del estado (sincronización)
 **Datos incluidos:**
 - `game_state`: Estado completo del juego
 - `update_type`: Tipo de actualización ('full', 'partial', 'sync')
 
-### 6. `PlayerActionEvent`
+### 8. `PlayerActionEvent`
 **Cuándo emitir:** Cuando un jugador realiza una acción
 **Datos incluidos:**
 - `player_id`: ID del jugador
@@ -103,8 +133,16 @@ event(new RoundStartedEvent(
   "event_config": {
     "channel": "room.{roomCode}",
     "events": {
+      "PlayerConnectedToGameEvent": {
+        "name": "player.connected",
+        "handler": "handlePlayerConnected"
+      },
+      "GameStartedEvent": {
+        "name": "game.started",
+        "handler": "handleGameStarted"
+      },
       "RoundStartedEvent": {
-        "name": ".game.round.started",
+        "name": "game.round.started",
         "handler": "handleRoundStarted"
       },
       "RoundEndedEvent": {
@@ -255,5 +293,13 @@ Herramientas generales funcionan con todos los juegos
 
 ---
 
-**Última actualización**: 2025-10-23
-**Autor**: Claude Code + Daniel
+## 📖 Documentación Relacionada
+
+- [Arquitectura Completa de Eventos y WebSockets](./EVENTS_AND_WEBSOCKETS_ARCHITECTURE.md)
+- [Flujo del Motor de Juegos](./GAME_ENGINE_FLOW.md)
+- [Cómo Crear un Juego](./HOW_TO_CREATE_A_GAME.md)
+
+---
+
+**Última actualización**: 2025-10-24
+**Autores**: Claude Code + Daniel
