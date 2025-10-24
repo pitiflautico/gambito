@@ -65,6 +65,20 @@
     "description": "Todos los jugadores responden simultáneamente cada pregunta"
   },
 
+  "timing": {
+    "game_start": {
+      "auto_next": true,
+      "delay": 3,
+      "message": "Empezando"
+    },
+    "round_ended": {
+      "auto_next": true,
+      "delay": 5,
+      "message": "Siguiente pregunta"
+    },
+    "countdown_warning_threshold": 3
+  },
+
   "modules": {
     "turn_system": {
       "enabled": true,

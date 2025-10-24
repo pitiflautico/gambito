@@ -726,4 +726,20 @@ class RoundManager
     {
         return $this->teamsManager && $this->teamsManager->isEnabled();
     }
+
+    /**
+     * Resetear el RoundManager a su estado inicial.
+     *
+     * Usado por BaseGameEngine::resetModules() al iniciar/reiniciar el juego.
+     * Vuelve a ronda 1 y limpia todas las eliminaciones.
+     *
+     * @return void
+     */
+    public function reset(): void
+    {
+        $this->currentRound = 1;
+        $this->permanentlyEliminated = [];
+        $this->temporarilyEliminated = [];
+        $this->roundJustCompleted = false;
+    }
 }

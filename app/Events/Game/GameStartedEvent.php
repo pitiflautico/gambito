@@ -19,6 +19,13 @@ use Illuminate\Queue\SerializesModels;
  * - Sincronizarse con el estado inicial del juego
  * - Mostrar la pantalla de juego activa
  * - Preparar la UI según la fase inicial
+ *
+ * Timing Metadata:
+ * El campo `timing` contiene información para el TimingModule del frontend:
+ * - auto_next (bool): Si debe avanzar automáticamente a la primera ronda
+ * - delay (int): Segundos a esperar antes de avanzar
+ * - action (string): Acción a realizar (ej: 'start_first_round')
+ * - message (string): Mensaje para mostrar en countdown (opcional)
  */
 class GameStartedEvent implements ShouldBroadcast
 {
@@ -29,14 +36,17 @@ class GameStartedEvent implements ShouldBroadcast
     public array $gameState;
     public int $totalPlayers;
     public array $players;
+    public ?array $timing;
 
     public function __construct(
         GameMatch $match,
-        array $gameState
+        array $gameState,
+        ?array $timing = null
     ) {
         $this->roomCode = $match->room->code;
         $this->gameSlug = $match->room->game->slug;
         $this->gameState = $gameState;
+        $this->timing = $timing;
 
         // Información de jugadores
         $this->players = $match->players->map(function ($player) {
@@ -61,11 +71,18 @@ class GameStartedEvent implements ShouldBroadcast
 
     public function broadcastWith(): array
     {
-        return [
+        $data = [
             'game_slug' => $this->gameSlug,
             'game_state' => $this->gameState,
             'total_players' => $this->totalPlayers,
             'players' => $this->players,
         ];
+
+        // Añadir timing metadata si está presente
+        if ($this->timing !== null) {
+            $data['timing'] = $this->timing;
+        }
+
+        return $data;
     }
 }

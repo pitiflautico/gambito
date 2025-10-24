@@ -22,6 +22,10 @@ Route::prefix('games')->name('api.games.')->group(function () {
     Route::get('/{slug}', [GameController::class, 'apiShow'])->name('show');
 });
 
+// API de Partidas (Match Control)
+Route::post('/games/{match}/start-next-round', [GameController::class, 'startNextRound'])
+    ->name('api.matches.start-next-round');
+
 // API de Salas
 Route::prefix('rooms')->name('api.rooms.')->group(function () {
     Route::get('/{code}/stats', [RoomController::class, 'apiStats'])->name('stats');

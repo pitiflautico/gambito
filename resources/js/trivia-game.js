@@ -152,19 +152,20 @@ class TriviaGame extends BaseGameClient {
      * Handler específico de Trivia para GameStarted
      *
      * Se ejecuta cuando el juego inicia (después de que el master presiona "Iniciar Juego").
-     * Este es el momento en el que la primera pregunta se muestra.
+     * Con TimingModule: Muestra countdown "Empezando en 3s..." automáticamente
      */
-    handleGameStartedTrivia(event) {
+    async handleGameStartedTrivia(event) {
         console.log('🎮 [Trivia] GameStartedEvent received:', event);
-
-        // Llamar al handler base
-        super.handleGameStarted(event);
 
         // Actualizar estado del juego
         this.gameState = event.game_state;
 
-        // PASO 1: Mostrar pantalla simple de "Va a empezar la partida"
+        // Mostrar la pantalla de espera (donde aparecerá el countdown)
         this.showGameStartingScreen();
+
+        // Llamar al handler base - Procesará el timing y mostrará countdown
+        // Cuando termine el countdown, llamará a this.onGameReady()
+        await super.handleGameStarted(event);
     }
 
     /**
@@ -188,6 +189,26 @@ class TriviaGame extends BaseGameClient {
         }
 
         console.log('✅ [Trivia] Game starting screen displayed');
+    }
+
+    /**
+     * Sobrescribir: Proporcionar elemento para mostrar countdown
+     */
+    getCountdownElement() {
+        return this.questionWaiting.querySelector('p');
+    }
+
+    /**
+     * Sobrescribir: Callback cuando termina el countdown de inicio
+     */
+    onGameReady() {
+        console.log('✅ [Trivia] Game is ready - Countdown finished');
+
+        // Cambiar mensaje a "Ha empezado la partida"
+        const waitingText = this.questionWaiting.querySelector('p');
+        if (waitingText) {
+            waitingText.innerHTML = '<strong style="font-size: 1.5em; display: block; margin-bottom: 0.5em;">🎉 ¡Ha empezado la partida!</strong>Esperando primera pregunta...';
+        }
     }
 
     /**

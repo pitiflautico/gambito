@@ -141,10 +141,14 @@ class GameMatch extends Model
             'state' => $this->game_state,
         ]);
 
-        // 5. Emitir evento GameStartedEvent para notificar a todos los jugadores
+        // 5. Obtener timing metadata desde config.json del juego
+        $timing = $engine->getGameStartTiming($this);
+
+        // 6. Emitir evento GameStartedEvent con timing metadata
         event(new \App\Events\Game\GameStartedEvent(
             match: $this,
-            gameState: $this->game_state
+            gameState: $this->game_state,
+            timing: $timing
         ));
     }
 
@@ -205,5 +209,91 @@ class GameMatch extends Model
     public function disconnectedPlayers()
     {
         return $this->players()->where('is_connected', false);
+    }
+
+    // ========================================================================
+    // LOCK MECHANISM - Race Condition Prevention
+    // ========================================================================
+
+    /**
+     * Intentar adquirir lock para avanzar la ronda.
+     *
+     * Usa Cache::add() que es atómico - solo el primer cliente lo adquiere.
+     * Esto previene que múltiples jugadores avancen la ronda simultáneamente.
+     *
+     * @param int $ttl Tiempo de vida del lock en segundos (default: 10)
+     * @return bool true si se adquirió el lock, false si otro cliente lo tiene
+     */
+    public function acquireRoundLock(int $ttl = 10): bool
+    {
+        $lockKey = $this->getRoundLockKey();
+
+        // Cache::add() solo añade si la clave NO existe (operación atómica)
+        // Retorna true si se añadió (lock adquirido)
+        // Retorna false si ya existe (otro cliente tiene el lock)
+        $acquired = \Cache::add($lockKey, true, $ttl);
+
+        if ($acquired) {
+            \Log::info('🔒 [Lock] Round lock acquired', [
+                'match_id' => $this->id,
+                'lock_key' => $lockKey,
+                'ttl' => $ttl,
+            ]);
+        } else {
+            \Log::warning('⏸️  [Lock] Round lock already held by another client', [
+                'match_id' => $this->id,
+                'lock_key' => $lockKey,
+            ]);
+        }
+
+        return $acquired;
+    }
+
+    /**
+     * Liberar el lock de la ronda.
+     *
+     * Debe llamarse en bloque finally para garantizar liberación.
+     */
+    public function releaseRoundLock(): void
+    {
+        $lockKey = $this->getRoundLockKey();
+
+        \Cache::forget($lockKey);
+
+        \Log::info('🔓 [Lock] Round lock released', [
+            'match_id' => $this->id,
+            'lock_key' => $lockKey,
+        ]);
+    }
+
+    /**
+     * Verificar si el lock de la ronda está activo.
+     *
+     * @return bool true si el lock está activo
+     */
+    public function hasRoundLock(): bool
+    {
+        return \Cache::has($this->getRoundLockKey());
+    }
+
+    /**
+     * Obtener la clave del lock para la ronda actual.
+     *
+     * La clave incluye el match_id y el round actual para que cada
+     * ronda tenga su propio lock independiente.
+     *
+     * @return string
+     */
+    protected function getRoundLockKey(): string
+    {
+        $currentRound = $this->game_state['round_system']['current_round'] ?? 0;
+        $phase = $this->game_state['phase'] ?? 'unknown';
+
+        return sprintf(
+            'match:%d:round:%d:phase:%s:lock',
+            $this->id,
+            $currentRound,
+            $phase
+        );
     }
 }

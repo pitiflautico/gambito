@@ -11,6 +11,13 @@ use Illuminate\Queue\SerializesModels;
 
 /**
  * Evento genérico emitido cuando termina una ronda.
+ *
+ * Timing Metadata:
+ * El campo `timing` contiene información para el TimingModule del frontend:
+ * - auto_next (bool): Si debe avanzar automáticamente a la siguiente ronda
+ * - delay (int): Segundos a esperar antes de avanzar
+ * - action (string): Acción a realizar (ej: 'next_round', 'show_results')
+ * - message (string): Mensaje para mostrar en countdown (opcional)
  */
 class RoundEndedEvent implements ShouldBroadcast
 {
@@ -20,17 +27,20 @@ class RoundEndedEvent implements ShouldBroadcast
     public int $roundNumber;
     public array $results;
     public array $scores;
+    public ?array $timing;
 
     public function __construct(
         GameMatch $match,
         int $roundNumber,
         array $results = [],
-        array $scores = []
+        array $scores = [],
+        ?array $timing = null
     ) {
         $this->roomCode = $match->room->code;
         $this->roundNumber = $roundNumber;
         $this->results = $results;
         $this->scores = $scores;
+        $this->timing = $timing;
     }
 
     public function broadcastOn(): Channel
@@ -45,10 +55,17 @@ class RoundEndedEvent implements ShouldBroadcast
 
     public function broadcastWith(): array
     {
-        return [
+        $data = [
             'round_number' => $this->roundNumber,
             'results' => $this->results,
             'scores' => $this->scores,
         ];
+
+        // Añadir timing metadata si está presente
+        if ($this->timing !== null) {
+            $data['timing'] = $this->timing;
+        }
+
+        return $data;
     }
 }

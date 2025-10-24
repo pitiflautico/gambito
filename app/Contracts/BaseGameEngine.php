@@ -392,19 +392,22 @@ abstract class BaseGameEngine implements GameEngineInterface
         // RESETEAR SCORING SYSTEM
         // ========================================================================
         if (($modules['scoring_system']['enabled'] ?? false) && isset($gameState['scoring_system'])) {
-            $scoreManager = ScoreManager::fromArray($gameState);
-
             // Aplicar overrides si existen
             if (isset($overrides['scoring_system']['scores'])) {
-                foreach ($overrides['scoring_system']['scores'] as $playerId => $score) {
-                    $scoreManager->setScore($playerId, $score);
-                }
+                $gameState['scoring_system']['scores'] = $overrides['scoring_system']['scores'];
             } else {
-                $scoreManager->resetAll(); // Todos los scores a 0
+                // Resetear todos los scores a 0
+                foreach ($playerIds as $playerId) {
+                    $gameState['scoring_system']['scores'][$playerId] = 0;
+                }
             }
 
-            $gameState = array_merge($gameState, $scoreManager->toArray());
-            Log::debug("Scoring system reset", ['scores' => $scoreManager->getScores()]);
+            // Limpiar historial si está habilitado
+            if ($modules['scoring_system']['track_history'] ?? false) {
+                $gameState['scoring_system']['score_history'] = [];
+            }
+
+            Log::debug("Scoring system reset", ['scores' => $gameState['scoring_system']['scores']]);
         }
 
         // ========================================================================
@@ -415,9 +418,9 @@ abstract class BaseGameEngine implements GameEngineInterface
 
             // Aplicar override si existe
             if (isset($overrides['turn_system']['current_turn_index'])) {
-                $roundManager->setCurrentTurnIndex($overrides['turn_system']['current_turn_index']);
+                $roundManager->getTurnManager()->setCurrentTurnIndex($overrides['turn_system']['current_turn_index']);
             } else {
-                $roundManager->resetToFirstTurn(); // Vuelve al primer jugador
+                $roundManager->getTurnManager()->reset(); // Vuelve al primer jugador
             }
 
             $gameState = array_merge($gameState, $roundManager->toArray());
@@ -1196,5 +1199,61 @@ abstract class BaseGameEngine implements GameEngineInterface
         // Por defecto retorna todo el game_state
         // Los juegos pueden sobrescribir para filtrar información
         return $match->game_state ?? [];
+    }
+
+    // ========================================================================
+    // TIMING MODULE - Configuration
+    // ========================================================================
+
+    /**
+     * Obtener timing metadata para GameStartedEvent desde config.json del juego.
+     *
+     * Lee la sección "timing.game_start" del config.json.
+     *
+     * CONVENCIÓN:
+     * Cada juego define su timing en config.json:
+     * {
+     *   "timing": {
+     *     "game_start": {
+     *       "auto_next": true,
+     *       "delay": 3,
+     *       "message": "Empezando"
+     *     },
+     *     "round_ended": {
+     *       "auto_next": true,
+     *       "delay": 5,
+     *       "message": "Siguiente pregunta"
+     *     }
+     *   }
+     * }
+     *
+     * @param GameMatch $match
+     * @return array|null Timing metadata o null si no está configurado
+     */
+    public function getGameStartTiming(GameMatch $match): ?array
+    {
+        // Obtener slug del juego
+        $gameSlug = $match->room->game->slug;
+        $configPath = base_path("games/{$gameSlug}/config.json");
+
+        if (!file_exists($configPath)) {
+            Log::warning("[{$gameSlug}] config.json not found, no timing available");
+            return null;
+        }
+
+        $config = json_decode(file_get_contents($configPath), true);
+        $timing = $config['timing']['game_start'] ?? null;
+
+        if ($timing) {
+            Log::info("[{$gameSlug}] Game start timing loaded", $timing);
+            return [
+                'auto_next' => $timing['auto_next'] ?? false,
+                'delay' => $timing['delay'] ?? 0,
+                'action' => 'game_ready',
+                'message' => $timing['message'] ?? 'Empezando'
+            ];
+        }
+
+        return null;
     }
 }

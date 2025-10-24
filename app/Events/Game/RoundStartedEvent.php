@@ -14,6 +14,12 @@ use Illuminate\Queue\SerializesModels;
  *
  * Este evento es emitido por BaseGameEngine y puede ser usado por cualquier juego.
  * Cada juego puede escuchar este evento y ejecutar su lógica específica.
+ *
+ * Timing Metadata:
+ * El campo `timing` contiene información para el TimingModule del frontend:
+ * - duration (int): Duración de la ronda en segundos (si tiene límite de tiempo)
+ * - countdown_visible (bool): Si debe mostrarse un countdown durante la ronda
+ * - warning_threshold (int): Segundos para mostrar warning (cambio de color)
  */
 class RoundStartedEvent implements ShouldBroadcast
 {
@@ -24,6 +30,7 @@ class RoundStartedEvent implements ShouldBroadcast
     public int $totalRounds;
     public string $phase;
     public array $gameState;
+    public ?array $timing;
 
     /**
      * Create a new event instance.
@@ -32,13 +39,15 @@ class RoundStartedEvent implements ShouldBroadcast
         GameMatch $match,
         int $currentRound,
         int $totalRounds,
-        string $phase = 'playing'
+        string $phase = 'playing',
+        ?array $timing = null
     ) {
         $this->roomCode = $match->room->code;
         $this->currentRound = $currentRound;
         $this->totalRounds = $totalRounds;
         $this->phase = $phase;
         $this->gameState = $match->game_state;
+        $this->timing = $timing;
     }
 
     /**
@@ -62,11 +71,18 @@ class RoundStartedEvent implements ShouldBroadcast
      */
     public function broadcastWith(): array
     {
-        return [
+        $data = [
             'current_round' => $this->currentRound,
             'total_rounds' => $this->totalRounds,
             'phase' => $this->phase,
             'game_state' => $this->gameState,
         ];
+
+        // Añadir timing metadata si está presente
+        if ($this->timing !== null) {
+            $data['timing'] = $this->timing;
+        }
+
+        return $data;
     }
 }

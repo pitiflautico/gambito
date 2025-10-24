@@ -1,3 +1,5 @@
+import TimingModule from '../modules/TimingModule.js';
+
 /**
  * BaseGameClient - Clase base para todos los juegos
  *
@@ -6,6 +8,7 @@
  * - Handlers de eventos genéricos (RoundStarted, RoundEnded, PlayerAction)
  * - Gestión de scores y jugadores
  * - Sistema de mensajes
+ * - Sistema de timing (TimingModule)
  *
  * Cada juego extiende esta clase e implementa solo su lógica específica.
  */
@@ -26,6 +29,10 @@ export class BaseGameClient {
         // Estado interno
         this.currentRound = 1;
         this.totalRounds = 10;
+
+        // Inicializar TimingModule
+        this.timing = new TimingModule();
+        this.timing.configure(config.timing || {});
     }
 
     /**
@@ -65,11 +72,22 @@ export class BaseGameClient {
      *
      * Se recibe el estado inicial completo del juego.
      */
-    handleGameStarted(event) {
+    async handleGameStarted(event) {
         console.log('🎮 [BaseGameClient] GameStartedEvent received:', event);
 
         // Actualizar game state con el estado inicial
         this.gameState = event.game_state;
+
+        // Procesar timing metadata si existe
+        if (event.timing) {
+            console.log('⏰ [BaseGameClient] Processing game start timing:', event.timing);
+
+            await this.timing.processTimingPoint(
+                event.timing,
+                () => this.onGameReady(),
+                this.getCountdownElement()
+            );
+        }
 
         // Los juegos específicos pueden sobrescribir este método
         // para hacer transiciones de UI, mostrar mensajes, etc.
@@ -92,9 +110,10 @@ export class BaseGameClient {
     /**
      * Handler genérico: Ronda terminada
      *
-     * Este método actualiza scores automáticamente para TODOS los juegos.
+     * Este método actualiza scores automáticamente para TODOS los juegos
+     * y procesa timing metadata para auto-avanzar a la siguiente ronda.
      */
-    handleRoundEnded(event) {
+    async handleRoundEnded(event) {
         // Actualizar scores (común para todos los juegos)
         if (event.scores) {
             this.scores = event.scores;
@@ -103,6 +122,17 @@ export class BaseGameClient {
         // Guardar resultados
         this.lastResults = event.results;
         this.lastRoundNumber = event.round_number;
+
+        // Procesar timing metadata si existe
+        if (event.timing) {
+            console.log('⏰ [BaseGameClient] Processing timing metadata:', event.timing);
+
+            await this.timing.processTimingPoint(
+                event.timing,
+                () => this.notifyReadyForNextRound(),
+                this.getCountdownElement()
+            );
+        }
 
         // Los juegos específicos sobrescriben este método para mostrar resultados
     }
@@ -173,6 +203,84 @@ export class BaseGameClient {
             console.error(`❌ [BaseGameClient] Error sending action to ${endpoint}:`, error);
             throw error;
         }
+    }
+
+    // ========================================================================
+    // TIMING MODULE - Race Condition Protection
+    // ========================================================================
+
+    /**
+     * Notificar al backend que el frontend está listo para la siguiente ronda.
+     *
+     * Race Condition Protection:
+     * - Todos los jugadores llaman a este endpoint cuando su countdown termina
+     * - El backend usa un lock mechanism para que solo el primer cliente avance
+     * - Los demás clientes reciben 409 Conflict y se sincronizan con RoundStartedEvent
+     * - Esto previene avanzar la ronda múltiples veces
+     */
+    async notifyReadyForNextRound() {
+        console.log('📤 [BaseGameClient] Notifying backend: ready for next round');
+
+        try {
+            const response = await fetch(`/api/games/${this.matchId}/start-next-round`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                },
+                body: JSON.stringify({
+                    room_code: this.roomCode
+                })
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.success) {
+                console.log('✅ [BaseGameClient] Successfully started next round');
+            } else if (response.status === 409) {
+                // 409 Conflict: Otro cliente ya está iniciando la ronda
+                console.log('⏸️  [BaseGameClient] Another client is starting the round, waiting for RoundStartedEvent...');
+            } else {
+                console.error('❌ [BaseGameClient] Error starting next round:', data.error);
+            }
+
+            // En todos los casos, el cliente se sincronizará con RoundStartedEvent
+        } catch (error) {
+            console.error('❌ [BaseGameClient] Network error notifying next round:', error);
+        }
+    }
+
+    /**
+     * Obtener elemento DOM donde mostrar countdown.
+     *
+     * Los juegos específicos deben sobrescribir este método para retornar
+     * el elemento donde quieren mostrar el countdown de timing.
+     *
+     * Ejemplo en TriviaGame:
+     * getCountdownElement() {
+     *     return this.questionWaiting.querySelector('p');
+     * }
+     *
+     * @returns {HTMLElement|null} Elemento DOM o null si no hay
+     */
+    getCountdownElement() {
+        // Por defecto, retornar null (no mostrar countdown)
+        // Los juegos específicos sobrescriben esto
+        return null;
+    }
+
+    /**
+     * Callback ejecutado cuando termina el countdown de inicio de juego.
+     *
+     * Los juegos específicos pueden sobrescribir este método para:
+     * - Cambiar el mensaje a "¡Ha empezado la partida!"
+     * - Iniciar la primera ronda
+     * - Hacer transiciones de UI
+     */
+    onGameReady() {
+        console.log('✅ [BaseGameClient] Game is ready');
+
+        // Los juegos específicos sobrescriben esto
     }
 }
 
