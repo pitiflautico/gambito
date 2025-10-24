@@ -30,6 +30,7 @@ class TriviaGame extends BaseGameClient {
 
         // Configurar handlers de eventos específicos de Trivia
         this.setupEventManager({
+            handleGameStarted: (event) => this.handleGameStartedTrivia(event),
             handleRoundStarted: (event) => this.handleRoundStartedTrivia(event),
             handleRoundEnded: (event) => this.handleRoundEndedTrivia(event),
             handlePlayerAction: (event) => this.handlePlayerActionTrivia(event),
@@ -97,12 +98,8 @@ class TriviaGame extends BaseGameClient {
     }
 
     syncInitialState() {
-        console.log('🔄 [Trivia] syncInitialState called');
-        console.log('   gameState:', this.gameState);
-        console.log('   phase:', this.gameState?.phase);
 
         if (!this.gameState) {
-            console.log('   ❌ No hay gameState, mostrando espera');
             this.showQuestionWaiting();
             return;
         }
@@ -113,7 +110,6 @@ class TriviaGame extends BaseGameClient {
         switch (phase) {
             case 'question':
                 // Hay una pregunta activa
-                console.log('   ✅ Fase: question - mostrando pregunta');
                 const currentQuestion = this.gameState.current_question;
                 const currentRound = this.gameState.current_question_index + 1;
                 const totalRounds = this.gameState.total_rounds || 10;
@@ -130,7 +126,6 @@ class TriviaGame extends BaseGameClient {
 
             case 'results':
                 // Mostrando resultados de la pregunta
-                console.log('   ⏳ Fase: results - mostrando resultados y esperando countdown');
                 const results = this.gameState.question_results || {};
                 const scores = this.gameState.scoring_system?.scores || {};
                 const roundNumber = this.gameState.round_system?.current_round || 1;
@@ -144,15 +139,55 @@ class TriviaGame extends BaseGameClient {
 
             case 'final_results':
                 // Juego terminado
-                console.log('   🏁 Fase: final_results - juego terminado');
                 // TODO: Mostrar resultados finales
                 break;
 
             default:
                 // Fase desconocida o esperando
-                console.log(`   ⚠️ Fase desconocida: ${phase}, mostrando espera`);
                 this.showQuestionWaiting();
         }
+    }
+
+    /**
+     * Handler específico de Trivia para GameStarted
+     *
+     * Se ejecuta cuando el juego inicia (después de que el master presiona "Iniciar Juego").
+     * Este es el momento en el que la primera pregunta se muestra.
+     */
+    handleGameStartedTrivia(event) {
+        console.log('🎮 [Trivia] GameStartedEvent received:', event);
+
+        // Llamar al handler base
+        super.handleGameStarted(event);
+
+        // Actualizar estado del juego
+        this.gameState = event.game_state;
+
+        // PASO 1: Mostrar pantalla simple de "Va a empezar la partida"
+        this.showGameStartingScreen();
+    }
+
+    /**
+     * Mostrar pantalla de inicio del juego
+     */
+    showGameStartingScreen() {
+        console.log('[showGameStartingScreen] Mostrando pantalla de inicio...');
+
+        // Ocultar todas las pantallas
+        this.questionActive.classList.add('hidden');
+        this.questionResults.classList.add('hidden');
+        this.questionWaiting.classList.remove('hidden');
+
+        // Mostrar mensaje de inicio en el <p> que existe
+        const waitingText = this.questionWaiting.querySelector('p');
+        if (waitingText) {
+            waitingText.innerHTML = '<strong style="font-size: 1.3em; display: block; margin-bottom: 0.5em;">🎮 ¡Va a empezar la partida!</strong>Prepárate para responder las preguntas...';
+            console.log('[showGameStartingScreen] Texto actualizado:', waitingText.innerHTML);
+        } else {
+            console.error('[showGameStartingScreen] No se encontró el elemento <p>');
+        }
+
+        console.log('✅ [Trivia] Game starting screen displayed');
     }
 
     /**
@@ -166,7 +201,6 @@ class TriviaGame extends BaseGameClient {
      * 5. Mostrar panel de pregunta activa
      */
     handleRoundStartedTrivia(event) {
-        console.log('🎯 [Trivia] RoundStartedEvent received:', event);
 
         // Llamar al handler base primero (logging, estado base, etc.)
         super.handleRoundStarted(event);
@@ -175,7 +209,6 @@ class TriviaGame extends BaseGameClient {
         const gameState = event.game_state;
         const currentQuestion = gameState.current_question;
 
-        console.log('📝 [Trivia] Current question:', currentQuestion);
 
         this.currentQuestion = {
             question: currentQuestion.question,
@@ -197,14 +230,12 @@ class TriviaGame extends BaseGameClient {
         this.resetPlayerStatuses();
         this.updateRoundCounter();
 
-        console.log('✅ [Trivia] Question rendered');
     }
 
     /**
      * Handler específico de Trivia para PlayerAction
      */
     handlePlayerActionTrivia(event) {
-        console.log('👤 [Trivia] PlayerActionEvent received:', event);
 
         // Llamar al handler base
         super.handlePlayerAction(event);
@@ -230,7 +261,6 @@ class TriviaGame extends BaseGameClient {
      * 3. Iniciar countdown para próxima pregunta
      */
     handleRoundEndedTrivia(event) {
-        console.log('🏁 [Trivia] RoundEndedEvent received:', event);
 
         // Llamar al handler base
         super.handleRoundEnded(event);
@@ -244,9 +274,6 @@ class TriviaGame extends BaseGameClient {
         // Los resultados vienen con player_id como key
         const results = event.results;
 
-        console.log('📊 [Trivia] Results:', results);
-        console.log('💯 [Trivia] Scores:', event.scores);
-        console.log('🔢 [Trivia] Question index:', this.lastQuestionIndex);
 
         // Actualizar puntuaciones en tiempo real (datos vienen del evento)
         this.updateScores(event.scores);
@@ -254,14 +281,12 @@ class TriviaGame extends BaseGameClient {
         // Mostrar quién ganó esta ronda
         this.showRoundResults(results);
 
-        console.log('✅ [Trivia] Results displayed');
     }
 
     /**
      * Handler específico de Trivia para PhaseChanged
      */
     handlePhaseChangedTrivia(event) {
-        console.log('🔄 [Trivia] PhaseChangedEvent received:', event);
         // TODO: Implementar cambios de fase si es necesario
     }
 
@@ -269,7 +294,6 @@ class TriviaGame extends BaseGameClient {
      * Handler específico de Trivia para TurnChanged
      */
     handleTurnChangedTrivia(event) {
-        console.log('🔁 [Trivia] TurnChangedEvent received:', event);
         // En Trivia no hay turnos (es simultáneo), pero dejamos el handler
     }
 
@@ -277,7 +301,6 @@ class TriviaGame extends BaseGameClient {
      * Handler específico de Trivia para GameFinished
      */
     handleGameFinishedTrivia(event) {
-        console.log('🎊 [Trivia] GameFinishedEvent received:', event);
 
         // Llamar al handler base
         super.handleGameFinished(event);
@@ -488,10 +511,6 @@ class TriviaGame extends BaseGameClient {
     }
 
     async notifyCountdownEnded() {
-        console.log('⏰ [Trivia] Countdown ended - notifying backend...', {
-            questionIndex: this.lastQuestionIndex
-        });
-
         try {
             const response = await fetch(`/api/trivia/countdown-ended`, {
                 method: 'POST',
@@ -507,16 +526,8 @@ class TriviaGame extends BaseGameClient {
 
             const data = await response.json();
 
-            if (data.success) {
-                if (data.already_started) {
-                    console.log('✅ [Trivia] Round already started by another player');
-                } else {
-                    console.log('✅ [Trivia] We started the next round');
-                }
-                // El evento RoundStartedEvent llegará por WebSocket
-            } else if (data.game_complete) {
-                console.log('🏁 [Trivia] Game is complete');
-            } else {
+            // El evento RoundStartedEvent llegará por WebSocket
+            if (!data.success && !data.game_complete) {
                 console.error('❌ [Trivia] Error notifying countdown:', data.error);
             }
         } catch (error) {
