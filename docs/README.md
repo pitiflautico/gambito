@@ -1,250 +1,190 @@
-# 📚 Documentación del Proyecto Gambito
+# Groups Games - Plataforma de Juegos Multijugador
 
-**Plataforma de Juegos Sociales Modulares**
+## ¿Qué es Groups Games?
 
-> ⚠️ **IMPORTANTE:** Antes de trabajar en este proyecto, lee [`INSTRUCTIONS_FOR_AGENTS.md`](INSTRUCTIONS_FOR_AGENTS.md)
+Groups Games es una plataforma web para jugar juegos multijugador en reuniones presenciales. Cada jugador usa su dispositivo móvil para interactuar con el juego mientras mantienen la interacción social cara a cara.
 
----
+## Concepto
 
-## 📖 Índice de Documentación
+- **Juegos presenciales**: Diseñado para grupos que están físicamente juntos
+- **Un dispositivo por jugador**: Cada persona usa su móvil/tablet
+- **Sin chat**: Los jugadores hablan cara a cara, no hay chat en la aplicación
+- **Sincronización en tiempo real**: Todos ven actualizaciones instantáneas vía WebSockets
 
-### 🎯 Documentación Esencial (LECTURA OBLIGATORIA)
-- 🤖 [**INSTRUCCIONES PARA AGENTES**](INSTRUCTIONS_FOR_AGENTS.md) - **LEE ESTO PRIMERO**
-- 🏗️ [**Arquitectura General**](ARCHITECTURE.md) - Visión general del sistema modular
-- 📖 [**Glosario de Términos**](GLOSSARY.md) - Definiciones de conceptos clave
-- 🛠️ [**Guía de Desarrollo**](DEVELOPMENT_GUIDE.md) - Setup, workflow y convenciones
-- 📦 [**Instalación y Deployment**](INSTALLATION.md) - Instalación desde cero y despliegue a producción ✅
-- 🔌 [**Configuración de WebSockets**](WEBSOCKET_SETUP.md) - Laravel Reverb setup y troubleshooting ✅
-- 📡 [**WebSockets y Broadcasting**](WEBSOCKETS_BROADCASTING.md) - Guía completa de eventos en tiempo real ✅
-- 🎮 [**Convención de Estructura de Juegos**](GAMES_CONVENTION.md) - **Ubicación de archivos JS, CSS, PHP** ✅
+## Arquitectura
 
----
+### Stack Tecnológico
 
-### 🏗️ Arquitectura del Sistema
-- [**Sistema Modular**](architecture/MODULAR_SYSTEM.md) - Cómo funciona el sistema de plugins
-- [**Game Registry**](architecture/GAME_REGISTRY.md) - Descubrimiento y carga de juegos ✅
-- [**Capabilities System**](architecture/CAPABILITIES.md) - Sistema de declaración de dependencias
+- **Backend**: Laravel 11 (PHP 8.2+)
+- **Frontend**: Blade + Vanilla JavaScript
+- **WebSockets**: Laravel Reverb (nativo Laravel 11)
+- **Base de Datos**: MySQL
+- **Assets**: Vite
 
----
+### Sistema Modular
 
-### 🔧 Módulos Core (Siempre Activos)
+La plataforma utiliza un sistema de **módulos reutilizables** que los juegos activan según necesiten:
 
-Estos módulos **siempre están disponibles** para todos los juegos:
+**Módulos Core** (siempre activos):
+- `GameEngine`: Ciclo de vida del juego
+- `RoomManager`: Gestión de salas y matches
 
-| Módulo | Estado | Descripción | Documentación |
-|--------|--------|-------------|---------------|
-| **Game Core** | ⏳ Pendiente | Motor principal del ciclo de vida del juego | [Ver docs](modules/core/GAME_CORE.md) |
-| **Room Manager** | ✅ Implementado | Gestión de salas, códigos y QR | [Ver docs](modules/core/ROOM_MANAGER.md) |
-| **Player Session** | ✅ Implementado | Gestión de jugadores invitados | [Ver docs](modules/core/PLAYER_SESSION.md) |
-| **Game Registry** | ✅ Implementado | Descubrimiento de juegos | [Ver docs](modules/core/GAME_REGISTRY.md) |
+**Módulos Opcionales** (configurables por juego):
+- `GuestSystem`: Invitados sin registro
+- `RoundSystem`: Sistema de rondas
+- `TurnSystem`: Turnos (simultáneos/secuenciales)
+- `ScoringSystem`: Puntuación y ranking
+- `TimerService`: Temporizadores
+- `RolesSystem`: Roles específicos del juego
 
----
+### Arquitectura de Eventos
 
-### 🎮 Módulos Opcionales (Configurables)
+- **Eventos genéricos**: El sistema emite eventos estándar para todos los juegos
+  - `GameStartedEvent`, `RoundStartedEvent`, `RoundEndedEvent`, `GameFinishedEvent`
+  - `PlayerConnectedEvent`, `PlayerActionEvent`, `TurnChangedEvent`
 
-Cada juego declara en `capabilities.json` cuáles de estos módulos necesita:
+- **Eventos específicos**: Cada juego puede definir sus propios eventos
+  - Ejemplo Trivia: `QuestionDisplayedEvent`, `AnswerSubmittedEvent`
 
-| Módulo | Prioridad | Descripción | Documentación |
-|--------|-----------|-------------|---------------|
-| **Guest System** | 🔥 MVP | Jugadores sin registro | [Ver docs](modules/optional/GUEST_SYSTEM.md) |
-| **Turn System** | 🔥 MVP | Turnos secuenciales/simultáneos | [Ver docs](modules/optional/TURN_SYSTEM.md) |
-| **Round System** | 🔥 MVP | Control de rondas (fijas o configurables) | [Ver docs](modules/optional/ROUND_SYSTEM.md) |
-| **Scoring System** | 🔥 MVP | Puntuación y ranking | [Ver docs](modules/optional/SCORING_SYSTEM.md) |
-| **Timer System** | 🔥 MVP | Temporizadores y límites de tiempo | [Ver docs](modules/optional/TIMER_SYSTEM.md) |
-| **Roles System** | 🔥 MVP | Asignación de roles | [Ver docs](modules/optional/ROLES_SYSTEM.md) |
-| **Realtime Sync** | 🔥 MVP | WebSockets para sincronización | [Ver docs](modules/optional/REALTIME_SYNC.md) |
-| **Teams System** | ⏳ Post-MVP | Agrupación en equipos | [Ver docs](modules/optional/TEAMS_SYSTEM.md) |
-| **Card/Deck System** | ⏳ Post-MVP | Gestión de mazos de cartas | [Ver docs](modules/optional/CARD_SYSTEM.md) |
-| **Board/Grid System** | ⏳ Post-MVP | Tableros de juego | [Ver docs](modules/optional/BOARD_SYSTEM.md) |
-| **Spectator Mode** | ⏳ Post-MVP | Modo observador | [Ver docs](modules/optional/SPECTATOR_MODE.md) |
-| **AI Players** | ⏳ Post-MVP | Bots controlados por IA | [Ver docs](modules/optional/AI_PLAYERS.md) |
-| **Replay System** | ⏳ Post-MVP | Grabación y reproducción | [Ver docs](modules/optional/REPLAY_SYSTEM.md) |
+## Juegos Disponibles
 
-**Leyenda:**
-- 🔥 MVP = Necesario para Pictionary (primera implementación)
-- ⏳ Post-MVP = Para juegos futuros
+### Trivia
+Juego de preguntas y respuestas en tiempo real.
 
----
+**Características**:
+- 10 rondas de preguntas
+- Turnos simultáneos (todos responden a la vez)
+- Timer de 15 segundos por pregunta
+- Sistema de puntuación
 
-### 🎲 Juegos Implementados
+**Estado**: ✅ Funcional
 
-| Juego | Estado | Jugadores | Módulos Usados | Documentación |
-|-------|--------|-----------|----------------|---------------|
-| **Pictionary** | ✅ Completado (MVP) | 2-10 | Guest, Turn, Scoring, Timer, Roles, Realtime | [Ver docs](games/PICTIONARY.md) |
-| **UNO** | ⏳ Futuro | 2-10 | Guest, Turn, Scoring, Timer, Card | [Ver docs](games/UNO.md) |
-| **Trivia** | ⏳ Futuro | 2-∞ | Guest, Turn, Scoring, Timer, Teams | [Ver docs](games/TRIVIA.md) |
+## Flujo de Usuario
 
----
+1. **Master crea sala**
+   - Usuario autenticado va a "Crear Sala"
+   - Selecciona juego
+   - Se genera código de 6 caracteres (ej: "ABC123")
 
-### 🔌 API y Contratos
+2. **Jugadores se unen**
+   - Ingresan código de sala
+   - Usuarios autenticados: entran directamente
+   - Invitados: ingresan nombre primero
 
-- [**GameEngineInterface**](api/GAME_ENGINE_INTERFACE.md) - Contrato obligatorio para todos los juegos
-- [**API Endpoints**](api/ENDPOINTS.md) - Documentación de endpoints REST
-- [**WebSocket Events**](api/WEBSOCKET_EVENTS.md) - Eventos en tiempo real
+3. **Lobby**
+   - Todos esperan en el lobby
+   - Master ve cuántos jugadores hay
+   - Master inicia el juego cuando está listo
 
----
+4. **Juego**
+   - Todos juegan en tiempo real
+   - Sincronización vía WebSockets
+   - Actualizaciones instantáneas
 
-### 🧪 Testing
+5. **Resultados**
+   - Ranking final
+   - Estadísticas del juego
 
-- [**Estrategia de Testing**](testing/TESTING_STRATEGY.md) - Cómo testear módulos y juegos
-- [**Guía de Tests**](testing/TESTING_GUIDE.md) - Escribir y ejecutar tests
+## Configuración del Juego
 
----
+Cada juego tiene su directorio en `games/{slug}/`:
 
-### 📋 Decisiones Arquitectónicas (ADRs)
+```
+games/trivia/
+├── TriviaEngine.php       # Lógica del juego
+├── TriviaController.php   # Endpoints HTTP
+├── config.json           # Configuración de módulos
+├── capabilities.json     # Metadata y eventos
+├── routes.php           # Rutas específicas
+├── views/
+│   ├── lobby.blade.php  # Vista del lobby
+│   └── game.blade.php   # Vista del juego
+└── assets/
+    └── questions.json   # Datos del juego
+```
 
-Registro de decisiones importantes del proyecto:
+## Testing
 
-| ADR | Título | Fecha | Estado |
-|-----|--------|-------|--------|
-| [ADR-001](decisions/ADR-001-MODULAR_SYSTEM.md) | Sistema Modular vs Monolítico | 2025-10-20 | ✅ Aceptado |
-| [ADR-002](decisions/ADR-002-ITERATIVE_DEVELOPMENT.md) | Desarrollo Iterativo (Opción C) | 2025-10-21 | ✅ Aceptado |
-| [ADR-003](decisions/ADR-003-WEBSOCKETS_REVERB.md) | WebSockets con Laravel Reverb | 2025-10-20 | ✅ Aceptado |
-| [ADR-004](decisions/ADR-004-NO_CHAT_MVP.md) | Sin Chat en MVP | 2025-10-20 | ✅ Aceptado |
+La plataforma utiliza **tests como contratos**:
 
----
+1. **RoomCreationFlowTest**: Contrato inmutable para creación de salas
+2. **LobbyJoinFlowTest**: Contrato inmutable para entrada al lobby
+3. **ModuleFlowTest**: Contrato para el sistema de módulos
 
-## 🚀 Inicio Rápido
+Estos tests **no se pueden modificar sin aprobación explícita**.
 
-### Para Desarrolladores/Agentes Nuevos
+```bash
+# Ejecutar tests
+php artisan test
 
-**PASO 1: Lectura obligatoria** (30 minutos)
-1. 🤖 [`INSTRUCTIONS_FOR_AGENTS.md`](INSTRUCTIONS_FOR_AGENTS.md) ← **Empieza aquí**
-2. 🏗️ [`ARCHITECTURE.md`](ARCHITECTURE.md)
-3. 📖 [`GLOSSARY.md`](GLOSSARY.md)
-4. 📋 [`../tasks/tasks-0001-prd-plataforma-juegos-sociales.md`](../tasks/tasks-0001-prd-plataforma-juegos-sociales.md)
+# Tests sin warnings
+./test-clean.sh
+```
 
-**PASO 2: Setup del proyecto**
-1. 🛠️ [`DEVELOPMENT_GUIDE.md`](DEVELOPMENT_GUIDE.md)
+## Debug
 
-**PASO 3: Ya puedes empezar a trabajar** 🎉
+Panel de debug para testing de eventos en tiempo real:
 
----
+```
+http://gambito.test/debug/game-events/{roomCode}
+```
 
-### Para Crear un Nuevo Juego
+Permite:
+- Ver eventos WebSocket en vivo
+- Iniciar/avanzar/finalizar juego manualmente
+- Inspeccionar game_state en tiempo real
 
-1. Lee [`api/GAME_ENGINE_INTERFACE.md`](api/GAME_ENGINE_INTERFACE.md)
-2. Revisa ejemplo en [`games/PICTIONARY.md`](games/PICTIONARY.md)
-3. Consulta [módulos opcionales disponibles](modules/optional/)
-4. Usa plantilla [`templates/TEMPLATE_GAME.md`](templates/TEMPLATE_GAME.md)
+## Deployment
 
----
+La aplicación está preparada para desplegarse como:
+- **Monolito**: Todo en un servidor
+- **Microservicios** (futuro): Módulos separados
 
-### Para Crear un Nuevo Módulo Opcional
+### Configuración
 
-1. Lee [`architecture/MODULAR_SYSTEM.md`](architecture/MODULAR_SYSTEM.md)
-2. Define contrato/interface del módulo
-3. Implementa el servicio
-4. Documenta en `docs/modules/optional/TU_MODULO.md`
-5. Usa plantilla [`templates/TEMPLATE_MODULE.md`](templates/TEMPLATE_MODULE.md)
+```env
+# Base de datos
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_DATABASE=groupsgames
 
----
+# WebSockets (Reverb)
+REVERB_APP_ID=your-app-id
+REVERB_APP_KEY=your-app-key
+REVERB_APP_SECRET=your-app-secret
+REVERB_HOST=localhost
+REVERB_PORT=8080
+REVERB_SCHEME=http
 
-## 📝 Convenciones de Documentación
+# Broadcasting
+BROADCAST_DRIVER=reverb
+```
 
-### Todos los documentos deben incluir:
+### Comandos Útiles
 
-- **Estado:** ✅ Implementado | 🚧 En desarrollo | ⏳ Pendiente
-- **Fecha de última actualización**
-- **Versión del módulo/juego**
-- **Ejemplos de código** cuando sea relevante
-- **Links a código fuente** relacionado
+```bash
+# Iniciar Reverb (WebSockets)
+php artisan reverb:start
 
-### Formato de nombres de archivos:
+# Registrar juegos
+php artisan games:discover
 
-- **Módulos:** `NOMBRE_MODULO.md` (mayúsculas con guiones bajos)
-- **Juegos:** `NOMBRE_JUEGO.md` (mayúsculas)
-- **ADRs:** `ADR-NNN-TITULO.md` (número + título)
-- **Arquitectura:** `NOMBRE_CONCEPTO.md` (mayúsculas con guiones bajos)
+# Limpiar caché
+php artisan cache:clear
+php artisan config:clear
+php artisan route:clear
+```
 
-### Idioma:
+## Próximos Pasos
 
-- ✅ **Toda la documentación en español**
-- ✅ **Comentarios en código en español**
-- ✅ **Nombres de métodos/clases en inglés** (convención Laravel/PHP)
+1. ~~Sistema modular completo~~ ✅
+2. ~~Tests como contratos~~ ✅
+3. ~~Panel de debug~~ ✅
+4. Implementar más juegos (usando sistema modular)
+5. Mejorar UI/UX
+6. Sistema de estadísticas
 
----
+## Links
 
-## 🔄 Mantenimiento de Documentación
-
-### ⚠️ CRÍTICO: La documentación DEBE actualizarse junto con el código
-
-Cuando implementes algo, **actualiza la documentación INMEDIATAMENTE**:
-
-| Acción | Documentación a actualizar |
-|--------|----------------------------|
-| ✅ Nuevo módulo core | `docs/modules/core/NOMBRE.md` + `docs/README.md` |
-| ✅ Nuevo módulo opcional | `docs/modules/optional/NOMBRE.md` + `docs/README.md` |
-| ✅ Nuevo juego | `docs/games/NOMBRE.md` + `docs/README.md` |
-| ✅ Nuevo término | `docs/GLOSSARY.md` |
-| ✅ Decisión arquitectónica | `docs/decisions/ADR-NNN-TITULO.md` |
-| ✅ Cambio en arquitectura | `docs/ARCHITECTURE.md` + ADR |
-| ✅ Tarea completada | `tasks/tasks-*.md` (marcar como ✅) |
-
-Ver detalles en: [`INSTRUCTIONS_FOR_AGENTS.md`](INSTRUCTIONS_FOR_AGENTS.md#-workflow-obligatorio)
-
----
-
-## 📊 Estado Actual del Proyecto
-
-**Última actualización:** 2025-10-21
-**Versión:** MVP 1.0
-
-### ✅ Completado
-
-- [x] Database schema (Games, Rooms, Matches, Players, MatchEvents)
-- [x] Core Models (Game, Room, GameMatch, Player, MatchEvent)
-- [x] Game Registry System (descubrimiento de juegos)
-- [x] Room Manager (crear salas, códigos, QR, lobby)
-- [x] Player Session (jugadores invitados, heartbeat)
-- [x] **Pictionary MVP Completo** (primer juego funcional)
-  - [x] Canvas de dibujo con sincronización en tiempo real
-  - [x] Sistema de turnos y rondas
-  - [x] Sistema de puntuación
-  - [x] Sistema de roles (dibujante/adivinador)
-  - [x] WebSocket broadcasting con Laravel Reverb
-  - [x] Interfaz adaptativa según rol
-  - [x] Finalización de partida con ranking
-  - [x] Flujo diferenciado para master/invitados/usuarios
-
-### ⏳ Pendiente
-
-- [ ] Admin Panel (Filament Resources)
-- [ ] Segundo juego (validación de módulos)
-- [ ] Modularización de sistemas (extraer Turn, Scoring, Timer, Roles como módulos)
-- [ ] Módulos opcionales post-MVP (Teams, Card, Board, Spectator, AI, Replay)
-
----
-
-## 📞 Contacto y Contribución
-
-### Para contribuir a la documentación:
-
-1. ✅ Sigue las plantillas en `docs/templates/`
-2. ✅ Usa español para toda la documentación
-3. ✅ Incluye ejemplos de código
-4. ✅ Actualiza `docs/README.md` (este archivo) si añades nuevo documento
-5. ✅ Actualiza `docs/GLOSSARY.md` si añades nuevos términos
-
-### Plantillas disponibles:
-
-- [`templates/TEMPLATE_MODULE.md`](templates/TEMPLATE_MODULE.md) - Para nuevos módulos
-- [`templates/TEMPLATE_GAME.md`](templates/TEMPLATE_GAME.md) - Para nuevos juegos
-- [`templates/TEMPLATE_ADR.md`](templates/TEMPLATE_ADR.md) - Para decisiones arquitectónicas
-
----
-
-## 🎯 Próximos Pasos
-
-**Inmediatos:**
-1. Finalizar documentación de módulos core existentes
-2. Crear documentación de módulos opcionales (plantillas)
-3. Documentar arquitectura detallada
-4. Implementar Pictionary MVP (Opción C iterativa)
-
-**Ver plan completo en:** [`../tasks/tasks-0001-prd-plataforma-juegos-sociales.md`](../tasks/tasks-0001-prd-plataforma-juegos-sociales.md)
-
----
-
-**Mantenido por:** Todo el equipo de desarrollo
-**Licencia:** Privado
+- [Convenciones y Modo de Trabajo](./CONVENTIONS.md)
+- [Módulos Disponibles](./MODULES.md)
