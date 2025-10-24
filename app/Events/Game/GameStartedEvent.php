@@ -57,6 +57,14 @@ class GameStartedEvent implements ShouldBroadcast
         })->toArray();
 
         $this->totalPlayers = count($this->players);
+
+        \Log::info('🎮 [GameStartedEvent] Event created', [
+            'room_code' => $this->roomCode,
+            'game_slug' => $this->gameSlug,
+            'total_players' => $this->totalPlayers,
+            'has_timing' => $timing !== null,
+            'timing' => $timing
+        ]);
     }
 
     public function broadcastOn(): Channel

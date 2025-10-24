@@ -119,16 +119,17 @@ class GameController extends Controller
             // 1. Validar que el juego está en fase correcta
             $currentPhase = $match->game_state['phase'] ?? null;
 
-            if ($currentPhase !== 'results') {
+            // Aceptar tanto "starting" (primer round) como "results" (siguientes rounds)
+            if ($currentPhase !== 'results' && $currentPhase !== 'starting') {
                 \Log::warning('⚠️  [API] Invalid phase for starting next round', [
                     'match_id' => $match->id,
-                    'expected_phase' => 'results',
+                    'expected_phases' => ['starting', 'results'],
                     'actual_phase' => $currentPhase,
                 ]);
 
                 return response()->json([
                     'success' => false,
-                    'error' => 'Game is not in results phase',
+                    'error' => 'Game is not in valid phase (expected: starting or results)',
                     'current_phase' => $currentPhase,
                 ], 400);
             }

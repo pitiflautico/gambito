@@ -94,6 +94,124 @@ abstract class BaseGameEngine implements GameEngineInterface
      */
     abstract protected function getAllPlayerResults(GameMatch $match): array;
 
+    /**
+     * Hook específico del juego para iniciar el juego.
+     *
+     * Los juegos implementan este método para setear su estado inicial específico
+     * (ej: cargar primera pregunta, asignar roles, etc.)
+     *
+     * @param GameMatch $match
+     * @return void
+     */
+    abstract protected function onGameStart(GameMatch $match): void;
+
+    // ========================================================================
+    // IMPLEMENTACIÓN BASE: startGame (común para todos los juegos)
+    // ========================================================================
+
+    /**
+     * Iniciar/Reiniciar el juego - IMPLEMENTACIÓN BASE.
+     *
+     * Este método ejecuta el flujo estándar que TODOS los juegos deben seguir:
+     * 1. Resetea módulos automáticamente
+     * 2. Setea phase = "starting" (espera a que todos los jugadores se conecten)
+     * 3. NO llama a onGameStart() todavía (se llama cuando todos estén conectados)
+     *
+     * FLUJO SECUENCIAL:
+     * - Master presiona "Iniciar" → startGame() → phase = "starting"
+     * - Lobby redirige a todos a /rooms/{code}
+     * - Cada jugador que entra incrementa contador en Redis
+     * - Cuando todos están conectados → RoomController llama transitionFromStarting()
+     *
+     * Los juegos NO deben sobrescribir este método, solo implementar onGameStart().
+     *
+     * @param GameMatch $match
+     * @return void
+     */
+    public function startGame(GameMatch $match): void
+    {
+        Log::info("[{$this->getGameSlug()}] Starting game", ['match_id' => $match->id]);
+
+        // 1. Resetear módulos automáticamente según config.json
+        $this->resetModules($match);
+
+        // 2. Setear fase inicial a "starting"
+        $gameState = $match->game_state ?? [];
+        $gameState['phase'] = 'starting';
+        $match->game_state = $gameState;
+        $match->save();
+
+        Log::info("[{$this->getGameSlug()}] Game in STARTING phase", [
+            'match_id' => $match->id,
+            'room_code' => $match->room->code
+        ]);
+
+        // 3. Los jugadores notificarán cuando carguen vía /api/rooms/{code}/player-connected
+        // 4. RoomController trackea conexiones y llama a transitionFromStarting() cuando todos listos
+    }
+
+    /**
+     * Transicionar de "starting" al primer round del juego.
+     *
+     * Este método se llama desde RoomController cuando todos los jugadores
+     * están conectados. Emite GameStartedEvent con countdown y luego inicia
+     * el primer round.
+     *
+     * @param GameMatch $match
+     * @return void
+     */
+    public function transitionFromStarting(GameMatch $match): void
+    {
+        $gameState = $match->game_state ?? [];
+        $currentPhase = $gameState['phase'] ?? null;
+
+        if ($currentPhase !== 'starting') {
+            Log::warning("[{$this->getGameSlug()}] Cannot transition - not in starting phase", [
+                'match_id' => $match->id,
+                'current_phase' => $currentPhase
+            ]);
+            return;
+        }
+
+        Log::info("[{$this->getGameSlug()}] All players connected - transitioning from starting", [
+            'match_id' => $match->id,
+            'room_code' => $match->room->code
+        ]);
+
+        // TODO: PASO A PASO - Comentado temporalmente para debug
+
+        // // 1. Emitir GameStartedEvent con timing metadata (countdown)
+        // $timing = $this->getGameStartTiming($match);
+
+        // event(new \App\Events\Game\GameStartedEvent(
+        //     match: $match,
+        //     gameState: $match->game_state,
+        //     timing: $timing
+        // ));
+
+        // Log::info("[{$this->getGameSlug()}] GameStartedEvent emitted with countdown", [
+        //     'match_id' => $match->id,
+        //     'timing' => $timing
+        // ]);
+
+        // // 2. Programar inicio del primer round después del countdown
+        // // El backend maneja el timing, el frontend solo muestra el countdown visualmente
+        // dispatch(function() use ($match) {
+        //     // Refrescar el match para obtener el estado más reciente
+        //     $match = $match->fresh();
+
+        //     // Verificar que seguimos en starting (por si acaso hubo algún cambio)
+        //     if (($match->game_state['phase'] ?? null) === 'starting') {
+        //         $this->onGameStart($match);
+        //     }
+        // })->delay(now()->addSeconds($timing['duration_seconds']));
+
+        // Log::info("[{$this->getGameSlug()}] Scheduled onGameStart() to run after countdown", [
+        //     'match_id' => $match->id,
+        //     'delay_seconds' => $timing['duration_seconds']
+        // ]);
+    }
+
     // ========================================================================
     // STRATEGY PATTERN: Extensibilidad para diferentes modos
     // ========================================================================
@@ -203,7 +321,21 @@ abstract class BaseGameEngine implements GameEngineInterface
      */
     public function advancePhase(GameMatch $match): void
     {
-        $this->startNewRound($match);
+        $currentPhase = $match->game_state['phase'] ?? null;
+
+        if ($currentPhase === 'starting') {
+            // Primer round: iniciar el juego
+            Log::info("[{$this->getGameSlug()}] Starting game from 'starting' phase", [
+                'match_id' => $match->id,
+            ]);
+            $this->onGameStart($match);
+        } else {
+            // Rondas subsecuentes: avanzar a la siguiente ronda
+            Log::info("[{$this->getGameSlug()}] Advancing to next round from '{$currentPhase}' phase", [
+                'match_id' => $match->id,
+            ]);
+            $this->startNewRound($match);
+        }
     }
 
     // ========================================================================

@@ -98,22 +98,35 @@ class TriviaGame extends BaseGameClient {
     }
 
     syncInitialState() {
+        console.log('🔄 [Trivia] Syncing initial state', this.gameState);
 
         if (!this.gameState) {
+            console.log('⏸️ [Trivia] No gameState, showing waiting screen');
             this.showQuestionWaiting();
             return;
         }
 
         const phase = this.gameState.phase;
+        console.log('📍 [Trivia] Current phase:', phase);
 
         // Manejar diferentes fases del juego
         switch (phase) {
             case 'question':
                 // Hay una pregunta activa
                 const currentQuestion = this.gameState.current_question;
-                const currentRound = this.gameState.current_question_index + 1;
-                const totalRounds = this.gameState.total_rounds || 10;
+                const currentRound = this.gameState.round_system?.current_round || 1;
+                const totalRounds = this.gameState.round_system?.total_rounds || 10;
 
+                // Si estamos en la ronda 1, NO renderizar aún
+                // Esperar a que llegue GameStartedEvent con el countdown
+                if (currentRound === 1) {
+                    console.log('⏳ [Trivia] Round 1 detected, waiting for GameStartedEvent with countdown');
+                    this.showQuestionWaiting();
+                    return;
+                }
+
+                // Si estamos en rondas posteriores, renderizar directamente
+                console.log('❓ [Trivia] Round', currentRound, '- rendering directly');
                 if (currentQuestion) {
                     this.handleRoundStartedTrivia({
                         game_state: this.gameState,
@@ -204,10 +217,22 @@ class TriviaGame extends BaseGameClient {
     onGameReady() {
         console.log('✅ [Trivia] Game is ready - Countdown finished');
 
-        // Cambiar mensaje a "Ha empezado la partida"
-        const waitingText = this.questionWaiting.querySelector('p');
-        if (waitingText) {
-            waitingText.innerHTML = '<strong style="font-size: 1.5em; display: block; margin-bottom: 0.5em;">🎉 ¡Ha empezado la partida!</strong>Esperando primera pregunta...';
+        // El game_state ya contiene la primera pregunta cargada
+        // Renderizarla inmediatamente
+        if (this.gameState && this.gameState.current_question) {
+            console.log('📝 [Trivia] Rendering first question from game_state');
+            this.showQuestion(
+                this.gameState.current_question,
+                this.gameState.round_system.current_round,
+                this.gameState.round_system.total_rounds
+            );
+        } else {
+            console.warn('⚠️ [Trivia] No current_question in game_state');
+            // Fallback: Mostrar mensaje de espera
+            const waitingText = this.questionWaiting.querySelector('p');
+            if (waitingText) {
+                waitingText.innerHTML = '<strong style="font-size: 1.5em; display: block; margin-bottom: 0.5em;">🎉 ¡Ha empezado la partida!</strong>Esperando primera pregunta...';
+            }
         }
     }
 

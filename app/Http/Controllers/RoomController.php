@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers;
 
-use App\Events\GameStartedEvent;
 use App\Events\PlayerJoinedEvent;
 use App\Events\PlayerLeftEvent;
 use App\Models\Game;
@@ -659,9 +658,9 @@ class RoomController extends Controller
             $room = $room->fresh();
             $room->load('match.players');
 
-            // Emitir evento de partida iniciada
-            $totalPlayers = $room->match->players()->count();
-            event(new GameStartedEvent($room, $totalPlayers));
+            // NOTA: El evento GameStartedEvent (genérico) se emite automáticamente
+            // desde GameMatch::start() con el timing metadata correcto.
+            // No necesitamos emitir nada aquí manualmente.
 
             return response()->json([
                 'success' => true,
@@ -758,6 +757,164 @@ class RoomController extends Controller
                 'success' => false,
                 'message' => $e->getMessage(),
             ], 400);
+        }
+    }
+
+    /**
+     * API: Notificar que el jugador está conectado (starting phase).
+     */
+    public function apiPlayerConnected(Request $request, string $code)
+    {
+        $code = strtoupper($code);
+        $room = $this->roomService->findRoomByCode($code);
+
+        if (!$room) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Sala no encontrada',
+            ], 404);
+        }
+
+        try {
+            // Obtener player_id del request
+            $playerId = $request->input('player_id');
+
+            if (!$playerId) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'player_id requerido',
+                ], 400);
+            }
+
+            // Verificar fase actual
+            $gameState = $room->match->game_state ?? [];
+            $currentPhase = $gameState['phase'] ?? null;
+
+            if ($currentPhase !== 'starting') {
+                // No estamos en starting phase, no hacer nada
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Not in starting phase, skipping',
+                    'data' => [
+                        'current_phase' => $currentPhase
+                    ]
+                ]);
+            }
+
+            \Log::info("📱 Player connected notification received", [
+                'room_code' => $code,
+                'player_id' => $playerId,
+                'phase' => $currentPhase
+            ]);
+
+            // Usar Cache para trackear jugadores conectados (funciona con file driver)
+            $cacheKey = "room:{$code}:starting:connected_players";
+
+            // Obtener lista actual de jugadores conectados
+            $connectedPlayers = \Illuminate\Support\Facades\Cache::get($cacheKey, []);
+
+            // Agregar jugador si no está ya (array evita duplicados)
+            if (!in_array($playerId, $connectedPlayers)) {
+                $connectedPlayers[] = $playerId;
+                \Illuminate\Support\Facades\Cache::put($cacheKey, $connectedPlayers, now()->addMinutes(5));
+            }
+
+            // Contar cuántos jugadores han notificado
+            $connectedCount = count($connectedPlayers);
+            $totalPlayers = $room->match->players()->where('is_connected', true)->count();
+
+            \Log::info("📊 Starting phase connection tracking", [
+                'room_code' => $code,
+                'connected_count' => $connectedCount,
+                'total_players' => $totalPlayers,
+                'connected_player_ids' => $connectedPlayers
+            ]);
+
+            // Si todos los jugadores están conectados, transicionar
+            if ($connectedCount >= $totalPlayers) {
+                \Log::info("✅✅✅ AHORA VAMOS A AVANZAR - All players connected ✅✅✅", [
+                    'room_code' => $code,
+                    'total_players' => $totalPlayers,
+                    'connected_count' => $connectedCount
+                ]);
+
+                // TODO: PASO A PASO - Comentado temporalmente para debug
+                // NO hacemos nada más por ahora, solo el log
+
+                // // Usar lock de Cache para evitar race conditions
+                // $lockKey = "room:{$code}:starting:transition_lock";
+                // $lockAcquired = \Illuminate\Support\Facades\Cache::add($lockKey, '1', now()->addSeconds(10));
+
+                // if ($lockAcquired) {
+                //     // Limpiar el contador de Cache ANTES de transicionar
+                //     \Illuminate\Support\Facades\Cache::forget($cacheKey);
+
+                //     // Responder inmediatamente al cliente
+                //     // La transición se hace en background
+                //     $match = $room->match;
+                //     $engine = app($room->match->room->game->getEngineClass());
+
+                //     // Ejecutar en background (fire-and-forget)
+                //     dispatch(function() use ($engine, $match, $code) {
+                //         try {
+                //             $engine->transitionFromStarting($match);
+
+                //             \Log::info("🎮 Transition complete", [
+                //                 'room_code' => $code,
+                //                 'new_phase' => $match->fresh()->game_state['phase'] ?? 'unknown'
+                //             ]);
+                //         } catch (\Exception $e) {
+                //             \Log::error("Error in transition", [
+                //                 'room_code' => $code,
+                //                 'error' => $e->getMessage()
+                            ]);
+                        } finally {
+                            \Illuminate\Support\Facades\Cache::forget("room:{$code}:starting:transition_lock");
+                        }
+                    })->afterResponse();
+
+                    return response()->json([
+                        'success' => true,
+                        'message' => 'All players connected, game starting',
+                        'data' => [
+                            'transitioned' => true,
+                            'connected_count' => $connectedCount,
+                            'total_players' => $totalPlayers
+                        ]
+                    ]);
+                } else {
+                    // Otro request ya está procesando la transición
+                    return response()->json([
+                        'success' => true,
+                        'message' => 'Another client is transitioning',
+                        'data' => [
+                            'waiting' => true
+                        ]
+                    ]);
+                }
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Player connected notification received',
+                'data' => [
+                    'connected_count' => $connectedCount,
+                    'total_players' => $totalPlayers,
+                    'waiting_for' => $totalPlayers - $connectedCount,
+                    'all_connected' => $connectedCount >= $totalPlayers
+                ]
+            ]);
+        } catch (\Exception $e) {
+            \Log::error("Error processing player connected notification", [
+                'room_code' => $code,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 500);
         }
     }
 

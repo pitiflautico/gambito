@@ -440,25 +440,20 @@
         function startGame() {
             if (!confirm('¿Iniciar la partida?')) return;
 
+            // Hacer el fetch para iniciar el juego
             fetch('/rooms/{{ $room->code }}/start', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'X-CSRF-TOKEN': '{{ csrf_token() }}'
                 }
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    window.location.href = '/rooms/{{ $room->code }}';
-                } else {
-                    alert(data.message);
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('Error al iniciar la partida');
+            }).catch(error => {
+                console.error('Error starting game:', error);
             });
+
+            // NO redirigir aquí
+            // El master también esperará el WebSocket .game.started como todos los demás
+            console.log('Game start requested, waiting for WebSocket event...');
         }
 
         function closeRoom() {
@@ -513,9 +508,9 @@
 
             // Evento: Partida iniciada
             channel.listen('.game.started', (data) => {
-                console.log('Game started:', data);
-                // Redirigir a la sala de juego
-                window.location.href = '/rooms/{{ $room->code }}';
+                console.log('Game started via WebSocket, redirecting immediately...');
+                // Redirigir INMEDIATAMENTE sin procesamiento adicional
+                window.location.replace('/rooms/{{ $room->code }}');
             });
 
             console.log('WebSocket listeners registered for lobby');

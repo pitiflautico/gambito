@@ -27,6 +27,10 @@
   "event_config": {
     "channel": "room.{roomCode}",
     "events": {
+      "GameStartedEvent": {
+        "name": "game.started",
+        "handler": "handleGameStarted"
+      },
       "RoundStartedEvent": {
         "name": "game.round.started",
         "handler": "handleRoundStarted"

@@ -300,7 +300,7 @@ class RoomService
         // Cambiar estado de la sala
         $room->update(['status' => Room::STATUS_PLAYING]);
 
-        // Iniciar la partida
+        // Iniciar la partida (esto emitirá GameStartedEvent)
         $room->match->start();
 
         Log::info("Game started", [

@@ -30,6 +30,7 @@ Route::post('/games/{match}/start-next-round', [GameController::class, 'startNex
 Route::prefix('rooms')->name('api.rooms.')->group(function () {
     Route::get('/{code}/stats', [RoomController::class, 'apiStats'])->name('stats');
     Route::post('/{code}/leave', [RoomController::class, 'apiLeave'])->name('leave');
+    Route::post('/{code}/player-connected', [RoomController::class, 'apiPlayerConnected'])->name('player-connected');
 });
 
 // API de Jugadores

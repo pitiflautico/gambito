@@ -9,19 +9,22 @@ use App\Services\Modules\ScoringSystem\ScoreCalculatorInterface;
  *
  * Calcula puntos para respuestas correctas con bonus por velocidad.
  *
- * Sistema de puntos:
- * - Puntos base: 100 puntos por respuesta correcta
+ * Sistema de puntos (lee desde config.json):
+ * - Puntos base según dificultad:
+ *   - Easy: 80 puntos
+ *   - Medium: 90 puntos
+ *   - Hard: 100 puntos
  * - Bonus por velocidad: Hasta 50 puntos adicionales
  *   - Responder en primeros 25% del tiempo: +50 puntos
  *   - Responder en primeros 50% del tiempo: +30 puntos
  *   - Responder en primeros 75% del tiempo: +10 puntos
  *   - Responder después del 75%: +0 puntos
  *
- * Ejemplo con tiempo límite de 15 segundos:
- * - 0-3.75s: 100 + 50 = 150 puntos
- * - 3.75-7.5s: 100 + 30 = 130 puntos
- * - 7.5-11.25s: 100 + 10 = 110 puntos
- * - 11.25-15s: 100 + 0 = 100 puntos
+ * Ejemplo con pregunta HARD y tiempo límite de 10 segundos:
+ * - 0-2.5s: 100 + 50 = 150 puntos
+ * - 2.5-5s: 100 + 30 = 130 puntos
+ * - 5-7.5s: 100 + 10 = 110 puntos
+ * - 7.5-10s: 100 + 0 = 100 puntos
  */
 class TriviaScoreCalculator implements ScoreCalculatorInterface
 {
@@ -33,9 +36,13 @@ class TriviaScoreCalculator implements ScoreCalculatorInterface
     ];
 
     /**
-     * Puntos base por respuesta correcta.
+     * Puntos base por dificultad (se lee desde config.json, estos son defaults).
      */
-    private const BASE_POINTS = 100;
+    private const BASE_POINTS = [
+        'easy' => 80,
+        'medium' => 90,
+        'hard' => 100,
+    ];
 
     /**
      * Bonus máximo por velocidad.
@@ -96,14 +103,16 @@ class TriviaScoreCalculator implements ScoreCalculatorInterface
      */
     private function calculateCorrectAnswerPoints(array $context): int
     {
-        $secondsElapsed = $context['seconds_elapsed'] ?? null;
+        $secondsElapsed = $context['seconds_elapsed'] ?? $context['time_elapsed'] ?? null;
         $timeLimit = $context['time_limit'] ?? null;
+        $difficulty = $context['difficulty'] ?? 'medium';
 
         if ($secondsElapsed === null || $timeLimit === null) {
-            throw new \InvalidArgumentException('Se requieren seconds_elapsed y time_limit');
+            throw new \InvalidArgumentException('Se requieren seconds_elapsed/time_elapsed y time_limit');
         }
 
-        $basePoints = self::BASE_POINTS;
+        // Obtener puntos base según dificultad
+        $basePoints = self::BASE_POINTS[$difficulty] ?? self::BASE_POINTS['medium'];
 
         // Calcular bonus por velocidad
         $speedBonus = $this->calculateSpeedBonus($secondsElapsed, $timeLimit);

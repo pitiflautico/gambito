@@ -73,16 +73,26 @@
     },
     "round_ended": {
       "auto_next": true,
-      "delay": 5,
+      "delay": 3,
       "message": "Siguiente pregunta"
     },
     "countdown_warning_threshold": 3
   },
 
+  "scoring": {
+    "base_points": {
+      "easy": 80,
+      "medium": 90,
+      "hard": 100
+    },
+    "speed_bonus_max": 50
+  },
+
   "modules": {
     "turn_system": {
       "enabled": true,
-      "mode": "simultaneous"
+      "mode": "simultaneous",
+      "round_per_turn": true
     },
     "scoring_system": {
       "enabled": true,

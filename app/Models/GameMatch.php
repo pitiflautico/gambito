@@ -131,7 +131,10 @@ class GameMatch extends Model
             'started_at' => now(),
         ]);
 
-        // 4. Refrescar para obtener el estado actualizado
+        // 4. Actualizar estado de la sala a 'playing'
+        $this->room->startMatch();
+
+        // 5. Refrescar para obtener el estado actualizado
         $this->refresh();
 
         \Log::info("Match started with game engine", [
@@ -141,15 +144,9 @@ class GameMatch extends Model
             'state' => $this->game_state,
         ]);
 
-        // 5. Obtener timing metadata desde config.json del juego
-        $timing = $engine->getGameStartTiming($this);
-
-        // 6. Emitir evento GameStartedEvent con timing metadata
-        event(new \App\Events\Game\GameStartedEvent(
-            match: $this,
-            gameState: $this->game_state,
-            timing: $timing
-        ));
+        // NOTA: El evento GameStartedEvent se emite automáticamente desde
+        // BaseGameEngine::startGame() con el timing metadata correcto.
+        // No es necesario emitirlo aquí.
     }
 
     /**

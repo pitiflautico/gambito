@@ -33,6 +33,19 @@ export class BaseGameClient {
         // Inicializar TimingModule
         this.timing = new TimingModule();
         this.timing.configure(config.timing || {});
+
+        // 🔍 DEBUG: Mostrar estado inicial
+        console.log('🎮 [DEBUG] Game loaded - Current state:', {
+            phase: this.gameState?.phase || 'unknown',
+            roomCode: this.roomCode,
+            playerId: this.playerId,
+            totalPlayers: this.players.length
+        });
+
+        // Notificar al backend que el jugador está conectado (fire-and-forget, no bloqueante)
+        this.notifyPlayerConnected().catch(err => {
+            console.warn('⚠️ [BaseGameClient] Failed to notify player connected:', err);
+        });
     }
 
     /**
@@ -67,10 +80,9 @@ export class BaseGameClient {
     /**
      * Handler genérico: Juego iniciado
      *
-     * Este método se ejecuta cuando el juego comienza (después de que el
-     * master presiona "Iniciar Juego" en el lobby).
-     *
-     * Se recibe el estado inicial completo del juego.
+     * Este método se ejecuta cuando el juego comienza.
+     * Simplemente actualiza el estado y muestra el countdown si existe.
+     * El backend se encargará de iniciar el primer round automáticamente.
      */
     async handleGameStarted(event) {
         console.log('🎮 [BaseGameClient] GameStartedEvent received:', event);
@@ -78,13 +90,13 @@ export class BaseGameClient {
         // Actualizar game state con el estado inicial
         this.gameState = event.game_state;
 
-        // Procesar timing metadata si existe
+        // Mostrar countdown si existe (solo visual, el backend inicia el round)
         if (event.timing) {
-            console.log('⏰ [BaseGameClient] Processing game start timing:', event.timing);
+            console.log('⏰ [BaseGameClient] Showing countdown:', event.timing);
 
             await this.timing.processTimingPoint(
                 event.timing,
-                () => this.onGameReady(),
+                () => console.log('⏰ Countdown finished, waiting for RoundStartedEvent...'),
                 this.getCountdownElement()
             );
         }
@@ -202,6 +214,47 @@ export class BaseGameClient {
         } catch (error) {
             console.error(`❌ [BaseGameClient] Error sending action to ${endpoint}:`, error);
             throw error;
+        }
+    }
+
+    /**
+     * Notificar al backend que el jugador está conectado.
+     *
+     * Se llama automáticamente cuando el jugador carga la página del juego.
+     * El backend usa esto para detectar cuándo todos están conectados y
+     * transicionar de la fase "starting" al primer round.
+     */
+    async notifyPlayerConnected() {
+        console.log('🔌 [BaseGameClient] Notifying backend: player connected', {
+            roomCode: this.roomCode,
+            playerId: this.playerId
+        });
+
+        try {
+            const response = await fetch(`/api/rooms/${this.roomCode}/player-connected`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                },
+                body: JSON.stringify({
+                    player_id: this.playerId
+                })
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.success) {
+                console.log('✅ [DEBUG] Player connected notification sent:', {
+                    connected_count: data.data?.connected_count || '?',
+                    total_players: data.data?.total_players || '?',
+                    waiting_for: data.data?.waiting_for || 0
+                });
+            } else {
+                console.error('❌ [BaseGameClient] Error notifying player connected:', data.message);
+            }
+        } catch (error) {
+            console.error('❌ [BaseGameClient] Error sending player connected notification:', error);
         }
     }
 

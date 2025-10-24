@@ -142,21 +142,16 @@ class TriviaEngine extends BaseGameEngine
     }
 
     /**
-     * Iniciar/Reiniciar el juego - Resetea todo y comienza desde la pregunta 1.
+     * Hook específico de Trivia para iniciar el juego.
      *
-     * Este método se llama cada vez que se quiere empezar/reiniciar el juego.
-     * Lee la configuración guardada en initialize() y resetea TODO a 0.
+     * IMPORTANTE: BaseGameEngine::startGame() ya reseteó los módulos automáticamente.
+     * Este método solo debe setear el estado inicial específico de Trivia.
      */
-    public function startGame(GameMatch $match): void
+    protected function onGameStart(GameMatch $match): void
     {
-        Log::info("Starting/Restarting Trivia game", ['match_id' => $match->id]);
+        Log::info("Trivia - onGameStart hook", ['match_id' => $match->id]);
 
-        // 1. ⭐ Resetear módulos automáticamente según config.json
-        $this->resetModules($match);
-        // Alternativamente, si quisieras empezar desde la ronda 5:
-        // $this->resetModules($match, ['round_system' => ['current_round' => 5]]);
-
-        // 2. Leer configuración guardada
+        // 1. Leer configuración guardada
         $config = $match->game_state['_config'] ?? [];
         $questions = $config['questions'] ?? [];
         $timePerQuestion = $config['time_per_question'] ?? 15;
@@ -186,19 +181,15 @@ class TriviaEngine extends BaseGameEngine
         $match->game_state = array_merge($match->game_state, $timerService->toArray());
         $match->save();
 
-        Log::info("Trivia game started", [
+        Log::info("Trivia - State set for first question", [
             'match_id' => $match->id,
             'question_index' => 0,
-            'phase' => 'question'
+            'phase' => 'question',
+            'question' => $firstQuestion['question']
         ]);
 
-        // 5. Broadcast inicio de ronda (primera pregunta)
-        event(new RoundStartedEvent(
-            match: $match,
-            currentRound: 1,
-            totalRounds: count($questions),
-            phase: 'question'
-        ));
+        // BaseGameEngine::startGame() se encargará de emitir GameStartedEvent
+        // con el timing metadata automáticamente.
     }
 
     // ========================================================================
@@ -567,9 +558,18 @@ class TriviaEngine extends BaseGameEngine
     {
         $gameState = $match->game_state;
 
-        // Avanzar ronda
+        // Avanzar ronda/turno según configuración
         $roundManager = RoundManager::fromArray($gameState);
-        $roundManager->nextTurn();
+
+        // En Trivia, cada pregunta es una ronda (round_per_turn: true)
+        $config = $this->getGameConfig();
+        $roundPerTurn = $config['modules']['turn_system']['round_per_turn'] ?? false;
+
+        if ($roundPerTurn) {
+            $roundManager->nextTurnWithRoundAdvance();
+        } else {
+            $roundManager->nextTurn();
+        }
 
         // Verificar si el juego terminó
         if ($roundManager->isGameComplete()) {
@@ -773,5 +773,21 @@ class TriviaEngine extends BaseGameEngine
     public function checkIfGameComplete(GameMatch $match): bool
     {
         return $this->isGameComplete($match);
+    }
+
+    /**
+     * Obtener configuración del juego desde config.json.
+     *
+     * @return array
+     */
+    protected function getGameConfig(): array
+    {
+        $configPath = base_path('games/trivia/config.json');
+
+        if (!file_exists($configPath)) {
+            return [];
+        }
+
+        return json_decode(file_get_contents($configPath), true) ?? [];
     }
 }
