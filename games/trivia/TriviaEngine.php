@@ -12,9 +12,11 @@ use App\Services\Modules\TurnSystem\TurnManager;
 use App\Events\Game\RoundStartedEvent;
 use App\Events\Game\RoundEndedEvent;
 use App\Events\Game\PlayerActionEvent;
+use App\Events\Game\TurnTimeoutEvent;
 use Games\Trivia\Events\GameFinishedEvent;
 use Games\Trivia\TriviaScoreCalculator;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Event;
 
 /**
  * Trivia Game Engine
@@ -44,6 +46,22 @@ use Illuminate\Support\Facades\Log;
  */
 class TriviaEngine extends BaseGameEngine
 {
+    /**
+     * Constructor: Registrar listener para timeout.
+     */
+    public function __construct()
+    {
+        parent::__construct();
+
+        // Listener: Cuando el turno expira (timeout)
+        Event::listen(TurnTimeoutEvent::class, function ($event) {
+            if ($event->match->room->game->slug === 'trivia') {
+                $this->endCurrentRound($event->match);
+            }
+        });
+    }
+
+
     /**
      * Inicializar el juego - SOLO guarda configuración.
      *
@@ -160,11 +178,16 @@ class TriviaEngine extends BaseGameEngine
             throw new \RuntimeException("No questions found in configuration");
         }
 
-        // 2. Iniciar timer de la primera pregunta
-        $timerService = TimerService::fromArray($match->game_state);
-        $timerService->startTimer('question_timer', $timePerQuestion);
+        // 2. Obtener RoundManager (ya tiene TimerService conectado y timer iniciado)
+        $roundManager = RoundManager::fromArray($match->game_state);
 
-        // 3. Setear estado inicial específico de Trivia (todo junto en un solo save)
+        // 3. Guardar el TimerService actualizado (con el timer iniciado)
+        $timerService = $roundManager->getTurnManager()->getTimerService();
+        if ($timerService) {
+            $match->game_state = array_merge($match->game_state, $timerService->toArray());
+        }
+
+        // 4. Setear estado inicial específico de Trivia
         $firstQuestion = $questions[0];
 
         $match->game_state = array_merge($match->game_state, [
@@ -174,7 +197,7 @@ class TriviaEngine extends BaseGameEngine
             'player_answers' => [],
             'question_start_time' => now()->timestamp,
             'question_results' => null,
-        ], $timerService->toArray());
+        ]);
 
         $match->save();
 
@@ -185,15 +208,15 @@ class TriviaEngine extends BaseGameEngine
             'question' => $firstQuestion['question']
         ]);
 
-        // 5. Emitir evento genérico RoundStartedEvent
-        // En Trivia, cada pregunta ES una ronda
-        $roundManager = RoundManager::fromArray($match->game_state);
+        // 5. Emitir evento genérico RoundStartedEvent con timing del turno
+        $timingInfo = $roundManager->getTurnManager()->getTimingInfo();
 
         event(new RoundStartedEvent(
             match: $match,
             currentRound: $roundManager->getCurrentRound(),
             totalRounds: $roundManager->getTotalRounds(),
-            phase: 'question'
+            phase: 'question',
+            timing: $timingInfo
         ));
 
         Log::info("Trivia - RoundStartedEvent emitted for first question", [
@@ -305,14 +328,40 @@ class TriviaEngine extends BaseGameEngine
     }
 
     /**
-     * Iniciar una nueva ronda (nueva pregunta).
+     * Iniciar una nueva ronda (cargar siguiente pregunta).
+     *
+     * SOLO carga la siguiente pregunta. BaseGameEngine ya:
+     * - Avanzó el RoundManager
+     * - Verificó si el juego terminó
+     * - Emitirá RoundStartedEvent después de esto
      *
      * @param GameMatch $match
      * @return void
      */
     protected function startNewRound(GameMatch $match): void
     {
-        $this->nextQuestion($match);
+        $gameState = $match->game_state;
+
+        // Obtener índice de siguiente pregunta
+        $nextIndex = ($gameState['current_question_index'] ?? -1) + 1;
+
+        // Cargar nueva pregunta
+        $nextQuestion = $gameState['questions'][$nextIndex];
+        $gameState['current_question_index'] = $nextIndex;
+        $gameState['current_question'] = $nextQuestion;
+        $gameState['player_answers'] = [];
+        $gameState['question_start_time'] = now()->timestamp;
+        $gameState['phase'] = 'question';
+        $gameState['question_results'] = [];
+
+        $match->game_state = $gameState;
+        $match->save();
+
+        Log::info("Question loaded", [
+            'match_id' => $match->id,
+            'question_index' => $nextIndex,
+            'question' => $nextQuestion['question']
+        ]);
     }
 
     /**
@@ -548,92 +597,11 @@ class TriviaEngine extends BaseGameEngine
         $match->game_state = $gameState;
         $match->save();
 
-        // Broadcast fin de ronda (pregunta)
-        $scores = $this->getScores($gameState);
-        $roundManager = $this->getRoundManager($match);
-
-        event(new RoundEndedEvent(
-            match: $match,
-            roundNumber: $roundManager->getCurrentRound(),
-            results: $questionResults,
-            scores: $scores
-        ));
-
-        // BaseGameEngine se encarga de programar la siguiente ronda vía RoundManager
+        // Delegar a BaseGameEngine para coordinar
+        // (emitirá RoundEndedEvent, avanzará ronda, llamará startNewRound, emitirá RoundStartedEvent)
+        $this->completeRound($match, $questionResults);
     }
 
-    /**
-     * Ir a siguiente pregunta o finalizar juego.
-     */
-    private function nextQuestion(GameMatch $match): void
-    {
-        $gameState = $match->game_state;
-
-        // Avanzar ronda/turno según configuración
-        $roundManager = RoundManager::fromArray($gameState);
-
-        // En Trivia, cada pregunta es una ronda (round_per_turn: true)
-        $config = $this->getGameConfig();
-        $roundPerTurn = $config['modules']['turn_system']['round_per_turn'] ?? false;
-
-        if ($roundPerTurn) {
-            $roundManager->nextTurnWithRoundAdvance();
-        } else {
-            $roundManager->nextTurn();
-        }
-
-        // Verificar si el juego terminó
-        if ($roundManager->isGameComplete()) {
-            $this->finalize($match);
-            return;
-        }
-
-        // Obtener siguiente pregunta
-        $nextIndex = $gameState['current_question_index'] + 1;
-
-        if ($nextIndex >= count($gameState['questions'])) {
-            // No hay más preguntas, finalizar
-            $this->finalize($match);
-            return;
-        }
-
-        $nextQuestion = $gameState['questions'][$nextIndex];
-
-        // Reiniciar estado para nueva pregunta
-        $gameState['current_question_index'] = $nextIndex;
-        $gameState['current_question'] = $nextQuestion;
-        $gameState['player_answers'] = [];
-        $gameState['question_start_time'] = now()->timestamp;
-        $gameState['phase'] = 'question';
-        $gameState['question_results'] = [];
-
-        // Actualizar Round Manager
-        $gameState = array_merge($gameState, $roundManager->toArray());
-
-        // Iniciar nuevo timer
-        $timerService = TimerService::fromArray($gameState);
-        $timerService->cancelTimer('question_timer');
-        $timerService->startTimer('question_timer', $gameState['time_per_question']);
-
-        $gameState = array_merge($gameState, $timerService->toArray());
-
-        $match->game_state = $gameState;
-        $match->save();
-
-        Log::info("Started next question", [
-            'match_id' => $match->id,
-            'question_index' => $nextIndex,
-            'round' => $roundManager->getCurrentRound()
-        ]);
-
-        // Broadcast nueva ronda (pregunta)
-        event(new RoundStartedEvent(
-            match: $match,
-            currentRound: $roundManager->getCurrentRound(),
-            totalRounds: $roundManager->getTotalRounds(),
-            phase: 'question'
-        ));
-    }
 
     /**
      * Seleccionar preguntas según configuración.

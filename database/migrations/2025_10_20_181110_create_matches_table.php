@@ -17,7 +17,7 @@ return new class extends Migration
             $table->timestamp('started_at')->nullable(); // Cuándo empezó la partida
             $table->timestamp('finished_at')->nullable(); // Cuándo terminó la partida
             $table->unsignedBigInteger('winner_id')->nullable(); // Ganador (sin FK por dependencia circular con players)
-            $table->json('game_state'); // Estado completo del juego (turnos, fase, datos específicos del juego)
+            $table->json('game_state')->nullable(); // Estado completo del juego (turnos, fase, datos específicos del juego)
             $table->timestamps();
 
             // Índices

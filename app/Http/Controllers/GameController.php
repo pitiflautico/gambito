@@ -300,4 +300,127 @@ class GameController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * API: Notificar que el tiempo del turno expiró (con protección contra race conditions).
+     *
+     * Este endpoint es llamado por el frontend cuando el countdown del timer llega a 0.
+     * Usa un lock mechanism para prevenir que múltiples clientes procesen el timeout simultáneamente.
+     *
+     * Flujo:
+     * 1. Frontend detecta que el timer llegó a 0
+     * 2. Frontend llama a este endpoint
+     * 3. Backend verifica que el tiempo realmente expiró (consultando TurnManager)
+     * 4. Backend emite TurnTimeoutEvent (evento interno, no broadcast)
+     * 5. Los engines específicos escuchan TurnTimeoutEvent y ejecutan su lógica
+     *
+     * Ejemplo en Trivia:
+     * - TriviaEngine escucha TurnTimeoutEvent
+     * - Ejecuta endCurrentRound() (asigna 0 puntos a quien no respondió)
+     * - Emite RoundEndedEvent (este sí se broadcast al frontend)
+     *
+     * Race Condition Protection:
+     * - Solo el primer cliente en adquirir el lock procesará el timeout
+     * - Otros clientes recibirán 409 Conflict
+     * - Todos los clientes se sincronizarán con los eventos resultantes (ej: RoundEndedEvent)
+     *
+     * @param \Illuminate\Http\Request $request
+     * @param \App\Models\GameMatch $match
+     */
+    public function turnTimeout(Request $request, \App\Models\GameMatch $match)
+    {
+        try {
+            \Log::info('📥 [API] turnTimeout request received', [
+                'match_id' => $match->id,
+                'room_code' => $match->room->code,
+                'current_phase' => $match->game_state['phase'] ?? 'unknown',
+            ]);
+
+            // 1. Obtener el TurnManager del game_state
+            $gameState = $match->game_state;
+
+            if (!isset($gameState['turn_system'])) {
+                \Log::warning('⚠️  [API] Turn system not enabled for this match', [
+                    'match_id' => $match->id,
+                ]);
+
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Turn system not enabled',
+                ], 400);
+            }
+
+            $turnManager = \App\Services\Modules\TurnSystem\TurnManager::fromArray($gameState['turn_system']);
+            $turnManager->setTimerService(\App\Services\Modules\TimerSystem\TimerService::fromArray($gameState));
+
+            // 2. Verificar si el tiempo realmente expiró
+            if (!$turnManager->isTimeExpired()) {
+                \Log::info('⏸️  [API] Turn time has not expired yet', [
+                    'match_id' => $match->id,
+                    'remaining_time' => $turnManager->getRemainingTime(),
+                ]);
+
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Turn time has not expired yet',
+                    'remaining_time' => $turnManager->getRemainingTime(),
+                ], 400);
+            }
+
+            // 3. Intentar adquirir lock (solo el primer cliente lo consigue)
+            if (!$match->acquireRoundLock()) {
+                \Log::info('⏸️  [API] Lock already held, another client is processing timeout', [
+                    'match_id' => $match->id,
+                ]);
+
+                return response()->json([
+                    'success' => true,
+                    'already_processing' => true,
+                    'message' => 'Another client is processing the timeout, you will receive events shortly',
+                ], 200);
+            }
+
+            // 4. Lock adquirido - llamar al engine directamente
+            try {
+                \Log::info('🔒 [API] Lock acquired, calling engine->onTurnTimeout()', [
+                    'match_id' => $match->id,
+                    'turn_index' => $turnManager->getCurrentTurnIndex(),
+                ]);
+
+                // Obtener engine del juego
+                $game = $match->room->game;
+                $engineClass = $game->getEngineClass();
+                $engine = app($engineClass);
+
+                // Llamar al engine directamente (sin eventos)
+                $engine->onTurnTimeout($match);
+
+                \Log::info('✅ [API] Engine->onTurnTimeout() executed successfully', [
+                    'match_id' => $match->id,
+                ]);
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Timeout processed',
+                ]);
+
+            } finally {
+                // 5. SIEMPRE liberar el lock (incluso si hubo excepción)
+                $match->releaseRoundLock();
+            }
+
+        } catch (\Exception $e) {
+            \Log::error('❌ [API] Error processing turn timeout', [
+                'match_id' => $match->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Internal server error',
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
 }

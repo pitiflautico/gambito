@@ -90,9 +90,11 @@ class TriviaCompleteGameRegressionTest extends TestCase
             $this->players[$name] = $player;
         }
 
-        // Inicializar engine
+        // Inicializar engine y empezar el juego directamente (sin flujo de Room)
         $this->engine = new TriviaEngine();
         $this->engine->initialize($this->match);
+        $this->engine->startGame($this->match); // Resetea módulos
+        $this->engine->triggerGameStart($this->match); // Ejecuta onGameStart() -> inicia primera pregunta
         $this->match->refresh();
     }
 

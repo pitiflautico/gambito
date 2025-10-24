@@ -146,8 +146,20 @@ abstract class BaseGameEngine implements GameEngineInterface
             'room_code' => $match->room->code
         ]);
 
-        // 3. Los jugadores notificarán cuando carguen vía /api/rooms/{code}/player-connected
-        // 4. RoomController trackea conexiones y llama a transitionFromStarting() cuando todos listos
+        // 3. Emitir evento para redirigir a todos del lobby al room
+        event(new \App\Events\Game\GameStartedEvent(
+            match: $match,
+            gameState: $gameState,
+            timing: null  // Sin countdown aún, solo redirección
+        ));
+
+        Log::info("[{$this->getGameSlug()}] GameStartedEvent emitted to redirect from lobby to room", [
+            'match_id' => $match->id,
+            'room_code' => $match->room->code
+        ]);
+
+        // 4. Los jugadores notificarán cuando carguen vía /api/rooms/{code}/player-connected
+        // 5. RoomController trackea conexiones y llama a transitionFromStarting() cuando todos listos
     }
 
     /**
@@ -343,6 +355,100 @@ abstract class BaseGameEngine implements GameEngineInterface
         }
     }
 
+    /**
+     * Completar la ronda actual y avanzar a la siguiente.
+     *
+     * ESTE ES EL MÉTODO QUE DEBES LLAMAR desde endCurrentRound().
+     * Coordina todo el flujo de finalización y avance de rondas:
+     *
+     * 1. Emite RoundEndedEvent (con resultados del juego específico)
+     * 2. Avanza RoundManager
+     * 3. Verifica si el juego terminó
+     * 4. Si no terminó:
+     *    - Llama a startNewRound() (implementado por el juego)
+     *    - Emite RoundStartedEvent
+     *
+     * IMPORTANTE: Los juegos NO deben:
+     * - Avanzar RoundManager manualmente
+     * - Emitir RoundEndedEvent o RoundStartedEvent manualmente
+     * - Llamar a nextRound() o nextTurn() directamente
+     *
+     * @param GameMatch $match
+     * @param array $results Resultados de la ronda (calculados por el juego específico)
+     * @return void
+     */
+    protected function completeRound(GameMatch $match, array $results = []): void
+    {
+        Log::info("[{$this->getGameSlug()}] Completing round", [
+            'match_id' => $match->id,
+        ]);
+
+        // 1. Obtener datos actuales
+        $roundManager = $this->getRoundManager($match);
+        $scores = $this->getScores($match->game_state);
+
+        // 2. Emitir RoundEndedEvent
+        event(new \App\Events\Game\RoundEndedEvent(
+            match: $match,
+            roundNumber: $roundManager->getCurrentRound(),
+            results: $results,
+            scores: $scores
+        ));
+
+        // 3. Avanzar RoundManager
+        $config = $this->getGameConfig();
+        $roundPerTurn = $config['modules']['turn_system']['round_per_turn'] ?? false;
+
+        if ($roundPerTurn) {
+            $roundManager->nextTurnWithRoundAdvance();
+        } else {
+            $roundManager->nextTurn();
+        }
+
+        // 4. Guardar estado actualizado del RoundManager
+        $gameState = $match->game_state;
+        $gameState = array_merge($gameState, $roundManager->toArray());
+
+        // Guardar TimerService actualizado (si se reinició el timer)
+        $timerService = $roundManager->getTurnManager()->getTimerService();
+        if ($timerService) {
+            $gameState = array_merge($gameState, $timerService->toArray());
+        }
+
+        $match->game_state = $gameState;
+        $match->save();
+
+        // 5. Verificar si el juego terminó
+        if ($roundManager->isGameComplete()) {
+            Log::info("[{$this->getGameSlug()}] Game complete, finalizing", [
+                'match_id' => $match->id,
+            ]);
+            $this->finalize($match);
+            return;
+        }
+
+        // 6. Cargar siguiente ronda (delegar al juego específico)
+        $this->startNewRound($match);
+
+        // 7. Emitir RoundStartedEvent
+        $match->refresh();
+        $roundManager = $this->getRoundManager($match);
+        $timingInfo = $roundManager->getTurnManager()->getTimingInfo();
+
+        event(new \App\Events\Game\RoundStartedEvent(
+            match: $match,
+            currentRound: $roundManager->getCurrentRound(),
+            totalRounds: $roundManager->getTotalRounds(),
+            phase: $match->game_state['phase'] ?? 'playing',
+            timing: $timingInfo
+        ));
+
+        Log::info("[{$this->getGameSlug()}] Round started", [
+            'match_id' => $match->id,
+            'round' => $roundManager->getCurrentRound(),
+        ]);
+    }
+
     // ========================================================================
     // INICIALIZACIÓN Y RESET DE MÓDULOS
     // ========================================================================
@@ -382,18 +488,33 @@ abstract class BaseGameEngine implements GameEngineInterface
         $gameState = [];
 
         // ========================================================================
+        // MÓDULO: Timer System (crear PRIMERO para que otros módulos lo usen)
+        // ========================================================================
+        if ($modules['timer_system']['enabled'] ?? false) {
+            $timerService = new TimerService();
+            Log::debug("Timer system initialized");
+        }
+
+        // ========================================================================
         // MÓDULO: Turn System
         // ========================================================================
         if ($modules['turn_system']['enabled'] ?? false) {
             $turnConfig = $modules['turn_system'];
             $mode = $moduleOverrides['turn_system']['mode'] ?? $turnConfig['mode'] ?? 'sequential';
+            $timeLimit = $moduleOverrides['turn_system']['time_limit'] ?? $turnConfig['time_limit'] ?? null;
 
             $turnManager = new \App\Services\Modules\TurnSystem\TurnManager(
                 playerIds: $playerIds,
-                mode: $mode
+                mode: $mode,
+                timeLimit: $timeLimit
             );
 
-            Log::debug("Turn system initialized", ['mode' => $mode]);
+            // Conectar TimerService si existe (necesario para timing automático)
+            if (isset($timerService)) {
+                $turnManager->setTimerService($timerService);
+            }
+
+            Log::debug("Turn system initialized", ['mode' => $mode, 'time_limit' => $timeLimit]);
         }
 
         // ========================================================================
@@ -442,12 +563,10 @@ abstract class BaseGameEngine implements GameEngineInterface
         }
 
         // ========================================================================
-        // MÓDULO: Timer System
+        // Guardar TimerService al final (después de conectarlo a otros módulos)
         // ========================================================================
-        if ($modules['timer_system']['enabled'] ?? false) {
-            $timerService = new TimerService();
+        if (isset($timerService)) {
             $gameState = array_merge($gameState, $timerService->toArray());
-            Log::debug("Timer system initialized");
         }
 
         // ========================================================================
@@ -509,10 +628,24 @@ abstract class BaseGameEngine implements GameEngineInterface
         $playerIds = $match->players->pluck('id')->toArray();
 
         // ========================================================================
+        // RESETEAR TIMER SYSTEM (crear PRIMERO para que otros módulos lo usen)
+        // ========================================================================
+        if (($modules['timer_system']['enabled'] ?? false)) {
+            // Limpiar todos los timers
+            $timerService = new TimerService();
+            Log::debug("Timer system reset", ['timers_cleared' => true]);
+        }
+
+        // ========================================================================
         // RESETEAR ROUND SYSTEM
         // ========================================================================
         if (($modules['round_system']['enabled'] ?? false) && isset($gameState['round_system'])) {
             $roundManager = RoundManager::fromArray($gameState);
+
+            // Reconectar TimerService al TurnManager si existe
+            if (isset($timerService) && $roundManager->getTurnManager()) {
+                $roundManager->getTurnManager()->setTimerService($timerService);
+            }
 
             // Aplicar override si existe
             if (isset($overrides['round_system']['current_round'])) {
@@ -548,20 +681,24 @@ abstract class BaseGameEngine implements GameEngineInterface
         }
 
         // ========================================================================
-        // RESETEAR TURN SYSTEM
+        // RESETEAR TURN SYSTEM (si está solo, sin RoundManager)
         // ========================================================================
-        if (($modules['turn_system']['enabled'] ?? false) && isset($gameState['turn_system'])) {
-            $roundManager = RoundManager::fromArray($gameState);
+        if (($modules['turn_system']['enabled'] ?? false) && isset($gameState['turn_system']) && !isset($roundManager)) {
+            $turnManager = \App\Services\Modules\TurnSystem\TurnManager::fromArray($gameState['turn_system']);
+
+            // Reconectar TimerService si existe
+            if (isset($timerService)) {
+                $turnManager->setTimerService($timerService);
+            }
 
             // Aplicar override si existe
             if (isset($overrides['turn_system']['current_turn_index'])) {
-                $roundManager->getTurnManager()->setCurrentTurnIndex($overrides['turn_system']['current_turn_index']);
+                $turnManager->setCurrentTurnIndex($overrides['turn_system']['current_turn_index']);
             } else {
-                $roundManager->getTurnManager()->reset(); // Vuelve al primer jugador
+                $turnManager->reset(); // Vuelve al primer jugador
             }
 
-            $gameState = array_merge($gameState, $roundManager->toArray());
-            $turnManager = $roundManager->getTurnManager();
+            $gameState = array_merge($gameState, ['turn_system' => $turnManager->toArray()]);
             Log::debug("Turn system reset", [
                 'current_turn_index' => $turnManager->getCurrentTurnIndex(),
                 'mode' => $turnManager->getMode()
@@ -569,13 +706,10 @@ abstract class BaseGameEngine implements GameEngineInterface
         }
 
         // ========================================================================
-        // RESETEAR TIMER SYSTEM
+        // Guardar TimerService al final (después de usarlo)
         // ========================================================================
-        if (($modules['timer_system']['enabled'] ?? false)) {
-            // Limpiar todos los timers
-            $timerService = new TimerService();
+        if (isset($timerService)) {
             $gameState = array_merge($gameState, $timerService->toArray());
-            Log::debug("Timer system reset", ['timers_cleared' => true]);
         }
 
         // ========================================================================
@@ -1260,6 +1394,34 @@ abstract class BaseGameEngine implements GameEngineInterface
     {
         $className = class_basename($this);
         return strtolower(str_replace('Engine', '', $className));
+    }
+
+    // ========================================================================
+    // TURN TIMEOUT HANDLING
+    // ========================================================================
+
+    /**
+     * Manejar timeout del turno cuando el tiempo expira.
+     *
+     * Este método es llamado por GameController cuando el frontend notifica
+     * que el timer del turno llegó a 0.
+     *
+     * Por defecto, finaliza la ronda actual (lo cual asigna 0 puntos a quien no respondió).
+     * Los juegos pueden sobrescribir este método si necesitan comportamiento custom.
+     *
+     * @param GameMatch $match
+     * @return void
+     */
+    public function onTurnTimeout(GameMatch $match): void
+    {
+        Log::info("[{$this->getGameSlug()}] Turn timeout - ending current round", [
+            'match_id' => $match->id,
+            'current_phase' => $match->game_state['phase'] ?? 'unknown'
+        ]);
+
+        // Por defecto, finalizar la ronda actual
+        // Esto asignará 0 puntos a jugadores que no respondieron
+        $this->endCurrentRound($match);
     }
 
     // ========================================================================

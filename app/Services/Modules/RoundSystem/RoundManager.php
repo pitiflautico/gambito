@@ -462,6 +462,12 @@ class RoundManager
         // Restaurar TurnManager primero
         $turnManager = TurnManager::fromArray($data['turn_system'] ?? []);
 
+        // Si existe TimerService en el state, conectarlo automáticamente al TurnManager
+        if (isset($data['timer_system'])) {
+            $timerService = \App\Services\Modules\TimerSystem\TimerService::fromArray($data);
+            $turnManager->setTimerService($timerService);
+        }
+
         $instance = new self(
             turnManager: $turnManager,
             totalRounds: $roundData['total_rounds'] ?? 0,
@@ -733,6 +739,9 @@ class RoundManager
      * Usado por BaseGameEngine::resetModules() al iniciar/reiniciar el juego.
      * Vuelve a ronda 1 y limpia todas las eliminaciones.
      *
+     * IMPORTANTE: También resetea el TurnManager si existe, lo que
+     * automáticamente inicia el timer del primer turno.
+     *
      * @return void
      */
     public function reset(): void
@@ -741,5 +750,10 @@ class RoundManager
         $this->permanentlyEliminated = [];
         $this->temporarilyEliminated = [];
         $this->roundJustCompleted = false;
+
+        // Resetear TurnManager (esto inicia el timer automáticamente)
+        if ($this->turnManager) {
+            $this->turnManager->reset();
+        }
     }
 }

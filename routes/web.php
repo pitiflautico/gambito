@@ -68,9 +68,8 @@ Route::prefix('rooms')->name('rooms.')->group(function () {
 });
 
 // ========================================================================
-// DEBUG ROUTES - WebSocket Event Testing
+// OLD DEBUG ROUTES (legacy - mantener por compatibilidad)
 // ========================================================================
-
 Route::get('/debug/websocket/{roomCode}', function ($roomCode) {
     $room = \App\Models\Room::where('code', $roomCode)->first();
 

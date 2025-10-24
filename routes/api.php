@@ -27,6 +27,8 @@ Route::post('/games/{match}/game-ready', [GameController::class, 'gameReady'])
     ->name('api.matches.game-ready');
 Route::post('/games/{match}/start-next-round', [GameController::class, 'startNextRound'])
     ->name('api.matches.start-next-round');
+Route::post('/games/{match}/turn-timeout', [GameController::class, 'turnTimeout'])
+    ->name('api.matches.turn-timeout');
 
 // API de Salas
 Route::prefix('rooms')->name('api.rooms.')->group(function () {

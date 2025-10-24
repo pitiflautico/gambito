@@ -39,6 +39,10 @@ return [
                 'name' => 'game.turn.changed',
                 'handler' => 'handleTurnChanged'
             ],
+            'GameFinishedEvent' => [
+                'name' => 'game.finished',
+                'handler' => 'handleGameFinished'
+            ],
         ]
     ]
 ];

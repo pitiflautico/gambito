@@ -3,6 +3,7 @@
 namespace App\Services\Modules\TurnSystem;
 
 use App\Services\Modules\TeamsSystem\TeamsManager;
+use App\Services\Modules\TimerSystem\TimerService;
 use Illuminate\Support\Collection;
 
 /**
@@ -69,14 +70,26 @@ class TurnManager
     protected bool $requireAllTeamMembers = false;
 
     /**
+     * Límite de tiempo por turno en segundos (null = sin límite).
+     */
+    protected ?int $timeLimit = null;
+
+    /**
+     * TimerService para manejar el timer del turno.
+     */
+    protected ?TimerService $timerService = null;
+
+    /**
      * Constructor.
      *
      * @param array $playerIds Array de IDs de jugadores
      * @param string $mode Modo de turnos: 'sequential', 'shuffle', 'simultaneous', 'free'
+     * @param int|null $timeLimit Límite de tiempo por turno en segundos (null = sin límite)
      */
     public function __construct(
         array $playerIds,
-        string $mode = 'sequential'
+        string $mode = 'sequential',
+        ?int $timeLimit = null
     ) {
         if (empty($playerIds)) {
             throw new \InvalidArgumentException('Se requiere al menos un jugador para el sistema de turnos');
@@ -84,6 +97,7 @@ class TurnManager
 
         $this->mode = $mode;
         $this->currentTurnIndex = 0;
+        $this->timeLimit = $timeLimit;
 
         // Inicializar orden según modo
         $this->turnOrder = match ($mode) {
@@ -155,6 +169,9 @@ class TurnManager
                 $this->cycleJustCompleted = true;
             }
         }
+
+        // Iniciar timer del turno automáticamente (si está configurado)
+        $this->startTurnTimer();
 
         return $this->getCurrentTurnInfo();
     }
@@ -256,6 +273,9 @@ class TurnManager
         $this->cycleJustCompleted = false;
         $this->isPaused = false;
         $this->direction = 1;
+
+        // Iniciar timer del primer turno automáticamente (si está configurado)
+        $this->startTurnTimer();
     }
 
     // ========================================================================
@@ -368,6 +388,7 @@ class TurnManager
             'direction' => $this->direction,
             'turn_completions' => $this->turnCompletions,
             'require_all_team_members' => $this->requireAllTeamMembers,
+            'time_limit' => $this->timeLimit,
         ];
     }
 
@@ -378,7 +399,8 @@ class TurnManager
     {
         $instance = new self(
             $state['turn_order'],
-            $state['mode'] ?? 'sequential'
+            $state['mode'] ?? 'sequential',
+            $state['time_limit'] ?? null
         );
 
         $instance->currentTurnIndex = $state['current_turn_index'] ?? 0;
@@ -668,6 +690,157 @@ class TurnManager
             'can_advance' => $turnStatus['is_complete'],
             'reason' => $turnStatus['is_complete'] ? 'turn_complete' : 'turn_incomplete',
             'details' => $turnStatus
+        ];
+    }
+
+    // ========================================================================
+    // TIMING DEL TURNO (Integración con TimingModule)
+    // ========================================================================
+
+    /**
+     * Establecer el TimerService para manejar timers del turno.
+     *
+     * @param TimerService|null $timerService
+     */
+    public function setTimerService(?TimerService $timerService): void
+    {
+        $this->timerService = $timerService;
+    }
+
+    /**
+     * Obtener el TimerService actual.
+     *
+     * @return TimerService|null
+     */
+    public function getTimerService(): ?TimerService
+    {
+        return $this->timerService;
+    }
+
+    /**
+     * Iniciar el timer del turno si está configurado.
+     *
+     * Este método crea un timer en TimerService que se encarga de:
+     * - Trackear el tiempo transcurrido
+     * - Exponer tiempo restante para el frontend
+     * - Emitir eventos cuando expira (si se configura)
+     *
+     * @return bool True si se inició el timer, false si no hay límite o TimerService
+     */
+    public function startTurnTimer(): bool
+    {
+        if ($this->timeLimit === null || $this->timerService === null) {
+            \Log::debug('❌ startTurnTimer: Cannot start timer', [
+                'timeLimit' => $this->timeLimit,
+                'hasTimerService' => $this->timerService !== null
+            ]);
+            return false;
+        }
+
+        // Cancelar timer anterior si existe
+        if ($this->timerService->hasTimer('turn_timer')) {
+            $this->timerService->cancelTimer('turn_timer');
+        }
+
+        // Crear nuevo timer del turno
+        $this->timerService->startTimer('turn_timer', $this->timeLimit);
+
+        \Log::info('✅ Turn timer started', [
+            'timeLimit' => $this->timeLimit,
+            'timer_name' => 'turn_timer'
+        ]);
+
+        return true;
+    }
+
+    /**
+     * Obtener el tiempo restante del turno actual en segundos.
+     *
+     * @return int|null Segundos restantes o null si no hay límite de tiempo
+     */
+    public function getRemainingTime(): ?int
+    {
+        if ($this->timeLimit === null || $this->timerService === null) {
+            return null;
+        }
+
+        if (!$this->timerService->hasTimer('turn_timer')) {
+            return null;
+        }
+
+        return $this->timerService->getRemainingTime('turn_timer');
+    }
+
+    /**
+     * Verificar si el tiempo del turno ha expirado.
+     *
+     * @return bool True si expiró, false si no o si no hay límite
+     */
+    public function isTimeExpired(): bool
+    {
+        if ($this->timeLimit === null || $this->timerService === null) {
+            return false;
+        }
+
+        if (!$this->timerService->hasTimer('turn_timer')) {
+            return false;
+        }
+
+        return $this->timerService->isExpired('turn_timer');
+    }
+
+    /**
+     * Cancelar el timer del turno.
+     */
+    public function cancelTurnTimer(): void
+    {
+        if ($this->timerService !== null && $this->timerService->hasTimer('turn_timer')) {
+            $this->timerService->cancelTimer('turn_timer');
+        }
+    }
+
+    /**
+     * Obtener el límite de tiempo configurado.
+     *
+     * @return int|null Segundos de límite o null
+     */
+    public function getTimeLimit(): ?int
+    {
+        return $this->timeLimit;
+    }
+
+    /**
+     * Verificar si el turno tiene límite de tiempo.
+     *
+     * @return bool
+     */
+    public function hasTimeLimit(): bool
+    {
+        return $this->timeLimit !== null;
+    }
+
+    /**
+     * Obtener información completa del timing del turno para el frontend.
+     *
+     * Esto se puede incluir en eventos (ej: RoundStartedEvent) para que
+     * el frontend muestre un countdown automáticamente.
+     *
+     * @return array|null Info del timing o null si no hay límite
+     */
+    public function getTimingInfo(): ?array
+    {
+        if (!$this->hasTimeLimit()) {
+            return null;
+        }
+
+        $remaining = $this->getRemainingTime();
+
+        return [
+            'type' => 'countdown',
+            'delay' => $this->timeLimit,
+            'remaining' => $remaining,
+            'is_expired' => $this->isTimeExpired(),
+            'warning_threshold' => 5, // Últimos 5 segundos en rojo
         ];
     }
 }

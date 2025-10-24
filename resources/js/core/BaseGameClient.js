@@ -56,6 +56,9 @@ export class BaseGameClient {
             handleRoundStarted: (event) => this.handleRoundStarted(event),
             handleRoundEnded: (event) => this.handleRoundEnded(event),
             handlePlayerAction: (event) => this.handlePlayerAction(event),
+            handlePhaseChanged: (event) => this.handlePhaseChanged(event),
+            handleTurnChanged: (event) => this.handleTurnChanged(event),
+            handleGameFinished: (event) => this.handleGameFinished(event),
         };
 
         // Combinar handlers por defecto con handlers custom del juego
@@ -167,6 +170,36 @@ export class BaseGameClient {
      */
     handlePlayerAction(event) {
         // Los juegos pueden usar esto para mostrar feedback visual
+    }
+
+    /**
+     * Handler genérico: Cambio de fase
+     *
+     * Se ejecuta cuando el juego cambia de fase (ej: lobby -> playing -> finished)
+     */
+    handlePhaseChanged(event) {
+        console.log('🔄 [BaseGameClient] Phase changed:', event);
+        // Los juegos específicos sobrescriben este método para manejar transiciones de fase
+    }
+
+    /**
+     * Handler genérico: Cambio de turno
+     *
+     * Se ejecuta cuando cambia el turno en juegos por turnos
+     */
+    handleTurnChanged(event) {
+        console.log('↪️ [BaseGameClient] Turn changed:', event);
+        // Los juegos específicos sobrescriben este método para actualizar UI de turnos
+    }
+
+    /**
+     * Handler genérico: Juego terminado
+     *
+     * Se ejecuta cuando el juego finaliza
+     */
+    handleGameFinished(event) {
+        console.log('🏁 [BaseGameClient] Game finished:', event);
+        // Los juegos específicos sobrescriben este método para mostrar pantalla de resultados finales
     }
 
     // ========================================================================

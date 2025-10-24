@@ -14,7 +14,12 @@ export default defineConfig({
                 'resources/js/trivia-game.js',
                 'resources/js/trivia-game-new.js',
             ],
-            refresh: true,
+            refresh: [
+                'resources/**',
+                'games/**/views/**',
+                'routes/**',
+                'app/Http/Controllers/**',
+            ],
         }),
     ],
 });

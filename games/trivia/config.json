@@ -92,7 +92,8 @@
     "turn_system": {
       "enabled": true,
       "mode": "simultaneous",
-      "round_per_turn": true
+      "round_per_turn": true,
+      "time_limit": 15
     },
     "scoring_system": {
       "enabled": true,
