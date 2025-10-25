@@ -5,7 +5,6 @@ namespace Games\Trivia;
 use App\Contracts\BaseGameEngine;
 use App\Models\GameMatch;
 use App\Models\Player;
-use App\Events\Game\RoundStartedEvent;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -20,19 +19,30 @@ class TriviaEngine extends BaseGameEngine
     /**
      * Inicializar el juego - FASE 1 (LOBBY)
      *
-     * Por ahora solo guardamos configuración mínima.
+     * Carga las preguntas desde questions.json y las mezcla aleatoriamente.
      */
     public function initialize(GameMatch $match): void
     {
         Log::info("[Trivia] Initializing - FASE 1", ['match_id' => $match->id]);
 
-        // Guardar configuración mínima
+        // Cargar preguntas desde JSON
+        $questionsPath = base_path('games/trivia/questions.json');
+        $questionsData = json_decode(file_get_contents($questionsPath), true);
+
+        // Mezclar preguntas aleatoriamente
+        $questions = $questionsData['questions'];
+        shuffle($questions);
+
+        // Guardar configuración con preguntas
         $match->game_state = [
             '_config' => [
                 'game' => 'trivia',
                 'initialized_at' => now()->toDateTimeString(),
+                'categories' => $questionsData['categories'],
             ],
             'phase' => 'waiting',
+            'questions' => $questions,
+            'current_question' => null,
         ];
 
         $match->save();
@@ -40,14 +50,17 @@ class TriviaEngine extends BaseGameEngine
         // Inicializar módulos automáticamente desde config.json
         $this->initializeModules($match);
 
-        Log::info("[Trivia] Configuration saved", ['match_id' => $match->id]);
+        Log::info("[Trivia] Questions loaded and shuffled", [
+            'match_id' => $match->id,
+            'total_questions' => count($questions)
+        ]);
     }
 
     /**
      * Hook cuando el juego empieza - FASE 3 (POST-COUNTDOWN)
      *
      * BaseGameEngine ya resetó los módulos.
-     * Solo emitimos un evento básico para mostrar "El juego ha empezado".
+     * Usamos handleNewRound() para iniciar la primera ronda siguiendo el flujo estándar.
      */
     protected function onGameStart(GameMatch $match): void
     {
@@ -61,16 +74,12 @@ class TriviaEngine extends BaseGameEngine
 
         $match->save();
 
-        // Emitir evento genérico RoundStartedEvent
-        event(new RoundStartedEvent(
-            match: $match,
-            currentRound: 1,
-            totalRounds: 1,
-            phase: 'playing',
-            timing: null
-        ));
+        // Usar handleNewRound() para iniciar la primera ronda
+        // advanceRound: false porque ya estamos en ronda 1 (resetModules ya lo hizo)
+        // Esto llama a startNewRound() + emite RoundStartedEvent automáticamente
+        $this->handleNewRound($match, advanceRound: false);
 
-        Log::info("[Trivia] RoundStartedEvent emitted", [
+        Log::info("[Trivia] First round started via handleNewRound()", [
             'match_id' => $match->id,
             'room_code' => $match->room->code
         ]);
@@ -86,13 +95,102 @@ class TriviaEngine extends BaseGameEngine
     }
 
     /**
-     * Iniciar nueva ronda (abstracto de BaseGameEngine).
-     * Por ahora no hace nada.
+     * Iniciar nueva ronda - Cargar siguiente pregunta.
+     *
+     * Este método se llama desde BaseGameEngine::handleNewRound()
+     * DESPUÉS de que RoundManager haya avanzado la ronda y reseteado el timer.
      */
     protected function startNewRound(GameMatch $match): void
     {
-        Log::info("[Trivia] startNewRound called (not implemented yet)", ['match_id' => $match->id]);
+        Log::info("[Trivia] Starting new round", ['match_id' => $match->id]);
+
+        // 1. Desbloquear jugadores (via PlayerStateManager)
+        $playerState = $this->getPlayerStateManager($match);
+        $playerState->reset();  // ← Resetea locks, actions, states, etc.
+        $this->savePlayerStateManager($match, $playerState);
+
+        // 2. Cargar siguiente pregunta
+        $question = $this->loadNextQuestion($match);
+
+        Log::info("[Trivia] Question loaded and players unlocked", [
+            'match_id' => $match->id,
+            'question_id' => $question['id'],
+            'question' => $question['question']
+        ]);
+
+        // Emitir evento específico de Trivia (opcional)
+        // event(new QuestionStartedEvent($match, $question));
     }
+
+    // ========================================================================
+    // GESTIÓN DE PREGUNTAS
+    // ========================================================================
+
+    /**
+     * Cargar la siguiente pregunta basándose en la ronda actual.
+     *
+     * @param GameMatch $match
+     * @return array Pregunta cargada
+     * @throws \RuntimeException Si no hay pregunta para la ronda actual
+     */
+    private function loadNextQuestion(GameMatch $match): array
+    {
+        $roundManager = $this->getRoundManager($match);
+        $currentRound = $roundManager->getCurrentRound();
+
+        $question = $this->getQuestionByRound($match, $currentRound);
+
+        $this->setCurrentQuestion($match, $question);
+
+        return $question;
+    }
+
+    /**
+     * Obtener pregunta por número de ronda.
+     *
+     * @param GameMatch $match
+     * @param int $roundNumber Número de ronda (1-based)
+     * @return array Pregunta
+     * @throws \RuntimeException Si no existe pregunta para esa ronda
+     */
+    private function getQuestionByRound(GameMatch $match, int $roundNumber): array
+    {
+        $questions = $match->game_state['questions'] ?? [];
+        $questionIndex = $roundNumber - 1; // Convertir a índice 0-based
+
+        if (!isset($questions[$questionIndex])) {
+            throw new \RuntimeException("No hay pregunta para la ronda {$roundNumber}");
+        }
+
+        return $questions[$questionIndex];
+    }
+
+    /**
+     * Establecer la pregunta actual en el estado del juego.
+     *
+     * @param GameMatch $match
+     * @param array $question
+     * @return void
+     */
+    private function setCurrentQuestion(GameMatch $match, array $question): void
+    {
+        $gameState = $match->game_state;
+        $gameState['current_question'] = $question;
+        $match->game_state = $gameState;
+        $match->save();
+    }
+
+    /**
+     * Obtener la pregunta actual.
+     *
+     * @param GameMatch $match
+     * @return array|null Pregunta actual o null si no hay ninguna
+     */
+    private function getCurrentQuestion(GameMatch $match): ?array
+    {
+        return $match->game_state['current_question'] ?? null;
+    }
+
 
     /**
      * Finalizar ronda actual (abstracto de BaseGameEngine).

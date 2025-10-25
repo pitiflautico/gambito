@@ -8,7 +8,6 @@ use App\Contracts\Strategies\SequentialEndStrategy;
 use App\Contracts\Strategies\SimultaneousEndStrategy;
 use App\Models\GameMatch;
 use App\Models\Player;
-use App\Services\Modules\RolesSystem\RoleManager;
 use App\Services\Modules\RoundSystem\RoundManager;
 use App\Services\Modules\ScoringSystem\Contracts\ScoreCalculator;
 use App\Services\Modules\ScoringSystem\ScoreManager;
@@ -150,13 +149,131 @@ abstract class BaseGameEngine implements GameEngineInterface
         ]);
 
         // 2. Llamar al hook específico del juego
-        // onGameStart() debe setear estado inicial y emitir RoundStartedEvent
+        // onGameStart() debe setear estado inicial y emitir la primera ronda
         $this->onGameStart($match);
 
         Log::info("[{$this->getGameSlug()}] onGameStart() completed", [
             'match_id' => $match->id,
             'phase' => $match->game_state['phase'] ?? 'unknown'
         ]);
+    }
+
+    /**
+     * Manejar el inicio de una nueva ronda - MÉTODO BASE.
+     *
+     * Este método orquesta el inicio de cada ronda y ejecuta tareas automáticas:
+     * 1. Avanzar contador de ronda y resetear turnos/timer (via RoundManager)
+     * 2. Guardar scores actualizados (si scoring_system habilitado)
+     * 3. Llamar a startNewRound() del juego específico (lógica del juego)
+     * 4. Emitir RoundStartedEvent con timing metadata
+     *
+     * CUÁNDO SE LLAMA:
+     * - Al inicio del juego: Desde onGameStart() para la primera ronda (advanceRound: false)
+     * - Entre rondas: Desde el endpoint /api/rooms/{code}/next-round (advanceRound: true)
+     *
+     * FLUJO DE EVENTOS:
+     * 1. Ronda termina → Engine llama endCurrentRound()
+     * 2. endCurrentRound() emite RoundEndedEvent con timing: {auto_next: true, delay: 3}
+     * 3. Frontend escucha .game.round.ended, espera 3 segundos
+     * 4. Frontend llama a POST /api/rooms/{code}/next-round
+     * 5. Endpoint llama a handleNewRound(advanceRound: true)
+     * 6. handleNewRound() → RoundManager avanza ronda y resetea timer
+     *
+     * @param GameMatch $match
+     * @param bool $advanceRound Si debe avanzar el contador de ronda (false para primera ronda)
+     * @return void
+     */
+    public function handleNewRound(GameMatch $match, bool $advanceRound = true): void
+    {
+        Log::info("[{$this->getGameSlug()}] Handling new round", [
+            'match_id' => $match->id,
+            'current_round' => $match->game_state['round_system']['current_round'] ?? 1,
+            'advance_round' => $advanceRound
+        ]);
+
+        // 1. LÓGICA BASE: Avanzar ronda (via RoundManager)
+        // RoundManager se encarga de:
+        // - Incrementar contador de ronda
+        // - Limpiar eliminaciones temporales
+        // - Resetear TurnManager (que cancela timer anterior e inicia uno nuevo)
+        if ($this->isModuleEnabled($match, 'round_system') && $advanceRound) {
+            $roundManager = $this->getRoundManager($match);
+            $roundManager->advanceToNextRound();
+            $this->saveRoundManager($match, $roundManager);
+
+            Log::info("[{$this->getGameSlug()}] Round advanced by RoundManager", [
+                'new_round' => $roundManager->getCurrentRound()
+            ]);
+        }
+
+        // 2. LÓGICA BASE: Guardar scores actualizados
+        if ($this->isModuleEnabled($match, 'scoring_system')) {
+            // Los scores ya están actualizados en game_state por endCurrentRound()
+            // Solo verificamos que estén sincronizados
+            $match->refresh();
+
+            Log::info("[{$this->getGameSlug()}] Scores synchronized", [
+                'scores' => $match->game_state['scoring_system']['scores'] ?? []
+            ]);
+        }
+
+        // 3. Llamar a la lógica específica del juego
+        $this->startNewRound($match);
+
+        // 4. Obtener metadata de la ronda del estado del juego
+        $roundData = $match->game_state['round_system'] ?? [];
+        $currentRound = $roundData['current_round'] ?? 1;
+        $totalRounds = $roundData['total_rounds'] ?? 0;
+
+        // 5. Obtener timing metadata del config del juego (si existe)
+        $timing = $this->getRoundStartTiming($match);
+
+        // 6. Emitir evento genérico RoundStartedEvent
+        event(new \App\Events\Game\RoundStartedEvent(
+            match: $match,
+            currentRound: $currentRound,
+            totalRounds: $totalRounds,
+            phase: $match->game_state['phase'] ?? 'playing',
+            timing: $timing
+        ));
+
+        Log::info("[{$this->getGameSlug()}] RoundStartedEvent emitted", [
+            'match_id' => $match->id,
+            'current_round' => $currentRound,
+            'total_rounds' => $totalRounds
+        ]);
+    }
+
+    /**
+     * Obtener timing metadata para el inicio de ronda.
+     *
+     * Los juegos pueden sobrescribir este método para proporcionar timing específico.
+     * Por defecto, busca en el config.json del juego.
+     *
+     * @param GameMatch $match
+     * @return array|null Timing metadata o null si no hay timing
+     */
+    protected function getRoundStartTiming(GameMatch $match): ?array
+    {
+        // Intentar obtener del config del juego
+        $config = $match->game_state['_config'] ?? [];
+
+        // Buscar en timing config si existe
+        if (isset($config['timing']['round_start'])) {
+            return $config['timing']['round_start'];
+        }
+
+        // Timing por defecto para juegos con timer
+        $turnSystem = $match->game_state['turn_system'] ?? [];
+        if (isset($turnSystem['time_limit']) && $turnSystem['time_limit'] > 0) {
+            return [
+                'duration' => $turnSystem['time_limit'],
+                'countdown_visible' => true,
+                'warning_threshold' => 3
+            ];
+        }
+
+        return null;
     }
 
     // ========================================================================
@@ -645,6 +762,22 @@ abstract class BaseGameEngine implements GameEngineInterface
     }
 
     // ========================================================================
+    // HELPERS: Generales
+    // ========================================================================
+
+    /**
+     * Verificar si un módulo está habilitado en el juego.
+     *
+     * @param GameMatch $match
+     * @param string $moduleName Nombre del módulo (ej: 'timer_system', 'scoring_system')
+     * @return bool
+     */
+    protected function isModuleEnabled(GameMatch $match, string $moduleName): bool
+    {
+        return isset($match->game_state[$moduleName]) && !empty($match->game_state[$moduleName]);
+    }
+
+    // ========================================================================
     // HELPERS: RoundManager
     // ========================================================================
 
@@ -817,90 +950,34 @@ abstract class BaseGameEngine implements GameEngineInterface
     }
 
     // ========================================================================
-    // HELPERS: RoleManager
+    // HELPERS: PlayerStateManager
     // ========================================================================
 
     /**
-     * Obtener RoleManager del game_state.
+     * Obtener PlayerStateManager del game_state.
      *
      * @param GameMatch $match
-     * @return RoleManager
+     * @return \App\Services\Modules\PlayerStateSystem\PlayerStateManager
      */
-    protected function getRoleManager(GameMatch $match): RoleManager
+    protected function getPlayerStateManager(GameMatch $match): \App\Services\Modules\PlayerStateSystem\PlayerStateManager
     {
-        return RoleManager::fromArray($match->game_state);
+        return \App\Services\Modules\PlayerStateSystem\PlayerStateManager::fromArray($match->game_state);
     }
 
     /**
-     * Guardar RoleManager de vuelta al game_state.
+     * Guardar PlayerStateManager de vuelta al game_state.
      *
      * @param GameMatch $match
-     * @param RoleManager $roleManager
+     * @param \App\Services\Modules\PlayerStateSystem\PlayerStateManager $playerState
      * @return void
      */
-    protected function saveRoleManager(GameMatch $match, RoleManager $roleManager): void
+    protected function savePlayerStateManager(GameMatch $match, \App\Services\Modules\PlayerStateSystem\PlayerStateManager $playerState): void
     {
         $match->game_state = array_merge(
             $match->game_state,
-            $roleManager->toArray()
+            $playerState->toArray()
         );
         $match->save();
-    }
-
-    /**
-     * Verificar si jugador tiene un rol.
-     *
-     * @param GameMatch $match
-     * @param int $playerId
-     * @param string $role
-     * @return bool
-     */
-    protected function playerHasRole(GameMatch $match, int $playerId, string $role): bool
-    {
-        return $this->getRoleManager($match)->hasRole($playerId, $role);
-    }
-
-    /**
-     * Asignar rol a jugador.
-     *
-     * @param GameMatch $match
-     * @param int $playerId
-     * @param string $role
-     * @return void
-     */
-    protected function assignRole(GameMatch $match, int $playerId, string $role): void
-    {
-        $roleManager = $this->getRoleManager($match);
-        $roleManager->assignRole($playerId, $role);
-        $this->saveRoleManager($match, $roleManager);
-    }
-
-    /**
-     * Rotar rol al siguiente jugador.
-     *
-     * @param GameMatch $match
-     * @param string $role
-     * @param array $turnOrder
-     * @return int ID del nuevo jugador con el rol
-     */
-    protected function rotateRole(GameMatch $match, string $role, array $turnOrder): int
-    {
-        $roleManager = $this->getRoleManager($match);
-        $newPlayerId = $roleManager->rotateRole($role, $turnOrder);
-        $this->saveRoleManager($match, $roleManager);
-        return $newPlayerId;
-    }
-
-    /**
-     * Obtener jugadores con un rol específico.
-     *
-     * @param GameMatch $match
-     * @param string $role
-     * @return array
-     */
-    protected function getPlayersWithRole(GameMatch $match, string $role): array
-    {
-        return $this->getRoleManager($match)->getPlayersWithRole($role);
     }
 
     // ========================================================================
@@ -1024,9 +1101,7 @@ abstract class BaseGameEngine implements GameEngineInterface
             'turn_mode' => $roundManager->getTurnManager()->getMode()
         ]);
 
-        if ($shouldRotate) {
-            $this->autoRotateRoles($match, $roundManager);
-        }
+        // Rotación de roles eliminada - usar PlayerStateManager directamente en el juego
 
         // Paso 4: Reiniciar timers (si existen)
         $this->restartTurnTimers($match);
@@ -1035,21 +1110,6 @@ abstract class BaseGameEngine implements GameEngineInterface
         $this->saveRoundManager($match, $roundManager);
 
         return $turnInfo;
-    }
-
-    /**
-     * Determinar si se deben rotar roles automáticamente.
-     *
-     * Por defecto, rota en modos secuenciales (sequential, shuffle).
-     * Los juegos pueden sobrescribir esto para control custom.
-     *
-     * @param GameMatch $match
-     * @return bool
-     */
-    protected function shouldAutoRotateRoles(GameMatch $match): bool
-    {
-        $mode = $this->getRoundManager($match)->getTurnManager()->getMode();
-        return in_array($mode, ['sequential', 'shuffle']);
     }
 
     /**
@@ -1062,150 +1122,6 @@ abstract class BaseGameEngine implements GameEngineInterface
     protected function shouldClearTemporaryEliminations(): bool
     {
         return false;
-    }
-
-    /**
-     * Rotar roles automáticamente basándose en la configuración del juego.
-     *
-     * Lee los roles del config.json y los rota según el turn_order.
-     * Asume que cada rol es exclusivo (un jugador solo puede tener un rol activo).
-     *
-     * @param GameMatch $match
-     * @param RoundManager $roundManager
-     * @return void
-     */
-    protected function autoRotateRoles(GameMatch $match, RoundManager $roundManager): void
-    {
-        $rotatableRoles = $this->getRotatableRoles();
-
-        Log::info("🔄 autoRotateRoles called", [
-            'match_id' => $match->id,
-            'rotatable_roles' => $rotatableRoles,
-            'game_config_modules' => $this->getGameConfig()['modules'] ?? 'NO CONFIG'
-        ]);
-
-        if (empty($rotatableRoles)) {
-            Log::warning("⚠️ No rotatable roles found - skipping rotation", [
-                'match_id' => $match->id
-            ]);
-            return; // Sin roles que rotar
-        }
-
-        $roleManager = $this->getRoleManager($match);
-        $turnOrder = $roundManager->getTurnOrder();
-
-        // Rotar cada rol
-        foreach ($rotatableRoles as $roleName) {
-            Log::info("🔄 Rotating role", [
-                'role' => $roleName,
-                'turn_order' => $turnOrder,
-                'roles_before' => $roleManager->toArray()['player_roles'] ?? []
-            ]);
-
-            // Rotar el rol usando el roleManager local (NO crear nueva instancia)
-            $newRolePlayerId = $roleManager->rotateRole($roleName, $turnOrder);
-
-            Log::info("✅ Role rotated", [
-                'role' => $roleName,
-                'new_player_id' => $newRolePlayerId,
-                'roles_after_rotate' => $roleManager->toArray()['player_roles'] ?? []
-            ]);
-
-            // Si hay roles complementarios (ej: drawer/guesser en Pictionary)
-            $complementaryRole = $this->getComplementaryRole($roleName);
-
-            if ($complementaryRole) {
-                Log::info("🔄 Assigning complementary roles", [
-                    'main_role' => $roleName,
-                    'complementary_role' => $complementaryRole,
-                    'main_role_player' => $newRolePlayerId,
-                    'other_players' => array_diff($turnOrder, [$newRolePlayerId])
-                ]);
-
-                // Asignar rol complementario a todos excepto el que tiene el rol principal
-                foreach ($turnOrder as $playerId) {
-                    if ($playerId !== $newRolePlayerId) {
-                        if (!$roleManager->hasRole($playerId, $complementaryRole)) {
-                            $roleManager->assignRole($playerId, $complementaryRole);
-                        }
-                    } else {
-                        // Remover rol complementario del jugador con rol principal
-                        $roleManager->removeRole($playerId, $complementaryRole);
-                    }
-                }
-            }
-        }
-
-        Log::info("💾 Saving roles after rotation", [
-            'final_roles' => $roleManager->toArray()['player_roles'] ?? []
-        ]);
-
-        $this->saveRoleManager($match, $roleManager);
-    }
-
-    /**
-     * Obtener lista de roles que deben rotarse automáticamente.
-     *
-     * IMPORTANTE: roles_system es OBLIGATORIO en todos los config.json
-     * Incluso si solo es ["player"], debe estar definido para mantener consistencia.
-     *
-     * Por defecto lee del config.json en modules.roles_system.roles y filtra los complementarios.
-     * Los juegos pueden sobrescribir para control custom.
-     *
-     * @return array Lista de nombres de roles a rotar
-     */
-    protected function getRotatableRoles(): array
-    {
-        $config = $this->getGameConfig();
-
-        // roles_system es OBLIGATORIO - siempre debe existir en config.json
-        $rolesConfig = $config['modules']['roles_system'] ?? null;
-
-        if (!$rolesConfig) {
-            Log::warning("⚠️ roles_system NOT found in config.json - this is required!", [
-                'game' => $this->getGameSlug(),
-                'config_modules' => array_keys($config['modules'] ?? [])
-            ]);
-            return [];
-        }
-
-        if (!($rolesConfig['enabled'] ?? false)) {
-            // roles_system existe pero está deshabilitado
-            return [];
-        }
-
-        $roles = $rolesConfig['roles'] ?? [];
-
-        // Filtrar roles que no son complementarios (ej: 'drawer' sí, 'guesser' no)
-        return array_filter($roles, function($role) {
-            return !$this->isComplementaryRole($role);
-        });
-    }
-
-    /**
-     * Determinar si un rol es complementario (no debe rotarse directamente).
-     *
-     * Por defecto, retorna false. Los juegos sobrescriben si tienen roles complementarios.
-     *
-     * @param string $role
-     * @return bool
-     */
-    protected function isComplementaryRole(string $role): bool
-    {
-        return false;
-    }
-
-    /**
-     * Obtener rol complementario de un rol principal.
-     *
-     * Por ejemplo: 'drawer' -> 'guesser' en Pictionary
-     *
-     * @param string $role
-     * @return string|null
-     */
-    protected function getComplementaryRole(string $role): ?string
-    {
-        return null;
     }
 
     /**

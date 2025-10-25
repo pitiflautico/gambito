@@ -22,6 +22,11 @@ Route::prefix('games')->name('api.games.')->group(function () {
     Route::get('/{slug}', [GameController::class, 'apiShow'])->name('show');
 });
 
+// API de Salas
+Route::prefix('rooms')->name('api.rooms.')->group(function () {
+    Route::get('/{code}/state', [RoomController::class, 'apiGetState'])->name('state');
+});
+
 // API de Partidas (Match Control)
 Route::post('/games/{match}/game-ready', [GameController::class, 'gameReady'])
     ->name('api.matches.game-ready');
@@ -38,6 +43,9 @@ Route::prefix('rooms')->name('api.rooms.')->group(function () {
     // Transición Lobby → Game Room
     Route::post('/{code}/ready', [RoomController::class, 'apiReady'])->name('ready');
     Route::post('/{code}/initialize-engine', [RoomController::class, 'apiInitializeEngine'])->name('initialize-engine');
+
+    // Gestión de Rondas
+    Route::post('/{code}/next-round', [RoomController::class, 'apiNextRound'])->name('next-round');
 
     // Presence Channel tracking
     Route::post('/{code}/presence/check', [RoomController::class, 'checkAllPlayersConnected'])

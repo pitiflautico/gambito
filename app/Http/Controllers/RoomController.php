@@ -828,6 +828,70 @@ class RoomController extends Controller
     }
 
     /**
+     * API: Avanzar a la siguiente ronda.
+     *
+     * Este endpoint es llamado por el frontend cuando:
+     * 1. Se recibe RoundEndedEvent con timing.auto_next = true
+     * 2. Frontend espera timing.delay segundos
+     * 3. Frontend llama a este endpoint
+     *
+     * @param Request $request
+     * @param string $code Código de la sala
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function apiNextRound(Request $request, string $code)
+    {
+        $code = strtoupper($code);
+        $room = $this->roomService->findRoomByCode($code);
+
+        if (!$room) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Sala no encontrada',
+            ], 404);
+        }
+
+        $match = $room->match;
+
+        // Verificar que la sala esté jugando
+        if ($room->status !== Room::STATUS_PLAYING) {
+            return response()->json([
+                'success' => false,
+                'message' => 'La sala no está en estado de juego',
+            ], 400);
+        }
+
+        try {
+            \Log::info('🔄 [NextRound] Starting new round', [
+                'room_code' => $code,
+                'match_id' => $match->id,
+                'current_round' => $match->game_state['round_system']['current_round'] ?? 1
+            ]);
+
+            // Llamar al método handleNewRound del engine
+            $engine = $match->getEngine();
+            $engine->handleNewRound($match);
+
+            \Log::info('✅ [NextRound] New round started successfully', [
+                'room_code' => $code,
+                'match_id' => $match->id,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Nueva ronda iniciada',
+                'current_round' => $match->game_state['round_system']['current_round'] ?? 1,
+            ]);
+        } catch (\Exception $e) {
+            \Log::error("❌ [NextRound] Error starting new round: {$e->getMessage()}");
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al iniciar nueva ronda: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
      * API: Obtener estadísticas de la sala.
      */
     public function apiStats(string $code)
@@ -1023,6 +1087,43 @@ class RoomController extends Controller
             'min_players' => $minPlayers,
             'total' => $minPlayers, // Para compatibilidad con frontend
             'all_connected' => $connectedCount >= $minPlayers,
+        ]);
+    }
+
+    /**
+     * Obtener el estado actual del juego de una sala.
+     *
+     * @param string $code Código de la sala
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function apiGetState(string $code)
+    {
+        $code = strtoupper($code);
+        $room = $this->roomService->findRoomByCode($code);
+
+        if (!$room) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Sala no encontrada',
+            ], 404);
+        }
+
+        // Si no hay match, retornar estado básico
+        if (!$room->match) {
+            return response()->json([
+                'success' => true,
+                'room_code' => $code,
+                'status' => $room->status,
+                'game_state' => null,
+            ]);
+        }
+
+        // Retornar el game_state completo
+        return response()->json([
+            'success' => true,
+            'room_code' => $code,
+            'status' => $room->status,
+            'game_state' => $room->match->game_state,
         ]);
     }
 }

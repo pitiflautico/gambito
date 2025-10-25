@@ -756,4 +756,32 @@ class RoundManager
             $this->turnManager->reset();
         }
     }
+
+    /**
+     * Avanzar a la siguiente ronda.
+     *
+     * Este método se llama desde BaseGameEngine::handleNewRound()
+     * y se encarga de:
+     * 1. Incrementar el contador de ronda
+     * 2. Limpiar eliminaciones temporales
+     * 3. Resetear turnos y timer (via TurnManager)
+     *
+     * IMPORTANTE: Este método NO llama a la lógica del juego.
+     * Solo gestiona el estado de rondas/turnos/timer.
+     *
+     * @return void
+     */
+    public function advanceToNextRound(): void
+    {
+        // Incrementar ronda
+        $this->currentRound++;
+
+        // Limpiar eliminaciones temporales
+        $this->clearTemporaryEliminations();
+
+        // Resetear TurnManager (esto cancela timer anterior e inicia uno nuevo)
+        if ($this->turnManager) {
+            $this->turnManager->reset();
+        }
+    }
 }

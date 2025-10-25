@@ -190,21 +190,26 @@ class TimerService
 
 ---
 
-### Task 12.0 - Extraer Roles System Module
+### Task 12.0 - ✅ COMPLETADO - Player State System Module
 
-**Prioridad:** Media
-**Estimación:** 4-6 horas
-**Complejidad:** Media
+**Estado:** COMPLETADO - Reemplazado por PlayerStateManager
+**Implementado:** `app/Services/Modules/PlayerStateSystem/PlayerStateManager.php`
 
-**Qué hacer:**
-1. Crear `app/Services/Modules/RolesSystem/RoleManager.php`
-2. Asignación dinámica de roles por turno
-3. Rotación de roles
-4. Permisos/capacidades por rol
-5. Validación de acciones según rol
-6. Extraer lógica de drawer/guesser de Pictionary
-7. Tests completos
-8. Documentación: `docs/modules/optional/ROLES_SYSTEM.md`
+**Funcionalidades implementadas:**
+1. ✅ Roles Persistentes (duran todo el juego): detective, mafia, etc.
+2. ✅ Roles de Ronda (temporales, se resetean): drawer, guesser, etc.
+3. ✅ Bloqueos de jugadores (control de quién puede actuar)
+4. ✅ Acciones de jugadores (registro de lo que hicieron)
+5. ✅ Estados custom (waiting, active, eliminated, etc.)
+6. ✅ Intentos/Vidas
+7. ✅ Reseteo de estado temporal vs persistente
+8. ✅ Documentación: `docs/MODULES.md` (sección Player State System)
+
+**Tipos de rotación de roles soportados:**
+- Secuencial (siguiente jugador en orden)
+- Aleatoria (jugador random)
+- Sin rotación (todos mismo rol)
+- Manual (lógica custom del juego)
 
 ---
 

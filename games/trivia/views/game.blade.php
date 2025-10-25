@@ -14,41 +14,47 @@
                 </div>
 
                 <!-- Body -->
-                <div class="px-6 py-12 text-center">
-                    <div class="mb-6">
-                        <span class="text-8xl">✅</span>
+                <div id="game-container" class="px-6 py-12">
+                    <!-- Loading State -->
+                    <div id="loading-state" class="text-center">
+                        <div class="mb-6">
+                            <span class="text-6xl">⏳</span>
+                        </div>
+                        <h2 class="text-2xl font-bold text-gray-800 mb-4">Esperando primera pregunta...</h2>
+                        <p class="text-gray-600">
+                            Sala: <strong class="text-gray-900">{{ $code }}</strong>
+                        </p>
                     </div>
 
-                    <h2 class="text-3xl font-bold text-gray-800 mb-6">Trivia está funcionando</h2>
+                    <!-- Question State (hidden initially) -->
+                    <div id="question-state" class="hidden">
+                        <!-- Round Info -->
+                        <div class="text-center mb-8">
+                            <p class="text-lg text-gray-600">
+                                Ronda <strong id="current-round" class="text-blue-600">1</strong> de <strong id="total-rounds" class="text-blue-600">10</strong>
+                            </p>
+                        </div>
 
-                    <p class="text-gray-600 mb-3">
-                        Sala: <strong class="text-gray-900">{{ $code }}</strong>
-                    </p>
+                        <!-- Category -->
+                        <div class="text-center mb-6">
+                            <span id="question-category" class="inline-block bg-purple-100 text-purple-800 text-sm font-semibold px-4 py-2 rounded-full"></span>
+                        </div>
 
-                    <p class="text-gray-600 mb-8">
-                        Match ID: <strong class="text-gray-900">{{ $match->id }}</strong>
-                    </p>
+                        <!-- Question -->
+                        <div class="text-center mb-8">
+                            <h2 id="question-text" class="text-3xl font-bold text-gray-900 mb-2"></h2>
+                        </div>
 
-                    <!-- Status -->
-                    <div class="bg-blue-50 border-l-4 border-blue-500 p-4 mb-6 mx-auto max-w-2xl">
-                        <p class="font-bold text-blue-800 mb-2">Flujo híbrido funcionando:</p>
-                        <div class="text-left text-sm text-blue-700 space-y-1">
-                            <div>✅ FASE 1: Lobby completado</div>
-                            <div>✅ FASE 2: Countdown completado</div>
-                            <div>✅ FASE 3: Juego iniciado</div>
+                        <!-- Options -->
+                        <div id="options-container" class="space-y-3 max-w-2xl mx-auto">
+                            <!-- Options will be inserted here -->
+                        </div>
+
+                        <!-- Timer (if present) -->
+                        <div class="text-center mt-8">
+                            <p id="timer" class="text-xl font-mono text-gray-600"></p>
                         </div>
                     </div>
-
-                    <hr class="my-8 border-gray-300">
-
-                    <h5 class="text-lg font-semibold text-gray-800 mb-4">Próximos pasos:</h5>
-                    <ul class="text-left text-gray-700 space-y-2 max-w-md mx-auto">
-                        <li>📝 Cargar preguntas desde questions.json</li>
-                        <li>🎯 Mostrar primera pregunta</li>
-                        <li>⏱️ Timer por pregunta</li>
-                        <li>🎮 Procesar respuestas</li>
-                        <li>🏆 Sistema de puntuación</li>
-                    </ul>
                 </div>
             </div>
         </div>
@@ -63,16 +69,94 @@
         matchId
     });
 
+    // Helper para mostrar la pregunta
+    function displayQuestion(question, categoryName, currentRound, totalRounds) {
+        console.log('📝 [Trivia] Displaying question:', question);
+
+        // Ocultar loading, mostrar pregunta
+        document.getElementById('loading-state').classList.add('hidden');
+        document.getElementById('question-state').classList.remove('hidden');
+
+        // Actualizar info de ronda
+        document.getElementById('current-round').textContent = currentRound;
+        document.getElementById('total-rounds').textContent = totalRounds;
+
+        // Actualizar categoría
+        document.getElementById('question-category').textContent = categoryName || question.category || 'General';
+
+        // Actualizar pregunta
+        document.getElementById('question-text').textContent = question.question;
+
+        // Renderizar opciones
+        const optionsContainer = document.getElementById('options-container');
+        optionsContainer.innerHTML = '';
+
+        question.options.forEach((option, index) => {
+            const button = document.createElement('button');
+            button.className = 'w-full bg-white hover:bg-blue-50 text-left px-6 py-4 rounded-lg border-2 border-gray-300 hover:border-blue-500 transition-all duration-200 text-lg font-medium text-gray-800';
+            button.textContent = option;
+            button.dataset.index = index;
+
+            button.addEventListener('click', () => {
+                console.log('✅ [Trivia] Option selected:', { index, option });
+                // TODO: Enviar respuesta al backend
+                alert(`Seleccionaste: ${option} (índice: ${index})\n\nTODO: Implementar envío de respuesta al backend`);
+            });
+
+            optionsContainer.appendChild(button);
+        });
+    }
+
     // Conectar al canal de la sala
     if (typeof window.Echo !== 'undefined') {
         const channel = window.Echo.channel(`room.${roomCode}`);
 
-        // Escuchar evento de ronda iniciada
-        channel.listen('.game.round-started', (data) => {
+        // ✅ CORREGIDO: Escuchar evento con el nombre correcto
+        channel.listen('.game.round.started', (data) => {
             console.log('🎮 [Trivia] Round started event received:', data);
+
+            const gameState = data.game_state;
+            const currentQuestion = gameState.current_question;
+            const categories = gameState._config?.categories || {};
+
+            if (currentQuestion) {
+                const categoryName = categories[currentQuestion.category] || currentQuestion.category;
+                displayQuestion(currentQuestion, categoryName, data.current_round, data.total_rounds);
+            } else {
+                console.error('❌ [Trivia] No current_question in game_state:', gameState);
+            }
         });
 
         console.log('✅ [Trivia] WebSocket channel connected');
+    } else {
+        console.error('❌ [Trivia] Echo not available');
     }
+
+    // Cargar pregunta actual si ya existe (refresh)
+    window.addEventListener('load', async () => {
+        try {
+            const response = await fetch(`/api/rooms/${roomCode}/state`);
+            if (response.ok) {
+                const data = await response.json();
+                const gameState = data.game_state;
+                const currentQuestion = gameState?.current_question;
+                const roundSystem = gameState?.round_system;
+                const categories = gameState?._config?.categories || {};
+
+                if (currentQuestion && roundSystem) {
+                    const categoryName = categories[currentQuestion.category] || currentQuestion.category;
+                    displayQuestion(
+                        currentQuestion,
+                        categoryName,
+                        roundSystem.current_round,
+                        roundSystem.total_rounds
+                    );
+                    console.log('✅ [Trivia] Loaded current question from API');
+                }
+            }
+        } catch (error) {
+            console.error('❌ [Trivia] Error loading initial state:', error);
+        }
+    });
     </script>
 </x-app-layout>

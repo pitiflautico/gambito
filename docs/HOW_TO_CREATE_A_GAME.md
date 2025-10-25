@@ -43,10 +43,10 @@ Guía completa y autocontenida para implementar un nuevo juego usando la arquite
   - Código: `app/Services/Modules/TimerSystem/Timer.php`
   - Tests: `tests/Unit/Services/Modules/TimerSystem/TimerServiceTest.php` (44 tests)
 
-#### Roles System
-- **Documentación técnica**: Pendiente crear `docs/modules/optional/ROLES_SYSTEM.md`
-  - Código: `app/Services/Modules/RolesSystem/RoleManager.php`
-  - Tests: `tests/Unit/Services/Modules/RolesSystem/RoleManagerTest.php` (22 tests)
+#### Player State System
+- **Documentación técnica**: `docs/MODULES.md` (sección Player State System)
+  - Código: `app/Services/Modules/PlayerStateSystem/PlayerStateManager.php`
+  - Gestiona estado individual de jugadores: roles persistentes/temporales, bloqueos, acciones, estados custom, intentos
 
 ### Ejemplo Completo de Referencia
 - **`games/pictionary/`** - Implementación completa de Pictionary
@@ -264,7 +264,7 @@ Define qué módulos usa tu juego:
       "scoring_system": true,
       "teams_system": false,
       "timer_system": true,
-      "roles_system": false,
+      "player_state_system": false,
       "card_system": false,
       "board_system": false,
       "spectator_mode": false,
@@ -611,7 +611,7 @@ $newDrawerId = $roleManager->rotateRole('drawer', $turnOrder);
       "round_system": true,
       "scoring_system": true,
       "timer_system": true,
-      "roles_system": true
+      "player_state_system": true
     }
   }
 }
@@ -622,7 +622,7 @@ $newDrawerId = $roleManager->rotateRole('drawer', $turnOrder);
 // initialize()
 $turnManager = new TurnManager($playerIds, 'sequential');
 $roundManager = new RoundManager($turnManager, totalRounds: 5);
-$roleManager = new RoleManager(['drawer', 'guesser']);
+$playerState = new PlayerStateManager(['drawer', 'guesser']);
 $timerService = new TimerService();
 
 // Cada turno
@@ -796,7 +796,7 @@ private function nextTurn(GameMatch $match): void
 
     // Restaurar módulos
     $roundManager = RoundManager::fromArray($gameState);
-    $roleManager = RoleManager::fromArray($gameState);
+    $playerState = PlayerStateManager::fromArray($gameState);
     $timerService = TimerService::fromArray($gameState);
 
     // Avanzar turno
@@ -1152,11 +1152,11 @@ Antes de hacer commit de tu juego, verifica:
 - **Turn System**: `app/Services/Modules/TurnSystem/TurnManager.php` (300 líneas)
 - **Scoring System**: `app/Services/Modules/ScoringSystem/ScoreManager.php`
 - **Timer System**: `app/Services/Modules/TimerSystem/TimerService.php`
-- **Roles System**: `app/Services/Modules/RolesSystem/RoleManager.php`
+- **Player State System**: `app/Services/Modules/PlayerStateSystem/PlayerStateManager.php`
 
 #### Tests (Ejemplos de Uso)
 - **RoundManager**: `tests/Unit/Services/Modules/RoundSystem/RoundManagerTest.php` (15 tests, 59 assertions)
-- **RoleManager**: `tests/Unit/Services/Modules/RolesSystem/RoleManagerTest.php` (22 tests, 56 assertions)
+- **PlayerStateManager**: Gestiona roles persistentes/temporales, bloqueos, acciones, estados
 - **TimerService**: `tests/Unit/Services/Modules/TimerSystem/TimerServiceTest.php` (44 tests, 130 assertions)
 - **ScoreManager**: `tests/Unit/Services/Modules/ScoringSystem/ScoreManagerTest.php`
 

@@ -294,19 +294,28 @@ $timerService->resetTimer($match);
 
 ---
 
-### 5. Roles System
+### 5. Player State System
 
-**Ubicación**: `app/Services/Modules/RolesSystem/RoleManager.php`
+**Ubicación**: `app/Services/Modules/PlayerStateSystem/PlayerStateManager.php`
 
-**¿Cuándo usarlo?**: Juegos donde los jugadores tienen roles (ej: dibujante/adivinador).
+**¿Cuándo usarlo?**: Gestión unificada del estado individual de jugadores.
+
+**Responsabilidades**:
+- **Roles Persistentes**: Roles que duran todo el juego (ej: Mafia, Detective)
+- **Roles de Ronda**: Roles temporales que cambian cada ronda (ej: dibujante, votante)
+- **Bloqueos**: ¿Puede actuar el jugador o ya actuó esta ronda?
+- **Acciones**: ¿Qué hizo el jugador esta ronda?
+- **Estados Custom**: waiting, active, eliminated, drawing, etc.
+- **Intentos/Vidas**: Para juegos que lo necesiten
 
 **Configuración**:
 ```json
 {
   "modules": {
-    "roles_system": {
+    "player_state_system": {
       "enabled": true,
-      "roles": ["drawer", "guesser"]
+      "available_roles": ["detective", "mafia", "civilian"],
+      "allow_multiple_persistent_roles": false
     }
   }
 }
@@ -315,30 +324,251 @@ $timerService->resetTimer($match);
 **Estado en game_state**:
 ```json
 {
-  "roles_system": {
-    "enabled": true,
-    "player_roles": {
-      "1": "drawer",
-      "2": "guesser",
-      "3": "guesser"
+  "player_state_system": {
+    "available_roles": ["detective", "mafia"],
+    "allow_multiple_persistent_roles": false,
+    "persistent_roles": {
+      "1": "detective",
+      "2": "mafia"
+    },
+    "round_roles": {
+      "1": "drawer"
+    },
+    "locks": {
+      "2": true
+    },
+    "actions": {
+      "2": {"type": "answer", "value": "Paris"}
+    },
+    "states": {
+      "1": "active",
+      "2": "waiting"
+    },
+    "attempts": {
+      "1": 2
     }
   }
 }
 ```
 
-**API**:
+**API - Roles Persistentes** (duran todo el juego):
 
 ```php
-$roleManager = new RoleManager($config);
+$playerState = $this->getPlayerStateManager($match);
 
-// Asignar rol
-$roleManager->assignRole($match, $playerId, 'drawer');
+// Asignar rol persistente
+$playerState->assignPersistentRole($playerId, 'detective');
 
 // Obtener rol
-$role = $roleManager->getPlayerRole($match, $playerId);
+$role = $playerState->getPersistentRole($playerId);
 
-// Rotar roles
-$roleManager->rotateRoles($match);
+// Verificar rol
+if ($playerState->hasPersistentRole($playerId, 'detective')) {
+    // ...
+}
+
+// Obtener jugadores con un rol
+$detectives = $playerState->getPlayersWithPersistentRole('detective');
+
+$this->savePlayerStateManager($match, $playerState);
+```
+
+**API - Roles de Ronda** (temporales, se resetean):
+
+```php
+$playerState = $this->getPlayerStateManager($match);
+
+// Asignar rol de ronda
+$playerState->assignRoundRole($playerId, 'drawer');
+
+// Obtener rol de ronda
+$roundRole = $playerState->getRoundRole($playerId);
+
+// Verificar rol de ronda
+if ($playerState->hasRoundRole($playerId, 'drawer')) {
+    // ...
+}
+
+// Limpiar roles de ronda (al finalizar la ronda)
+$playerState->clearAllRoundRoles();
+
+$this->savePlayerStateManager($match, $playerState);
+```
+
+**API - Bloqueos** (control de quién puede actuar):
+
+```php
+$playerState = $this->getPlayerStateManager($match);
+
+// Bloquear jugador (ya actuó)
+$playerState->lockPlayer($playerId);
+
+// Verificar si está bloqueado
+if ($playerState->isPlayerLocked($playerId)) {
+    return ['error' => 'Ya respondiste esta ronda'];
+}
+
+// Desbloquear todos (al iniciar nueva ronda)
+$playerState->unlockAllPlayers();
+
+$this->savePlayerStateManager($match, $playerState);
+```
+
+**API - Acciones**:
+
+```php
+$playerState = $this->getPlayerStateManager($match);
+
+// Registrar acción
+$playerState->setPlayerAction($playerId, [
+    'type' => 'answer',
+    'value' => 'Paris',
+    'timestamp' => now()
+]);
+
+// Obtener acción
+$action = $playerState->getPlayerAction($playerId);
+
+// Verificar si actuó
+if ($playerState->hasPlayerActed($playerId)) {
+    // ...
+}
+
+// Obtener todas las acciones
+$allActions = $playerState->getAllActions();
+
+$this->savePlayerStateManager($match, $playerState);
+```
+
+**API - Estados Custom**:
+
+```php
+$playerState = $this->getPlayerStateManager($match);
+
+// Establecer estado
+$playerState->setPlayerState($playerId, 'drawing');
+
+// Obtener estado
+$state = $playerState->getPlayerState($playerId);
+
+// Obtener jugadores con estado específico
+$drawingPlayers = $playerState->getPlayersWithState('drawing');
+
+$this->savePlayerStateManager($match, $playerState);
+```
+
+**API - Intentos/Vidas**:
+
+```php
+$playerState = $this->getPlayerStateManager($match);
+
+// Incrementar intentos
+$attempts = $playerState->incrementAttempts($playerId);
+
+// Obtener intentos
+$attempts = $playerState->getAttempts($playerId);
+
+// Resetear intentos
+$playerState->resetAttempts($playerId);
+
+$this->savePlayerStateManager($match, $playerState);
+```
+
+**Reseteo de Estado**:
+
+```php
+// Al iniciar nueva ronda, resetear estado temporal
+$playerState = $this->getPlayerStateManager($match);
+$playerState->reset();  // Limpia: roundRoles, locks, actions, states, attempts
+                        // MANTIENE: persistentRoles (duran todo el juego)
+$this->savePlayerStateManager($match, $playerState);
+```
+
+**API - Rotación de Roles** (métodos listos para usar):
+
+**1. Rotación Secuencial** - Rota al siguiente jugador en orden:
+```php
+$playerState = $this->getPlayerStateManager($match);
+$playerIds = $match->players->pluck('id')->toArray();
+$roundManager = $this->getRoundManager($match);
+
+// Rotar 'drawer' al siguiente jugador secuencialmente
+$newDrawerId = $playerState->rotateRoleSequential(
+    role: 'drawer',
+    playerIds: $playerIds,
+    currentRound: $roundManager->getCurrentRound()
+);
+
+$this->savePlayerStateManager($match, $playerState);
+```
+
+**2. Rotación Aleatoria** - Asigna a jugador random:
+```php
+$playerState = $this->getPlayerStateManager($match);
+$playerIds = $match->players->pluck('id')->toArray();
+
+// Asignar 'drawer' a un jugador aleatorio
+$randomDrawerId = $playerState->rotateRoleRandom(
+    role: 'drawer',
+    playerIds: $playerIds
+);
+
+$this->savePlayerStateManager($match, $playerState);
+```
+
+**3. Sin Rotación** - Todos mismo rol persistente:
+```php
+$playerState = $this->getPlayerStateManager($match);
+$playerIds = $match->players->pluck('id')->toArray();
+
+// Todos son 'guesser' durante todo el juego
+$playerState->assignSameRoleToAll(
+    role: 'guesser',
+    playerIds: $playerIds
+);
+
+$this->savePlayerStateManager($match, $playerState);
+```
+
+**4. Rotación Custom** - Callback con lógica específica:
+```php
+$playerState = $this->getPlayerStateManager($match);
+$playerIds = $match->players->pluck('id')->toArray();
+
+// Lógica custom: asignar al jugador con más puntos
+$newDrawerId = $playerState->rotateRoleCustom(
+    role: 'drawer',
+    playerIds: $playerIds,
+    callback: function($role, $playerIds, $roundRoles) use ($match) {
+        $scoreManager = $this->getScoreManager($match);
+        $ranking = $scoreManager->getRanking();
+        return $ranking[0]['player_id']; // Jugador con más puntos
+    }
+);
+
+$this->savePlayerStateManager($match, $playerState);
+```
+
+**5. Roles Complementarios** - Múltiples roles mutuamente excluyentes:
+```php
+$playerState = $this->getPlayerStateManager($match);
+$playerIds = $match->players->pluck('id')->toArray();
+$roundManager = $this->getRoundManager($match);
+
+// 1 drawer, el resto guessers (rota secuencialmente)
+$assignments = $playerState->rotateComplementaryRoles(
+    roleConfig: ['drawer' => 1, 'guesser' => '*'],
+    playerIds: $playerIds,
+    currentRound: $roundManager->getCurrentRound(),
+    rotationType: 'sequential' // o 'random'
+);
+
+// $assignments = [
+//   'drawer' => [3],
+//   'guesser' => [1, 2, 4, 5]
+// ]
+
+$this->savePlayerStateManager($match, $playerState);
 ```
 
 ---
@@ -482,7 +712,7 @@ protected function loadModule(string $moduleKey, array $moduleConfig): mixed
         'turn_system' => new TurnManager($moduleConfig),
         'scoring_system' => new ScoreManager($moduleConfig),
         'timer' => new TimerService($moduleConfig),
-        'roles_system' => new RoleManager($moduleConfig),
+        'player_state_system' => new PlayerStateManager($moduleConfig),
         'mi_modulo' => new MiModulo($moduleConfig),  // ← Agregar aquí
         default => null,
     };

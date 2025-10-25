@@ -442,9 +442,10 @@ Los juegos pueden usar los módulos de `BaseGameEngine`:
 - Gestiona temporizadores
 - `TimerService::fromArray($match->game_state)`
 
-### RoleManager (opcional)
-- Gestiona roles específicos del juego
-- `$this->getRoleManager($match)`
+### PlayerStateManager (opcional)
+- Gestiona estado individual de jugadores
+- Roles persistentes y temporales, bloqueos, acciones, estados
+- `$this->getPlayerStateManager($match)`
 
 ---
 
