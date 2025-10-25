@@ -34,10 +34,22 @@ class GameStartedEvent implements ShouldBroadcast
 
     public function broadcastWith(): array
     {
+        $players = $this->room->match->players()
+            ->where('is_connected', true)
+            ->get(['id', 'name', 'user_id'])
+            ->map(function ($player) {
+                return [
+                    'id' => $player->id,
+                    'name' => $player->name,
+                    'user_id' => $player->user_id,
+                ];
+            });
+
         return [
             'room_code' => $this->room->code,
             'game_name' => $this->room->game->name,
-            'total_players' => $this->room->match->players()->count(),
+            'players' => $players->toArray(),
+            'total_players' => $players->count(),
             'timestamp' => now()->toIso8601String(),
         ];
     }
