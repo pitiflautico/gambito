@@ -13,6 +13,9 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
+// Todas las rutas de debug necesitan middleware web para sesiones
+Route::middleware(['web'])->group(function () {
+
 // ========================================================================
 // GAME EVENTS DEBUG PANEL
 // ========================================================================
@@ -20,6 +23,9 @@ use Illuminate\Support\Facades\Route;
 /**
  * Panel visual para debugging de eventos del juego
  * URL: /debug/game-events/{roomCode}
+ *
+ * AUTO-CREA un player de testing para cada sesión que acceda al panel.
+ * Esto permite abrir múltiples pestañas del navegador para testear Presence Channel.
  */
 Route::get('/game-events/{roomCode}', function ($roomCode) {
     $room = Room::where('code', $roomCode)->firstOrFail();
@@ -29,17 +35,48 @@ Route::get('/game-events/{roomCode}', function ($roomCode) {
         abort(404, 'No hay partida activa en esta sala');
     }
 
+    // AUTO-CREAR PLAYER DE TESTING
+    $sessionId = request()->session()->getId();
+    $user = auth()->user();
+
+    $player = \App\Models\Player::where('match_id', $match->id)
+        ->where(function ($query) use ($user, $sessionId) {
+            $query->where('user_id', $user?->id)
+                  ->orWhere('session_id', $sessionId);
+        })
+        ->first();
+
+    // Si no existe, crear uno
+    if (!$player) {
+        $playerNumber = \App\Models\Player::where('match_id', $match->id)->count() + 1;
+
+        $player = \App\Models\Player::create([
+            'match_id' => $match->id,
+            'session_id' => $sessionId,
+            'user_id' => $user?->id,
+            'name' => "Debug Player {$playerNumber}",
+            'role' => 'player',
+        ]);
+
+        logger()->info("🧪 [DEBUG] Auto-created debug player", [
+            'player_id' => $player->id,
+            'player_name' => $player->name,
+            'session_id' => $sessionId,
+            'room_code' => $roomCode,
+        ]);
+    }
+
     $baseEventsConfig = require config_path('game-events.php');
     $baseEvents = $baseEventsConfig['base_events']['events'] ?? [];
 
-    return view('debug-game-events', compact('roomCode', 'room', 'match', 'baseEvents'));
+    return view('debug.events', compact('roomCode', 'room', 'match', 'baseEvents', 'player'));
 })->name('debug.game-events.panel');
 
 /**
- * API: Iniciar juego
- * POST /debug/game-events/{roomCode}/start
+ * API: Reset Room (eliminar players y resetear game_state)
+ * POST /debug/game-events/{roomCode}/reset
  */
-Route::post('/game-events/{roomCode}/start', function ($roomCode) {
+Route::post('/game-events/{roomCode}/reset', function ($roomCode) {
     $room = Room::where('code', $roomCode)->firstOrFail();
     $match = $room->match;
 
@@ -48,13 +85,19 @@ Route::post('/game-events/{roomCode}/start', function ($roomCode) {
     }
 
     try {
-        $engine = $room->game->getEngine();
-        $engine->startGame($match);
+        // Eliminar players
+        $match->players()->delete();
+
+        // Resetear game_state
+        $match->update(['game_state' => []]);
+
+        // Resetear status de la sala
+        $room->update(['status' => 'waiting']);
 
         return response()->json([
             'success' => true,
-            'message' => 'Game started',
-            'game_state' => $match->fresh()->game_state,
+            'message' => 'Room reset successfully',
+            'room_code' => $room->code,
         ]);
     } catch (\Exception $e) {
         return response()->json([
@@ -63,95 +106,7 @@ Route::post('/game-events/{roomCode}/start', function ($roomCode) {
             'trace' => config('app.debug') ? $e->getTraceAsString() : null,
         ], 400);
     }
-})->name('debug.game-events.start');
-
-/**
- * API: Avanzar a la siguiente ronda
- * POST /debug/game-events/{roomCode}/next-round
- */
-Route::post('/game-events/{roomCode}/next-round', function ($roomCode) {
-    $room = Room::where('code', $roomCode)->firstOrFail();
-    $match = $room->match;
-
-    if (!$match) {
-        return response()->json(['success' => false, 'error' => 'No match found'], 404);
-    }
-
-    try {
-        $engine = $room->game->getEngine();
-
-        // Simular completar ronda actual y avanzar a la siguiente
-        $engine->completeRound($match, []);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Round advanced',
-            'game_state' => $match->fresh()->game_state,
-        ]);
-    } catch (\Exception $e) {
-        return response()->json([
-            'success' => false,
-            'error' => $e->getMessage(),
-            'trace' => config('app.debug') ? $e->getTraceAsString() : null,
-        ], 400);
-    }
-})->name('debug.game-events.next-round');
-
-/**
- * API: Finalizar juego
- * POST /debug/game-events/{roomCode}/end
- */
-Route::post('/game-events/{roomCode}/end', function ($roomCode) {
-    $room = Room::where('code', $roomCode)->firstOrFail();
-    $match = $room->match;
-
-    if (!$match) {
-        return response()->json(['success' => false, 'error' => 'No match found'], 404);
-    }
-
-    try {
-        $engine = $room->game->getEngine();
-        $engine->finalize($match);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Game ended',
-            'game_state' => $match->fresh()->game_state,
-        ]);
-    } catch (\Exception $e) {
-        return response()->json([
-            'success' => false,
-            'error' => $e->getMessage(),
-            'trace' => config('app.debug') ? $e->getTraceAsString() : null,
-        ], 400);
-    }
-})->name('debug.game-events.end');
-
-/**
- * API: Obtener estado actual del juego
- * GET /debug/game-events/{roomCode}/state
- */
-Route::get('/game-events/{roomCode}/state', function ($roomCode) {
-    $room = Room::where('code', $roomCode)->firstOrFail();
-    $match = $room->match;
-
-    if (!$match) {
-        return response()->json(['success' => false, 'error' => 'No match found'], 404);
-    }
-
-    return response()->json([
-        'success' => true,
-        'room_code' => $room->code,
-        'room_status' => $room->status,
-        'match_id' => $match->id,
-        'game_state' => $match->game_state,
-        'players' => $match->players->map(fn($p) => [
-            'id' => $p->id,
-            'name' => $p->name,
-            'is_connected' => $p->is_connected,
-        ]),
-    ]);
-})->name('debug.game-events.state');
+})->name('debug.game-events.reset');
 
 // ========================================================================
 // LEGACY DEBUG ROUTES (mantener por compatibilidad)
@@ -189,3 +144,5 @@ Route::get('/websocket/{roomCode}', function ($roomCode) {
         'eventConfig' => $eventConfig,
     ]);
 })->name('debug.websocket');
+
+}); // End of web middleware group

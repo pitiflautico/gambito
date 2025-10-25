@@ -19,17 +19,10 @@ Broadcast::channel('App.Models.User.{id}', function ($user, $id) {
     return (int) $user->id === (int) $id;
 });
 
-// Canal privado de sala de juego (por código de sala)
+// Presence Channel - Trackea automáticamente quién está conectado
+// NOTA: Laravel añade automáticamente el prefijo "presence-" cuando usas Echo.join()
+// Por eso aquí solo ponemos "room.{code}" aunque en JS se usa join('room.{code}')
 Broadcast::channel('room.{code}', function ($user, string $code) {
-    // MODO DEMO: Permitir acceso a sala DEMO123 sin autenticación
-    if ($code === 'DEMO123') {
-        return [
-            'id' => request()->session()->getId(),
-            'name' => 'Demo User',
-            'role' => 'demo',
-        ];
-    }
-
     // Verificar que la sala existe
     $room = Room::where('code', $code)->first();
 
@@ -37,37 +30,49 @@ Broadcast::channel('room.{code}', function ($user, string $code) {
         return false;
     }
 
-    // Verificar que el usuario es el master de la sala
-    if ($user && $room->master_id === $user->id) {
-        return [
-            'id' => $user->id,
-            'name' => $user->name,
-            'role' => 'master',
-        ];
+    $match = $room->match;
+    if (!$match) {
+        return false;
     }
 
-    // Verificar si es un jugador invitado (guest) en esta sala
-    // Los guests se identifican por session_id, no por user_id
+    // Buscar el jugador por session_id o user_id
     $sessionId = request()->session()->getId();
 
-    $player = Player::whereHas('match', function ($query) use ($room) {
-        $query->where('room_id', $room->id);
-    })
-    ->where(function ($query) use ($user, $sessionId) {
-        $query->where('user_id', $user?->id)
-              ->orWhere('session_id', $sessionId);
-    })
-    ->where('is_active', true)
-    ->first();
+    $player = null;
 
-    if ($player) {
-        return [
-            'id' => $player->id,
-            'name' => $player->name,
-            'role' => 'player',
-        ];
+    // Si hay usuario autenticado, buscar por user_id
+    if ($user) {
+        $player = Player::where('match_id', $match->id)
+            ->where('user_id', $user->id)
+            ->first();
     }
 
-    // No autorizado
-    return false;
+    // Si no hay player aún, buscar por session_id (para guests)
+    if (!$player && $sessionId) {
+        $player = Player::where('match_id', $match->id)
+            ->where('session_id', $sessionId)
+            ->first();
+    }
+
+    if (!$player) {
+        \Log::warning('❌ Presence Channel: Player not found', [
+            'room_code' => $code,
+            'user_id' => $user?->id,
+            'session_id' => substr($sessionId, 0, 20) . '...',
+        ]);
+        return false;
+    }
+
+    \Log::info('✅ Presence Channel: Authorized', [
+        'player_id' => $player->id,
+        'player_name' => $player->name,
+        'room_code' => $code,
+    ]);
+
+    // Retornar info del jugador
+    return [
+        'id' => $player->id,
+        'name' => $player->name,
+        'role' => $player->role,
+    ];
 });

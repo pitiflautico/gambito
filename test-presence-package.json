@@ -1,0 +1,14 @@
+{
+  "name": "presence-channel-test",
+  "version": "1.0.0",
+  "description": "Script para testear conexiones simultáneas al Presence Channel",
+  "type": "module",
+  "scripts": {
+    "test:presence": "node test-presence-connections.js"
+  },
+  "dependencies": {
+    "laravel-echo": "^1.16.1",
+    "pusher-js": "^8.4.0-rc2",
+    "node-fetch": "^3.3.2"
+  }
+}

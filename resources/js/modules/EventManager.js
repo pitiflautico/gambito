@@ -86,7 +86,40 @@ class EventManager {
         console.log('🔌 [EventManager] Connecting to channel:', channelName);
 
         try {
-            this.channel = window.Echo.channel(channelName);
+            // Usar Presence Channel para trackear conexiones automáticamente
+            // Los canales que empiezan con "room." son Presence Channels
+            // Laravel añade automáticamente el prefijo "presence-" internamente
+            const isPresenceChannel = channelName.startsWith('presence-') || channelName.startsWith('room.');
+
+            if (isPresenceChannel) {
+                console.log('👥 [EventManager] Using Presence Channel');
+                this.channel = window.Echo.join(channelName);
+
+                // Trackear quién está conectado
+                this.channel
+                    .here((users) => {
+                        console.log('👥 [EventManager] Users currently in room:', users);
+                        if (this.handlers.onUsersHere) {
+                            this.handlers.onUsersHere(users);
+                        }
+                    })
+                    .joining((user) => {
+                        console.log('✅ [EventManager] User joined:', user);
+                        if (this.handlers.onUserJoining) {
+                            this.handlers.onUserJoining(user);
+                        }
+                    })
+                    .leaving((user) => {
+                        console.log('❌ [EventManager] User left:', user);
+                        if (this.handlers.onUserLeaving) {
+                            this.handlers.onUserLeaving(user);
+                        }
+                    });
+            } else {
+                // Canal privado normal
+                this.channel = window.Echo.private(channelName);
+            }
+
             console.log('✅ [EventManager] Channel connected:', channelName);
 
             // Registrar listeners automáticamente desde la configuración

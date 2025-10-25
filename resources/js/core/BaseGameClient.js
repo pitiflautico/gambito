@@ -36,11 +36,6 @@ export class BaseGameClient {
 
         // Solo mostrar el estado
         console.log('state:', this.gameState?.phase || 'unknown');
-
-        // Notificar al backend que el jugador está conectado (fire-and-forget, no bloqueante)
-        this.notifyPlayerConnected().catch(err => {
-            console.warn('⚠️ [BaseGameClient] Failed to notify player connected:', err);
-        });
     }
 
     /**
@@ -52,7 +47,6 @@ export class BaseGameClient {
         // Handlers por defecto que todos los juegos usan
         const defaultHandlers = {
             handleGameStarted: (event) => this.handleGameStarted(event),
-            handlePlayerConnected: (event) => this.handlePlayerConnected(event),
             handleRoundStarted: (event) => this.handleRoundStarted(event),
             handleRoundEnded: (event) => this.handleRoundEnded(event),
             handlePlayerAction: (event) => this.handlePlayerAction(event),
@@ -104,20 +98,6 @@ export class BaseGameClient {
         // para hacer transiciones de UI, mostrar mensajes, etc.
     }
 
-    /**
-     * Handler genérico: Jugador conectado
-     *
-     * Actualiza el contador de jugadores conectados en tiempo real
-     */
-    handlePlayerConnected(event) {
-        console.log('📱 [BaseGameClient] Player connected:', event);
-
-        // Actualizar el contador en la UI
-        const statusElement = document.getElementById('connection-status');
-        if (statusElement) {
-            statusElement.textContent = `(${event.connected_count}/${event.total_players})`;
-        }
-    }
 
     /**
      * Handler genérico: Nueva ronda iniciada
@@ -258,36 +238,6 @@ export class BaseGameClient {
         } catch (error) {
             console.error(`❌ [BaseGameClient] Error sending action to ${endpoint}:`, error);
             throw error;
-        }
-    }
-
-    /**
-     * Notificar al backend que el jugador está conectado.
-     *
-     * Se llama automáticamente cuando el jugador carga la página del juego.
-     * El backend usa esto para detectar cuándo todos están conectados y
-     * transicionar de la fase "starting" al primer round.
-     */
-    async notifyPlayerConnected() {
-        try {
-            const response = await fetch(`/api/rooms/${this.roomCode}/player-connected`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
-                },
-                body: JSON.stringify({
-                    player_id: this.playerId
-                })
-            });
-
-            const data = await response.json();
-
-            if (response.ok && data.success) {
-                // Silencioso, no mostrar nada
-            }
-        } catch (error) {
-            // Silencioso
         }
     }
 
