@@ -3,27 +3,24 @@
 namespace App\Services\Modules\RoundSystem;
 
 use App\Services\Modules\TurnSystem\TurnManager;
-use App\Services\Modules\TeamsSystem\TeamsManager;
 
 /**
  * Servicio genérico para gestionar rondas en juegos.
  *
- * Una RONDA es un ciclo completo donde todos los jugadores han participado.
- * RoundManager gestiona:
+ * RESPONSABILIDADES:
  * - Conteo de rondas (actual, total)
- * - Eliminación de jugadores (permanente/temporal por ronda)
+ * - Timing entre rondas (emitir eventos, programar backups)
  * - Detección de fin de juego
  * - Contiene un TurnManager para gestionar turnos dentro de la ronda
  *
- * Separación de responsabilidades:
- * - RoundManager: ¿En qué ronda estamos? ¿Quién está eliminado? ¿Acabó el juego?
- * - TurnManager: ¿De quién es el turno ahora? ¿En qué orden juegan?
+ * NO ES RESPONSABLE DE:
+ * - Estado de jugadores (eliminaciones, bloqueos, etc.) → PlayerStateManager
+ * - Decisiones de negocio (cuándo termina ronda) → GameEngine + Strategies
+ * - Equipos → TeamsManager (módulo separado)
  *
  * Ejemplos de uso:
- * - Pictionary: 5 rondas, eliminación temporal por ronda
- * - Battle Royale: Rondas infinitas, eliminación permanente
- * - Trivia: N rondas, sin eliminación
- * - Mafia: Múltiples rondas día/noche, eliminación permanente
+ * - Trivia: N rondas, con timing de 3s entre rondas
+ * - Pictionary: 5 rondas, timing personalizado
  */
 class RoundManager
 {
@@ -38,28 +35,9 @@ class RoundManager
     protected int $totalRounds;
 
     /**
-     * Jugadores eliminados permanentemente (fuera del juego).
-     *
-     * @var array<int>
-     */
-    protected array $permanentlyEliminated = [];
-
-    /**
-     * Jugadores eliminados temporalmente (solo esta ronda).
-     *
-     * @var array<int>
-     */
-    protected array $temporarilyEliminated = [];
-
-    /**
      * TurnManager interno para gestionar turnos.
      */
     protected TurnManager $turnManager;
-
-    /**
-     * TeamsManager opcional para juegos por equipos.
-     */
-    protected ?TeamsManager $teamsManager = null;
 
     /**
      * Si se acaba de completar una ronda.
@@ -101,9 +79,6 @@ class RoundManager
         if ($this->turnManager->isCycleComplete()) {
             $this->currentRound++;
             $this->roundJustCompleted = true;
-
-            // Auto-limpiar eliminaciones temporales
-            $this->clearTemporaryEliminations();
         }
 
         return $turnInfo;
@@ -127,9 +102,6 @@ class RoundManager
         // En round-per-turn mode, SIEMPRE avanzamos la ronda
         $this->currentRound++;
         $this->roundJustCompleted = true;
-
-        // Auto-limpiar eliminaciones temporales
-        $this->clearTemporaryEliminations();
 
         return $turnInfo;
     }
@@ -182,152 +154,8 @@ class RoundManager
             return false; // Juego infinito
         }
 
-        return $this->currentRound > $this->totalRounds;
-    }
-
-    // ========================================================================
-    // GESTIÓN DE ELIMINACIONES
-    // ========================================================================
-
-    /**
-     * Eliminar un jugador del juego.
-     *
-     * @param int $playerId ID del jugador
-     * @param bool $permanent True = permanente, False = solo esta ronda
-     * @return void
-     */
-    public function eliminatePlayer(int $playerId, bool $permanent = true): void
-    {
-        // Verificar que el jugador existe en el turn order
-        if (!in_array($playerId, $this->turnManager->getTurnOrder())) {
-            return;
-        }
-
-        if ($permanent) {
-            if (!in_array($playerId, $this->permanentlyEliminated)) {
-                $this->permanentlyEliminated[] = $playerId;
-            }
-            // Si estaba en temporales, remover
-            $this->temporarilyEliminated = array_values(
-                array_filter($this->temporarilyEliminated, fn($id) => $id !== $playerId)
-            );
-        } else {
-            // Eliminación temporal (solo esta ronda)
-            if (!in_array($playerId, $this->temporarilyEliminated) &&
-                !in_array($playerId, $this->permanentlyEliminated)) {
-                $this->temporarilyEliminated[] = $playerId;
-            }
-        }
-    }
-
-    /**
-     * Verificar si un jugador está eliminado.
-     *
-     * @param int $playerId ID del jugador
-     * @return bool True si está eliminado (temporal o permanente)
-     */
-    public function isEliminated(int $playerId): bool
-    {
-        return in_array($playerId, $this->permanentlyEliminated) ||
-               in_array($playerId, $this->temporarilyEliminated);
-    }
-
-    /**
-     * Verificar si está eliminado permanentemente.
-     *
-     * @param int $playerId ID del jugador
-     * @return bool True si está eliminado permanentemente
-     */
-    public function isPermanentlyEliminated(int $playerId): bool
-    {
-        return in_array($playerId, $this->permanentlyEliminated);
-    }
-
-    /**
-     * Verificar si está eliminado temporalmente.
-     *
-     * @param int $playerId ID del jugador
-     * @return bool True si está eliminado solo esta ronda
-     */
-    public function isTemporarilyEliminated(int $playerId): bool
-    {
-        return in_array($playerId, $this->temporarilyEliminated);
-    }
-
-    /**
-     * Restaurar un jugador eliminado temporalmente.
-     *
-     * @param int $playerId ID del jugador
-     * @return bool True si se restauró, False si era permanente
-     */
-    public function restorePlayer(int $playerId): bool
-    {
-        if (in_array($playerId, $this->permanentlyEliminated)) {
-            return false; // No se puede restaurar permanentes
-        }
-
-        $this->temporarilyEliminated = array_values(
-            array_filter($this->temporarilyEliminated, fn($id) => $id !== $playerId)
-        );
-
-        return true;
-    }
-
-    /**
-     * Limpiar todas las eliminaciones temporales.
-     *
-     * Se llama automáticamente al completar una ronda.
-     *
-     * @return void
-     */
-    public function clearTemporaryEliminations(): void
-    {
-        $this->temporarilyEliminated = [];
-    }
-
-    /**
-     * Obtener jugadores activos (no eliminados).
-     *
-     * @return array<int> IDs de jugadores activos
-     */
-    public function getActivePlayers(): array
-    {
-        return array_values(
-            array_filter(
-                $this->turnManager->getTurnOrder(),
-                fn($playerId) => !$this->isEliminated($playerId)
-            )
-        );
-    }
-
-    /**
-     * Obtener jugadores eliminados permanentemente.
-     *
-     * @return array<int>
-     */
-    public function getPermanentlyEliminated(): array
-    {
-        return $this->permanentlyEliminated;
-    }
-
-    /**
-     * Obtener jugadores eliminados temporalmente.
-     *
-     * @return array<int>
-     */
-    public function getTemporarilyEliminated(): array
-    {
-        return $this->temporarilyEliminated;
-    }
-
-    /**
-     * Obtener cantidad de jugadores activos.
-     *
-     * @return int Número de jugadores no eliminados
-     */
-    public function getActivePlayerCount(): int
-    {
-        return count($this->getActivePlayers());
+        // El juego está completo cuando terminamos la última ronda
+        return $this->currentRound >= $this->totalRounds;
     }
 
     // ========================================================================
@@ -440,8 +268,6 @@ class RoundManager
             'round_system' => [
                 'current_round' => $this->currentRound,
                 'total_rounds' => $this->totalRounds,
-                'permanently_eliminated' => $this->permanentlyEliminated,
-                'temporarily_eliminated' => $this->temporarilyEliminated,
             ],
             // TurnManager mantiene su propio namespace
             'turn_system' => $this->turnManager->toArray(),
@@ -474,270 +300,100 @@ class RoundManager
             currentRound: $roundData['current_round'] ?? 1
         );
 
-        $instance->permanentlyEliminated = $roundData['permanently_eliminated'] ?? [];
-        $instance->temporarilyEliminated = $roundData['temporarily_eliminated'] ?? [];
-
         return $instance;
     }
 
     /**
-     * Programar el avance automático a la siguiente ronda.
+     * Completar ronda actual.
      *
-     * Útil para juegos simultáneos donde todos juegan al mismo tiempo
-     * y después de mostrar resultados se debe avanzar automáticamente.
+     * Responsabilidades de RoundManager:
+     * - Emitir RoundEndedEvent con timing metadata
+     * - Avanzar turno/ronda
+     * - Programar backup automático si está configurado
      *
-     * @param callable $callback Función a ejecutar para avanzar la ronda
+     * @param \App\Models\GameMatch $match
+     * @param array $results Resultados de la ronda
+     * @param array $scores Puntuaciones actuales
+     * @return void
+     */
+    public function completeRound(\App\Models\GameMatch $match, array $results = [], array $scores = []): void
+    {
+        \Log::info('[RoundManager] completeRound() STARTED', [
+            'match_id' => $match->id,
+            'current_round' => $this->currentRound
+        ]);
+        
+        try {
+            // 1. Leer configuración de timing desde game_state
+            $gameConfig = $match->game_state['_config'] ?? [];
+            $timingConfig = $gameConfig['timing']['round_ended'] ?? null;
+            $roundPerTurn = $gameConfig['modules']['turn_system']['round_per_turn'] ?? false;
+
+            \Log::info('[RoundManager] Timing config', [
+                'timing_config' => $timingConfig,
+                'round_per_turn' => $roundPerTurn
+            ]);
+
+            // 2. Emitir evento RoundEndedEvent con timing metadata
+            \Log::info('[RoundManager] About to emit RoundEndedEvent');
+            event(new \App\Events\Game\RoundEndedEvent(
+                match: $match,
+                roundNumber: $this->currentRound,
+                results: $results,
+                scores: $scores,
+                timing: $timingConfig
+            ));
+            \Log::info('[RoundManager] RoundEndedEvent emitted');
+
+            // 3. NO avanzar la ronda aquí - eso lo hará handleNewRound() cuando se llame
+            // El frontend esperará el countdown y luego llamará a /next-round
+            // que ejecutará handleNewRound() que avanzará la ronda y emitirá RoundStartedEvent
+            
+            \Log::info('[RoundManager] Round NOT advanced yet - waiting for countdown/frontend to call next-round', [
+                'current_round' => $this->currentRound
+            ]);
+
+            // 4. BACKUP DESHABILITADO TEMPORALMENTE
+            // El backup automático requiere un queue asíncrono (redis/database)
+            // Con queue=sync, el Job se ejecuta inmediatamente ignorando el delay
+            // Por ahora, solo el frontend maneja el countdown y llama a /next-round
+            // TODO: Configurar queue asíncrono y re-habilitar backup
+            
+            \Log::info('[RoundManager] Frontend countdown will trigger next round', [
+                'timing_config' => $timingConfig
+            ]);
+            
+            \Log::info('[RoundManager] completeRound() FINISHED');
+        } catch (\Exception $e) {
+            \Log::error('[RoundManager] ERROR in completeRound()', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            throw $e;
+        }
+    }
+
+    /**
+     * Programar el avance automático a la siguiente ronda (BACKUP).
+     *
+     * Este job actúa como backup del frontend.
+     * Usa el sistema de locks para evitar duplicados.
+     *
+     * @param int $matchId ID del match a avanzar
      * @param int $delaySeconds Segundos de espera antes de ejecutar
      * @return void
      */
-    public function scheduleNextRound(callable $callback, int $delaySeconds = 5): void
+    public function scheduleNextRound(int $matchId, int $delaySeconds = 5): void
     {
-        \App\Jobs\StartNextRoundJob::dispatch($callback)->delay(now()->addSeconds($delaySeconds));
+        \App\Jobs\StartNextRoundJob::dispatch($matchId)->delay(now()->addSeconds($delaySeconds));
     }
 
-    /**
-     * Verificar si todos los jugadores activos han participado en la ronda actual.
-     *
-     * Útil para juegos simultáneos donde necesitas saber si todos ya jugaron
-     * antes de avanzar.
-     *
-     * @param array $participatedPlayers IDs de jugadores que ya participaron
-     * @return bool True si todos los jugadores activos ya participaron
-     */
-    public function allPlayersParticipated(array $participatedPlayers): bool
-    {
-        $activePlayers = $this->getActivePlayers();
-        $participated = array_intersect($activePlayers, $participatedPlayers);
-
-        return count($participated) === count($activePlayers);
-    }
-
-    /**
-     * Determinar si la ronda debe terminar basado en las respuestas en juegos simultáneos.
-     *
-     * En juegos simultáneos competitivos (como Trivia):
-     * - Si alguien acierta → terminar ronda inmediatamente
-     * - Si todos fallan → terminar ronda
-     * - Si algunos fallan pero no todos respondieron → continuar
-     *
-     * SOPORTE DE EQUIPOS:
-     * - Si NO hay equipos: comportamiento normal (jugadores individuales)
-     * - Si hay equipos: depende del modo de equipos
-     *
-     * @param array $playerResults Array de resultados: [player_id => ['success' => bool]]
-     * @return array ['should_end' => bool, 'reason' => string]
-     */
-    public function shouldEndSimultaneousRound(array $playerResults): array
-    {
-        // Sin equipos: comportamiento normal
-        if (!$this->teamsManager || !$this->teamsManager->isEnabled()) {
-            return $this->shouldEndSimultaneousRoundIndividual($playerResults);
-        }
-
-        // Con equipos: según el modo
-        $mode = $this->teamsManager->getMode();
-
-        return match ($mode) {
-            'all_teams' => $this->shouldEndSimultaneousRoundAllTeams($playerResults),
-            'team_turns' => $this->shouldEndSimultaneousRoundTeamTurns($playerResults),
-            default => $this->shouldEndSimultaneousRoundIndividual($playerResults)
-        };
-    }
-
-    /**
-     * Verificar fin de ronda en modo individual (sin equipos)
-     */
-    protected function shouldEndSimultaneousRoundIndividual(array $playerResults): array
-    {
-        $activePlayers = $this->getActivePlayers();
-        $totalActivePlayers = count($activePlayers);
-        $respondedPlayers = count($playerResults);
-
-        // Verificar si alguien tuvo éxito
-        foreach ($playerResults as $result) {
-            if ($result['success'] ?? false) {
-                return [
-                    'should_end' => true,
-                    'reason' => 'player_succeeded',
-                    'winner_found' => true,
-                ];
-            }
-        }
-
-        // Nadie tuvo éxito aún
-        // Verificar si todos ya respondieron
-        if ($respondedPlayers >= $totalActivePlayers) {
-            return [
-                'should_end' => true,
-                'reason' => 'all_failed',
-                'winner_found' => false,
-            ];
-        }
-
-        // Aún hay jugadores que no han respondido y nadie acertó
-        return [
-            'should_end' => false,
-            'reason' => 'waiting_for_players',
-            'winner_found' => false,
-        ];
-    }
-
-    /**
-     * Verificar fin de ronda en modo "all_teams" (todos los equipos juegan simultáneamente)
-     *
-     * Ejemplo: Trivia por equipos - todos responden cada pregunta
-     * Termina cuando:
-     * - Un equipo completo respondió correctamente (todos sus miembros)
-     * - O todos los equipos completaron sus respuestas
-     */
-    protected function shouldEndSimultaneousRoundAllTeams(array $playerResults): array
-    {
-        $teams = $this->teamsManager->getTeams();
-
-        // Verificar por cada equipo
-        foreach ($teams as $team) {
-            $teamMembers = $team['members'];
-            $teamResponses = array_filter(
-                $playerResults,
-                fn($playerId) => in_array($playerId, $teamMembers),
-                ARRAY_FILTER_USE_KEY
-            );
-
-            // ¿Todos los miembros del equipo respondieron?
-            if (count($teamResponses) === count($teamMembers)) {
-                // ¿Alguno tuvo éxito?
-                foreach ($teamResponses as $result) {
-                    if ($result['success'] ?? false) {
-                        return [
-                            'should_end' => true,
-                            'reason' => 'team_succeeded',
-                            'winner_found' => true,
-                            'winning_team_id' => $team['id']
-                        ];
-                    }
-                }
-            }
-        }
-
-        // Verificar si todos los equipos ya respondieron
-        $allTeamsResponded = true;
-        foreach ($teams as $team) {
-            $teamMembers = $team['members'];
-            $teamResponses = array_filter(
-                $playerResults,
-                fn($playerId) => in_array($playerId, $teamMembers),
-                ARRAY_FILTER_USE_KEY
-            );
-
-            if (count($teamResponses) < count($teamMembers)) {
-                $allTeamsResponded = false;
-                break;
-            }
-        }
-
-        if ($allTeamsResponded) {
-            return [
-                'should_end' => true,
-                'reason' => 'all_teams_failed',
-                'winner_found' => false,
-            ];
-        }
-
-        return [
-            'should_end' => false,
-            'reason' => 'waiting_for_teams',
-            'winner_found' => false,
-        ];
-    }
-
-    /**
-     * Verificar fin de ronda en modo "team_turns" (turnos por equipo)
-     *
-     * Ejemplo: Pictionary por equipos - un equipo juega su turno completo
-     * Termina cuando:
-     * - Todos los miembros del equipo actual han respondido
-     */
-    protected function shouldEndSimultaneousRoundTeamTurns(array $playerResults): array
-    {
-        $currentTeam = $this->teamsManager->getCurrentTeam();
-
-        if (!$currentTeam) {
-            return [
-                'should_end' => false,
-                'reason' => 'no_current_team',
-                'winner_found' => false,
-            ];
-        }
-
-        $teamMembers = $currentTeam['members'];
-        $teamResponses = array_filter(
-            $playerResults,
-            fn($playerId) => in_array($playerId, $teamMembers),
-            ARRAY_FILTER_USE_KEY
-        );
-
-        // Verificar si alguien del equipo tuvo éxito
-        foreach ($teamResponses as $result) {
-            if ($result['success'] ?? false) {
-                return [
-                    'should_end' => true,
-                    'reason' => 'team_member_succeeded',
-                    'winner_found' => true,
-                    'team_id' => $currentTeam['id']
-                ];
-            }
-        }
-
-        // Verificar si todos los miembros del equipo ya respondieron
-        if (count($teamResponses) >= count($teamMembers)) {
-            return [
-                'should_end' => true,
-                'reason' => 'team_all_failed',
-                'winner_found' => false,
-                'team_id' => $currentTeam['id']
-            ];
-        }
-
-        return [
-            'should_end' => false,
-            'reason' => 'waiting_for_team_members',
-            'winner_found' => false,
-        ];
-    }
-
-    // ========================================================================
-    // INTEGRACIÓN CON EQUIPOS
-    // ========================================================================
-
-    /**
-     * Establecer el TeamsManager para juegos por equipos
-     */
-    public function setTeamsManager(?TeamsManager $teamsManager): void
-    {
-        $this->teamsManager = $teamsManager;
-    }
-
-    /**
-     * Obtener el TeamsManager
-     */
-    public function getTeamsManager(): ?TeamsManager
-    {
-        return $this->teamsManager;
-    }
-
-    /**
-     * Verificar si el juego se está jugando por equipos
-     */
-    public function isTeamsMode(): bool
-    {
-        return $this->teamsManager && $this->teamsManager->isEnabled();
-    }
 
     /**
      * Resetear el RoundManager a su estado inicial.
      *
      * Usado por BaseGameEngine::resetModules() al iniciar/reiniciar el juego.
-     * Vuelve a ronda 1 y limpia todas las eliminaciones.
+     * Vuelve a ronda 1.
      *
      * IMPORTANTE: También resetea el TurnManager si existe, lo que
      * automáticamente inicia el timer del primer turno.
@@ -747,8 +403,6 @@ class RoundManager
     public function reset(): void
     {
         $this->currentRound = 1;
-        $this->permanentlyEliminated = [];
-        $this->temporarilyEliminated = [];
         $this->roundJustCompleted = false;
 
         // Resetear TurnManager (esto inicia el timer automáticamente)
@@ -763,8 +417,7 @@ class RoundManager
      * Este método se llama desde BaseGameEngine::handleNewRound()
      * y se encarga de:
      * 1. Incrementar el contador de ronda
-     * 2. Limpiar eliminaciones temporales
-     * 3. Resetear turnos y timer (via TurnManager)
+     * 2. Resetear turnos y timer (via TurnManager)
      *
      * IMPORTANTE: Este método NO llama a la lógica del juego.
      * Solo gestiona el estado de rondas/turnos/timer.
@@ -775,9 +428,6 @@ class RoundManager
     {
         // Incrementar ronda
         $this->currentRound++;
-
-        // Limpiar eliminaciones temporales
-        $this->clearTemporaryEliminations();
 
         // Resetear TurnManager (esto cancela timer anterior e inicia uno nuevo)
         if ($this->turnManager) {

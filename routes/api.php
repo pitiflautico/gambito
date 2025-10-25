@@ -45,7 +45,17 @@ Route::prefix('rooms')->name('api.rooms.')->group(function () {
     Route::post('/{code}/initialize-engine', [RoomController::class, 'apiInitializeEngine'])->name('initialize-engine');
 
     // Gestión de Rondas
-    Route::post('/{code}/next-round', [RoomController::class, 'apiNextRound'])->name('next-round');
+    Route::post('/{code}/next-round', [\App\Http\Controllers\PlayController::class, 'apiNextRound'])->name('next-round');
+
+    // Información del Jugador
+    Route::get('/{code}/player-info', [RoomController::class, 'apiGetPlayerInfo'])
+        ->middleware(['web'])
+        ->name('player-info');
+
+    // Acciones de Juego (genérico para todos los juegos)
+    Route::post('/{code}/action', [\App\Http\Controllers\PlayController::class, 'apiProcessAction'])
+        ->middleware(['web'])
+        ->name('action');
 
     // Presence Channel tracking
     Route::post('/{code}/presence/check', [RoomController::class, 'checkAllPlayersConnected'])

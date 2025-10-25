@@ -26,6 +26,18 @@ namespace App\Services\Modules\PlayerStateSystem;
 class PlayerStateManager
 {
     // ========================================================================
+    // LISTA DE JUGADORES
+    // ========================================================================
+
+    /**
+     * IDs de todos los jugadores en el match.
+     * Se inicializa una vez al principio y se mantiene para referencia.
+     *
+     * @var array<int>
+     */
+    protected array $playerIds = [];
+
+    // ========================================================================
     // ROLES PERSISTENTES (todo el juego, NO se resetean)
     // ========================================================================
 
@@ -98,6 +110,7 @@ class PlayerStateManager
     // ========================================================================
 
     public function __construct(
+        array $playerIds = [],
         array $availableRoles = [],
         bool $allowMultiplePersistentRoles = false,
         array $persistentRoles = [],
@@ -107,6 +120,7 @@ class PlayerStateManager
         array $states = [],
         array $attempts = []
     ) {
+        $this->playerIds = $playerIds;
         $this->availableRoles = $availableRoles;
         $this->allowMultiplePersistentRoles = $allowMultiplePersistentRoles;
         $this->persistentRoles = $persistentRoles;
@@ -115,6 +129,43 @@ class PlayerStateManager
         $this->actions = $actions;
         $this->states = $states;
         $this->attempts = $attempts;
+    }
+
+    // ========================================================================
+    // INFORMACIÓN DE JUGADORES
+    // ========================================================================
+
+    /**
+     * Obtener el total de jugadores en el match.
+     *
+     * @return int
+     */
+    public function getTotalPlayers(): int
+    {
+        return count($this->playerIds);
+    }
+
+    /**
+     * Obtener los IDs de todos los jugadores.
+     *
+     * @return array<int>
+     */
+    public function getPlayerIds(): array
+    {
+        return $this->playerIds;
+    }
+
+    /**
+     * Agregar un jugador al módulo.
+     *
+     * @param int $playerId
+     * @return void
+     */
+    public function addPlayer(int $playerId): void
+    {
+        if (!in_array($playerId, $this->playerIds, true)) {
+            $this->playerIds[] = $playerId;
+        }
     }
 
     // ========================================================================
@@ -457,35 +508,118 @@ class PlayerStateManager
     // ========================================================================
 
     /**
+     * Verificar si todos los jugadores están bloqueados.
+     *
+     * @return bool
+     */
+    public function areAllPlayersLocked(): bool
+    {
+        $totalPlayers = $this->getTotalPlayers();
+        $lockedPlayers = count($this->locks);
+        
+        return $lockedPlayers >= $totalPlayers && $totalPlayers > 0;
+    }
+
+    /**
      * Bloquear jugador (ya actuó esta ronda).
      *
      * @param int $playerId
-     * @return void
+     * @param \App\Models\GameMatch|null $match Para emitir evento (opcional)
+     * @param \App\Models\Player|null $player Para emitir evento (opcional)
+     * @param array $additionalData Datos adicionales para el evento
+     * @return array
      */
-    public function lockPlayer(int $playerId): void
+    public function lockPlayer(
+        int $playerId, 
+        ?\App\Models\GameMatch $match = null, 
+        ?\App\Models\Player $player = null,
+        array $additionalData = []
+    ): array
     {
         $this->locks[$playerId] = true;
+
+        // Usar el método centralizado
+        $allPlayersLocked = $this->areAllPlayersLocked();
+        $lockedPlayers = count($this->locks);
+        $totalPlayers = $this->getTotalPlayers();
+
+        // Emitir evento si se proporcionan el match y el player
+        if ($match && $player) {
+            event(new \App\Events\Game\PlayerLockedEvent(
+                $match,
+                $player,
+                $additionalData
+            ));
+
+            \Log::info("[PlayerStateManager] Player locked and event emitted", [
+                'match_id' => $match->id,
+                'player_id' => $playerId,
+                'player_name' => $player->name,
+                'locked_players' => $lockedPlayers,
+                'total_players' => $totalPlayers,
+                'all_locked' => $allPlayersLocked
+            ]);
+        }
+
+        // Retornar información sobre el estado de bloqueos
+        return [
+            'locked_players' => $lockedPlayers,
+            'total_players' => $totalPlayers,
+            'all_players_locked' => $allPlayersLocked,
+        ];
     }
 
     /**
      * Desbloquear jugador.
      *
      * @param int $playerId
+     * @param \App\Models\GameMatch|null $match Para emitir evento (opcional)
+     * @param \App\Models\Player|null $player Para emitir evento (opcional)
+     * @param array $additionalData Datos adicionales para el evento
      * @return void
      */
-    public function unlockPlayer(int $playerId): void
+    public function unlockPlayer(
+        int $playerId,
+        ?\App\Models\GameMatch $match = null,
+        ?\App\Models\Player $player = null,
+        array $additionalData = []
+    ): void
     {
         unset($this->locks[$playerId]);
+
+        // Emitir evento si se proporcionan el match y el player
+        if ($match && $player) {
+            event(new \App\Events\Game\PlayerUnlockedEvent(
+                $match,
+                $player,
+                $additionalData
+            ));
+
+            \Log::info("[PlayerStateManager] Player unlocked and event emitted", [
+                'match_id' => $match->id,
+                'player_id' => $playerId,
+                'player_name' => $player->name,
+            ]);
+        }
     }
 
     /**
      * Desbloquear todos los jugadores.
      *
+     * Útil al inicio de cada ronda para resetear los bloqueos.
+     *
      * @return void
      */
     public function unlockAllPlayers(): void
     {
-        $this->locks = [];
+        // Desbloquear cada jugador individualmente
+        foreach ($this->playerIds as $playerId) {
+            $this->unlockPlayer($playerId);
+        }
+        
+        \Log::info("[PlayerStateManager] All players unlocked", [
+            'count' => count($this->playerIds)
+        ]);
     }
 
     /**
@@ -686,15 +820,34 @@ class PlayerStateManager
      * NO limpia:
      * - Roles persistentes (se mantienen todo el juego)
      *
+     * @param \App\Models\GameMatch|null $match Para emitir evento de desbloqueo (opcional)
+     * @param array $additionalData Datos adicionales para el evento
      * @return void
      */
-    public function reset(): void
+    public function reset(
+        ?\App\Models\GameMatch $match = null,
+        array $additionalData = []
+    ): void
     {
+        $hadLockedPlayers = !empty($this->locks);
+        
         $this->roundRoles = [];
         $this->locks = [];
         $this->actions = [];
         $this->states = [];
         $this->attempts = [];
+        
+        // Emitir evento de desbloqueo si había jugadores bloqueados
+        if ($hadLockedPlayers && $match) {
+            event(new \App\Events\Game\PlayersUnlockedEvent(
+                $match,
+                $additionalData
+            ));
+
+            \Log::info("[PlayerStateManager] State reset and players unlocked event emitted", [
+                'match_id' => $match->id,
+            ]);
+        }
     }
 
     // ========================================================================
@@ -710,6 +863,9 @@ class PlayerStateManager
     {
         return [
             'player_state_system' => [
+                // LISTA DE JUGADORES
+                'player_ids' => $this->playerIds,
+
                 // PERSISTENTE (no se resetea)
                 'available_roles' => $this->availableRoles,
                 'allow_multiple_persistent_roles' => $this->allowMultiplePersistentRoles,
@@ -736,6 +892,7 @@ class PlayerStateManager
         $stateData = $data['player_state_system'] ?? $data;
 
         return new self(
+            playerIds: $stateData['player_ids'] ?? [],
             availableRoles: $stateData['available_roles'] ?? [],
             allowMultiplePersistentRoles: $stateData['allow_multiple_persistent_roles'] ?? false,
             persistentRoles: $stateData['persistent_roles'] ?? [],

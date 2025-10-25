@@ -51,21 +51,23 @@ class SimultaneousEndStrategy implements EndRoundStrategy
         RoundManager $roundManager,
         callable $getAllPlayerResults
     ): array {
-        // Obtener resultados de TODOS los jugadores
-        $playerResults = $getAllPlayerResults($match);
-
-        // Delegar a RoundManager para decidir
-        // (RoundManager conoce la lógica de cuándo todos respondieron, etc.)
-        $roundStatus = $roundManager->shouldEndSimultaneousRound(
-            $playerResults,
-            $this->config
-        );
-
-        // Agregar delay configurado
-        if (!isset($roundStatus['delay_seconds'])) {
-            $roundStatus['delay_seconds'] = $this->config['delay_seconds'];
+        // Verificar si la acción actual indicó force_end
+        // El juego específico decide según sus reglas mediante este flag
+        if ($actionResult['force_end'] ?? false) {
+            return [
+                'should_end' => true,
+                'reason' => $actionResult['end_reason'] ?? 'game_rules',
+                'winner_found' => false,
+                'delay_seconds' => $this->config['delay_seconds'],
+            ];
         }
 
-        return $roundStatus;
+        // No terminar - el juego debe usar force_end para indicar fin de ronda
+        return [
+            'should_end' => false,
+            'reason' => 'waiting_for_game_decision',
+            'winner_found' => false,
+            'delay_seconds' => $this->config['delay_seconds'],
+        ];
     }
 }

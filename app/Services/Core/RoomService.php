@@ -59,10 +59,20 @@ class RoomService
         $code = $this->generateUniqueCode();
 
         // Separar game_settings de settings generales
+        // Los settings generales son: max_players, private
+        // Todo lo demás son configuraciones específicas del juego
+        $generalSettings = [];
         $gameSettings = [];
-        if (isset($settings['play_with_teams'])) {
-            $gameSettings['play_with_teams'] = $settings['play_with_teams'];
-            unset($settings['play_with_teams']);
+        
+        $generalKeys = ['max_players', 'private'];
+        
+        foreach ($settings as $key => $value) {
+            if (in_array($key, $generalKeys)) {
+                $generalSettings[$key] = $value;
+            } else {
+                // Todo lo demás es configuración específica del juego
+                $gameSettings[$key] = $value;
+            }
         }
 
         // Crear sala
@@ -71,7 +81,7 @@ class RoomService
             'game_id' => $game->id,
             'master_id' => $master->id,
             'status' => Room::STATUS_WAITING,
-            'settings' => $settings,
+            'settings' => $generalSettings,
             'game_settings' => !empty($gameSettings) ? $gameSettings : null,
         ]);
 

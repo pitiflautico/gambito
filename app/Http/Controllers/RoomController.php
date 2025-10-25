@@ -828,70 +828,6 @@ class RoomController extends Controller
     }
 
     /**
-     * API: Avanzar a la siguiente ronda.
-     *
-     * Este endpoint es llamado por el frontend cuando:
-     * 1. Se recibe RoundEndedEvent con timing.auto_next = true
-     * 2. Frontend espera timing.delay segundos
-     * 3. Frontend llama a este endpoint
-     *
-     * @param Request $request
-     * @param string $code Código de la sala
-     * @return \Illuminate\Http\JsonResponse
-     */
-    public function apiNextRound(Request $request, string $code)
-    {
-        $code = strtoupper($code);
-        $room = $this->roomService->findRoomByCode($code);
-
-        if (!$room) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Sala no encontrada',
-            ], 404);
-        }
-
-        $match = $room->match;
-
-        // Verificar que la sala esté jugando
-        if ($room->status !== Room::STATUS_PLAYING) {
-            return response()->json([
-                'success' => false,
-                'message' => 'La sala no está en estado de juego',
-            ], 400);
-        }
-
-        try {
-            \Log::info('🔄 [NextRound] Starting new round', [
-                'room_code' => $code,
-                'match_id' => $match->id,
-                'current_round' => $match->game_state['round_system']['current_round'] ?? 1
-            ]);
-
-            // Llamar al método handleNewRound del engine
-            $engine = $match->getEngine();
-            $engine->handleNewRound($match);
-
-            \Log::info('✅ [NextRound] New round started successfully', [
-                'room_code' => $code,
-                'match_id' => $match->id,
-            ]);
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Nueva ronda iniciada',
-                'current_round' => $match->game_state['round_system']['current_round'] ?? 1,
-            ]);
-        } catch (\Exception $e) {
-            \Log::error("❌ [NextRound] Error starting new round: {$e->getMessage()}");
-            return response()->json([
-                'success' => false,
-                'message' => 'Error al iniciar nueva ronda: ' . $e->getMessage(),
-            ], 500);
-        }
-    }
-
-    /**
      * API: Obtener estadísticas de la sala.
      */
     public function apiStats(string $code)
@@ -1118,12 +1054,70 @@ class RoomController extends Controller
             ]);
         }
 
-        // Retornar el game_state completo
+        $match = $room->match;
+
         return response()->json([
             'success' => true,
             'room_code' => $code,
             'status' => $room->status,
-            'game_state' => $room->match->game_state,
+            'game_state' => $match->game_state,
+        ]);
+    }
+
+    /**
+     * Obtener información del jugador actual en una sala.
+     *
+     * @param string $code Código de la sala
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function apiGetPlayerInfo(string $code)
+    {
+        $code = strtoupper($code);
+        
+        // Buscar sala usando RoomService
+        $room = $this->roomService->findRoomByCode($code);
+
+        if (!$room) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Sala no encontrada',
+            ], 404);
+        }
+
+        // Verificar que la sala tenga un match
+        if (!$room->match) {
+            return response()->json([
+                'success' => false,
+                'message' => 'La sala no tiene un juego activo',
+            ], 400);
+        }
+
+        // Obtener el jugador actual
+        $userId = Auth::id();
+
+        if (!$userId) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No estás autenticado',
+            ], 401);
+        }
+
+        $match = $room->match;
+        $player = $match->players->firstWhere('user_id', $userId);
+
+        if (!$player) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No estás registrado en esta sala',
+            ], 403);
+        }
+
+        // Retornar información del jugador
+        return response()->json([
+            'success' => true,
+            'player_id' => $player->id,
+            'player_name' => $player->name,
+            'user_id' => $player->user_id,
         ]);
     }
 }

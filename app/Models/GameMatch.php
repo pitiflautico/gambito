@@ -319,4 +319,36 @@ class GameMatch extends Model
             $phase
         );
     }
+
+    /**
+     * Obtener el engine del juego.
+     *
+     * @return mixed
+     */
+    public function getEngine()
+    {
+        return $this->room->game->getEngine();
+    }
+
+    /**
+     * Procesar una acción del juego.
+     *
+     * Método wrapper para evitar tener que obtener el engine cada vez.
+     *
+     * @param Player $player
+     * @param string $action
+     * @param array $data
+     * @return array
+     */
+    public function processAction(Player $player, string $action, array $data = []): array
+    {
+        $engine = $this->getEngine();
+        
+        return $engine->processAction(
+            match: $this,
+            player: $player,
+            action: $action,
+            data: $data
+        );
+    }
 }

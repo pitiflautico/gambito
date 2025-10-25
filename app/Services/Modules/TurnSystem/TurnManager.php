@@ -2,7 +2,6 @@
 
 namespace App\Services\Modules\TurnSystem;
 
-use App\Services\Modules\TeamsSystem\TeamsManager;
 use App\Services\Modules\TimerSystem\TimerService;
 use Illuminate\Support\Collection;
 
@@ -51,23 +50,6 @@ class TurnManager
      * Dirección de los turnos: 1 = forward, -1 = backward (reversed).
      */
     protected int $direction = 1;
-
-    /**
-     * TeamsManager opcional para juegos por equipos.
-     */
-    protected ?TeamsManager $teamsManager = null;
-
-    /**
-     * Tracking de jugadores que completaron su acción en el turno actual.
-     * Formato: ['player_id' => true, ...]
-     */
-    protected array $turnCompletions = [];
-
-    /**
-     * Requiere que todos los miembros del equipo completen antes de avanzar.
-     * Solo aplica en modo team_turns.
-     */
-    protected bool $requireAllTeamMembers = false;
 
     /**
      * Límite de tiempo por turno en segundos (null = sin límite).
@@ -386,8 +368,6 @@ class TurnManager
             'mode' => $this->mode,
             'is_paused' => $this->isPaused,
             'direction' => $this->direction,
-            'turn_completions' => $this->turnCompletions,
-            'require_all_team_members' => $this->requireAllTeamMembers,
             'time_limit' => $this->timeLimit,
         ];
     }
@@ -406,8 +386,6 @@ class TurnManager
         $instance->currentTurnIndex = $state['current_turn_index'] ?? 0;
         $instance->isPaused = $state['is_paused'] ?? false;
         $instance->direction = $state['direction'] ?? 1;
-        $instance->turnCompletions = $state['turn_completions'] ?? [];
-        $instance->requireAllTeamMembers = $state['require_all_team_members'] ?? false;
 
         return $instance;
     }

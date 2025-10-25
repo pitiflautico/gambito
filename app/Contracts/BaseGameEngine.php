@@ -9,7 +9,7 @@ use App\Contracts\Strategies\SimultaneousEndStrategy;
 use App\Models\GameMatch;
 use App\Models\Player;
 use App\Services\Modules\RoundSystem\RoundManager;
-use App\Services\Modules\ScoringSystem\Contracts\ScoreCalculator;
+use App\Services\Modules\ScoringSystem\ScoreCalculatorInterface;
 use App\Services\Modules\ScoringSystem\ScoreManager;
 use App\Services\Modules\TimerSystem\TimerService;
 use Illuminate\Support\Facades\Log;
@@ -87,7 +87,25 @@ abstract class BaseGameEngine implements GameEngineInterface
      * @param GameMatch $match
      * @return void
      */
-    abstract protected function endCurrentRound(GameMatch $match): void;
+    abstract public function endCurrentRound(GameMatch $match): void;
+    
+    /**
+     * Verificar el estado actual de la ronda según las reglas del juego.
+     * 
+     * Este método OPCIONAL permite al juego analizar si la ronda debe terminar
+     * basándose en el estado actual (útil para auditorías o debugging).
+     * 
+     * La decisión real de terminar ronda se toma en processRoundAction() 
+     * mediante el flag force_end.
+     * 
+     * @param GameMatch $match
+     * @return array ['should_end' => bool, 'reason' => string|null]
+     */
+    protected function checkRoundState(GameMatch $match): array
+    {
+        // Implementación por defecto: no hace nada
+        return ['should_end' => false, 'reason' => null];
+    }
 
     /**
      * Obtener todos los resultados de jugadores en la ronda actual.
@@ -190,6 +208,23 @@ abstract class BaseGameEngine implements GameEngineInterface
             'current_round' => $match->game_state['round_system']['current_round'] ?? 1,
             'advance_round' => $advanceRound
         ]);
+
+        // 0. VERIFICAR SI EL JUEGO YA TERMINÓ (antes de avanzar)
+        if ($this->isModuleEnabled($match, 'round_system') && $advanceRound) {
+            $roundManager = $this->getRoundManager($match);
+            
+            // Si ya se completó la última ronda, finalizar en vez de avanzar
+            if ($roundManager->isGameComplete()) {
+                Log::info("[{$this->getGameSlug()}] Game already complete, finalizing instead of starting new round", [
+                    'match_id' => $match->id,
+                    'current_round' => $roundManager->getCurrentRound(),
+                    'total_rounds' => $roundManager->getTotalRounds()
+                ]);
+                
+                $this->finalize($match);
+                return;
+            }
+        }
 
         // 1. LÓGICA BASE: Avanzar ronda (via RoundManager)
         // RoundManager se encarga de:
@@ -404,42 +439,25 @@ abstract class BaseGameEngine implements GameEngineInterface
             'match_id' => $match->id,
         ]);
 
-        // 1. Obtener datos actuales
+        // 1. Obtener módulos
         $roundManager = $this->getRoundManager($match);
         $scores = $this->getScores($match->game_state);
 
-        // 2. Emitir RoundEndedEvent
-        event(new \App\Events\Game\RoundEndedEvent(
-            match: $match,
-            roundNumber: $roundManager->getCurrentRound(),
-            results: $results,
-            scores: $scores
-        ));
+        Log::info("[{$this->getGameSlug()}] About to call roundManager->completeRound()", [
+            'match_id' => $match->id,
+            'has_roundManager' => $roundManager !== null
+        ]);
 
-        // 3. Avanzar RoundManager
-        $config = $this->getGameConfig();
-        $roundPerTurn = $config['modules']['turn_system']['round_per_turn'] ?? false;
+        // 2. Delegar a RoundManager para completar la ronda
+        // RoundManager maneja: emitir evento, avanzar, programar backup, etc.
+        $roundManager->completeRound($match, $results, $scores);
+        
+        Log::info("[{$this->getGameSlug()}] roundManager->completeRound() finished");
 
-        if ($roundPerTurn) {
-            $roundManager->nextTurnWithRoundAdvance();
-        } else {
-            $roundManager->nextTurn();
-        }
+        // 3. Guardar estado actualizado
+        $this->saveRoundManager($match, $roundManager);
 
-        // 4. Guardar estado actualizado del RoundManager
-        $gameState = $match->game_state;
-        $gameState = array_merge($gameState, $roundManager->toArray());
-
-        // Guardar TimerService actualizado (si se reinició el timer)
-        $timerService = $roundManager->getTurnManager()->getTimerService();
-        if ($timerService) {
-            $gameState = array_merge($gameState, $timerService->toArray());
-        }
-
-        $match->game_state = $gameState;
-        $match->save();
-
-        // 5. Verificar si el juego terminó
+        // 4. Verificar si el juego terminó
         if ($roundManager->isGameComplete()) {
             Log::info("[{$this->getGameSlug()}] Game complete, finalizing", [
                 'match_id' => $match->id,
@@ -447,27 +465,6 @@ abstract class BaseGameEngine implements GameEngineInterface
             $this->finalize($match);
             return;
         }
-
-        // 6. Cargar siguiente ronda (delegar al juego específico)
-        $this->startNewRound($match);
-
-        // 7. Emitir RoundStartedEvent
-        $match->refresh();
-        $roundManager = $this->getRoundManager($match);
-        $timingInfo = $roundManager->getTurnManager()->getTimingInfo();
-
-        event(new \App\Events\Game\RoundStartedEvent(
-            match: $match,
-            currentRound: $roundManager->getCurrentRound(),
-            totalRounds: $roundManager->getTotalRounds(),
-            phase: $match->game_state['phase'] ?? 'playing',
-            timing: $timingInfo
-        ));
-
-        Log::info("[{$this->getGameSlug()}] Round started", [
-            'match_id' => $match->id,
-            'round' => $roundManager->getCurrentRound(),
-        ]);
     }
 
     // ========================================================================
@@ -872,13 +869,15 @@ abstract class BaseGameEngine implements GameEngineInterface
      * Obtener ScoreManager del game_state.
      *
      * @param GameMatch $match
-     * @param ScoreCalculator|null $calculator
+     * @param ScoreCalculatorInterface|null $calculator
      * @return ScoreManager
      */
-    protected function getScoreManager(GameMatch $match, ?ScoreCalculator $calculator = null): ScoreManager
+    protected function getScoreManager(GameMatch $match, ?ScoreCalculatorInterface $calculator = null): ScoreManager
     {
         $gameState = $match->game_state;
-        $playerIds = array_keys($this->getScores($gameState));
+        
+        // Obtener player IDs desde el match directamente (no desde scores, que pueden estar vacíos)
+        $playerIds = $match->players->pluck('id')->toArray();
 
         return ScoreManager::fromArray(
             playerIds: $playerIds,
@@ -910,7 +909,7 @@ abstract class BaseGameEngine implements GameEngineInterface
      * @param int $playerId
      * @param string $reason
      * @param array $context
-     * @param ScoreCalculator|null $calculator
+     * @param ScoreCalculatorInterface|null $calculator
      * @return void
      */
     protected function awardPoints(
@@ -918,7 +917,7 @@ abstract class BaseGameEngine implements GameEngineInterface
         int $playerId,
         string $reason,
         array $context = [],
-        ?ScoreCalculator $calculator = null
+        ?ScoreCalculatorInterface $calculator = null
     ): void {
         $scoreManager = $this->getScoreManager($match, $calculator);
         $scoreManager->awardPoints($playerId, $reason, $context);
@@ -961,7 +960,26 @@ abstract class BaseGameEngine implements GameEngineInterface
      */
     protected function getPlayerStateManager(GameMatch $match): \App\Services\Modules\PlayerStateSystem\PlayerStateManager
     {
-        return \App\Services\Modules\PlayerStateSystem\PlayerStateManager::fromArray($match->game_state);
+        $playerState = \App\Services\Modules\PlayerStateSystem\PlayerStateManager::fromArray($match->game_state);
+        
+        // Si no tiene player_ids (estado antiguo o no inicializado), agregarlos ahora
+        if ($playerState->getTotalPlayers() === 0) {
+            $playerIds = $match->players->pluck('id')->toArray();
+            
+            foreach ($playerIds as $playerId) {
+                $playerState->addPlayer($playerId);
+            }
+            
+            Log::info("[{$this->getGameSlug()}] PlayerStateManager initialized with player IDs", [
+                'match_id' => $match->id,
+                'player_count' => count($playerIds)
+            ]);
+            
+            // Guardar el estado actualizado
+            $this->savePlayerStateManager($match, $playerState);
+        }
+        
+        return $playerState;
     }
 
     /**

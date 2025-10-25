@@ -139,4 +139,192 @@ class PlayController extends Controller
         // Fallback: Cargar vista genérica si el juego no tiene vista específica
         return view('rooms.show', compact('code', 'room', 'playerId', 'role', 'players', 'eventConfig'));
     }
+
+    // ========================================================================
+    // API ENDPOINTS - GAMEPLAY
+    // ========================================================================
+
+    /**
+     * API: Procesar una acción del juego.
+     */
+    public function apiProcessAction(Request $request, string $code)
+    {
+        $code = strtoupper($code);
+        
+        // 1. Validar request
+        $validated = $request->validate([
+            'action' => 'required|string',
+            'data' => 'sometimes|array',
+        ]);
+
+        // 2. Buscar sala usando RoomService (sin consultas directas)
+        $room = $this->roomService->findRoomByCode($code);
+
+        if (!$room) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Sala no encontrada',
+            ], 404);
+        }
+
+        // 3. Verificar que la sala esté en juego
+        if ($room->status !== Room::STATUS_PLAYING || !$room->match) {
+            return response()->json([
+                'success' => false,
+                'message' => 'La sala no está en juego',
+            ], 400);
+        }
+
+        // 4. Obtener el jugador actual usando helper (sin queries)
+        $userId = Auth::id();
+
+        if (!$userId) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No estás autenticado',
+            ], 401);
+        }
+
+        $match = $room->match;
+        $player = $match->players->firstWhere('user_id', $userId);
+
+        if (!$player) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No estás registrado en esta sala',
+            ], 403);
+        }
+
+        \Log::info("[PlayController] Action submitted via API", [
+            'room_code' => $code,
+            'player_id' => $player->id,
+            'action' => $validated['action'],
+            'data' => $validated['data'] ?? []
+        ]);
+
+        try {
+            // 5. Procesar la acción (match delega al engine internamente)
+            $result = $match->processAction(
+                player: $player,
+                action: $validated['action'],
+                data: $validated['data'] ?? []
+            );
+
+            // 6. Retornar resultado
+            return response()->json($result);
+        } catch (\Exception $e) {
+            \Log::error("[PlayController] Error processing action", [
+                'room_code' => $code,
+                'action' => $validated['action'],
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al procesar acción: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * API: Avanzar a la siguiente ronda.
+     */
+    public function apiNextRound(Request $request, string $code)
+    {
+        $code = strtoupper($code);
+        $room = $this->roomService->findRoomByCode($code);
+
+        if (!$room) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Sala no encontrada',
+            ], 404);
+        }
+
+        $match = $room->match;
+
+        // Verificar que la sala esté jugando
+        if ($room->status !== Room::STATUS_PLAYING) {
+            return response()->json([
+                'success' => false,
+                'message' => 'La sala no está en estado de juego',
+            ], 400);
+        }
+
+        // VALIDACIÓN DE RONDA: Detectar llamadas obsoletas
+        $requestedFromRound = $request->input('from_round');
+        $currentRound = $match->game_state['round_system']['current_round'] ?? 1;
+        
+        if ($requestedFromRound && $requestedFromRound < $currentRound) {
+            \Log::info('⏭️ [NextRound] Obsolete request detected', [
+                'room_code' => $code,
+                'match_id' => $match->id,
+                'requested_from_round' => $requestedFromRound,
+                'current_round' => $currentRound,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Solicitud obsoleta - la ronda ya avanzó',
+                'obsolete' => true,
+                'current_round' => $currentRound,
+            ]);
+        }
+
+        // PROTECCIÓN CONTRA RACE CONDITION
+        // Múltiples jugadores van a llamar este endpoint simultáneamente cuando termine el countdown.
+        // Solo el primero debe ejecutarlo, los demás reciben confirmación de que ya se está procesando.
+        if (!$match->acquireRoundLock()) {
+            \Log::info('⏭️ [NextRound] Already processing (race condition prevented)', [
+                'room_code' => $code,
+                'match_id' => $match->id,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Ronda ya está siendo procesada',
+                'already_processing' => true,
+            ]);
+        }
+
+        try {
+            \Log::info('🔄 [NextRound] Starting new round', [
+                'room_code' => $code,
+                'match_id' => $match->id,
+                'from_round' => $requestedFromRound,
+                'current_round' => $currentRound
+            ]);
+
+            // Llamar al método handleNewRound del engine
+            $engine = $match->getEngine();
+            $engine->handleNewRound($match);
+
+            // Refrescar match para obtener la nueva ronda
+            $match->refresh();
+
+            \Log::info('✅ [NextRound] New round started successfully', [
+                'room_code' => $code,
+                'match_id' => $match->id,
+                'new_round' => $match->game_state['round_system']['current_round'] ?? 1
+            ]);
+
+            // Liberar el lock
+            $match->releaseRoundLock();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Nueva ronda iniciada',
+                'current_round' => $match->game_state['round_system']['current_round'] ?? 1,
+            ]);
+        } catch (\Exception $e) {
+            // Liberar el lock en caso de error
+            $match->releaseRoundLock();
+            
+            \Log::error("❌ [NextRound] Error starting new round: {$e->getMessage()}");
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al iniciar nueva ronda: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
 }

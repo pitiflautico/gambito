@@ -96,7 +96,7 @@
       "time_limit": 15
     },
     "scoring_system": {
-      "enabled": false,
+      "enabled": true,
       "track_history": true,
       "allow_negative_scores": false
     },
