@@ -80,17 +80,6 @@ interface GameEngineInterface
     public function getGameStateForPlayer(GameMatch $match, Player $player): array;
 
     /**
-     * Avanzar a la siguiente fase/ronda del juego.
-     *
-     * Este método se llama cuando una fase o ronda termina.
-     * Debe actualizar el game_state con la nueva fase/ronda.
-     *
-     * @param GameMatch $match La partida actual
-     * @return void
-     */
-    public function advancePhase(GameMatch $match): void;
-
-    /**
      * Manejar la desconexión de un jugador.
      *
      * Este método se llama cuando un jugador se desconecta.
