@@ -112,121 +112,45 @@ abstract class BaseGameEngine implements GameEngineInterface
     /**
      * Iniciar/Reiniciar el juego - IMPLEMENTACIÓN BASE.
      *
-     * Este método ejecuta el flujo estándar que TODOS los juegos deben seguir:
-     * 1. Resetea módulos automáticamente
-     * 2. Setea phase = "starting" (espera a que todos los jugadores se conecten)
-     * 3. NO llama a onGameStart() todavía (se llama cuando todos estén conectados)
+     * FLUJO HÍBRIDO (Sistema Nuevo):
+     * ================================
+     * 1. Lobby → Master presiona "Iniciar" → GameMatch::start()
+     * 2. Backend emite GameStartedEvent → Todos redirigen a /rooms/{code}/transition
+     * 3. Transition → Presence Channel trackea conexiones
+     * 4. Todos conectados → apiReady() emite GameCountdownEvent (timestamp-based)
+     * 5. Countdown termina → apiInitializeEngine() llama:
+     *    - engine->initialize($match) - UNA VEZ (guarda config en _config)
+     *    - engine->startGame($match) - Resetea módulos + llama onGameStart()
+     * 6. onGameStart() - Setea estado inicial + emite RoundStartedEvent
+     * 7. GameMatch emite GameInitializedEvent → Todos redirigen al juego
      *
-     * FLUJO SECUENCIAL:
-     * - Master presiona "Iniciar" → startGame() → phase = "starting"
-     * - Lobby redirige a todos a /rooms/{code}
-     * - Cada jugador que entra incrementa contador en Redis
-     * - Cuando todos están conectados → RoomController llama transitionFromStarting()
-     *
-     * Los juegos NO deben sobrescribir este método, solo implementar onGameStart().
+     * Este método NO debe ser sobrescrito por los juegos.
+     * Los juegos solo implementan onGameStart() para su lógica específica.
      *
      * @param GameMatch $match
      * @return void
      */
     public function startGame(GameMatch $match): void
     {
-        Log::info("[{$this->getGameSlug()}] Starting game", ['match_id' => $match->id]);
+        Log::info("[{$this->getGameSlug()}] Starting game (resetting modules + calling onGameStart)", [
+            'match_id' => $match->id
+        ]);
 
         // 1. Resetear módulos automáticamente según config.json
         $this->resetModules($match);
 
-        // 2. Setear fase inicial a "starting"
-        $gameState = $match->game_state ?? [];
-        $gameState['phase'] = 'starting';
-        $match->game_state = $gameState;
-        $match->save();
-
-        Log::info("[{$this->getGameSlug()}] Game in STARTING phase", [
-            'match_id' => $match->id,
-            'room_code' => $match->room->code
+        Log::info("[{$this->getGameSlug()}] Modules reset complete", [
+            'match_id' => $match->id
         ]);
 
-        // 3. Emitir evento para redirigir a todos del lobby al room
-        event(new \App\Events\Game\GameStartedEvent(
-            match: $match,
-            gameState: $gameState,
-            timing: null  // Sin countdown aún, solo redirección
-        ));
-
-        Log::info("[{$this->getGameSlug()}] GameStartedEvent emitted to redirect from lobby to room", [
-            'match_id' => $match->id,
-            'room_code' => $match->room->code
-        ]);
-
-        // 4. Los jugadores notificarán cuando carguen vía /api/rooms/{code}/player-connected
-        // 5. RoomController trackea conexiones y llama a transitionFromStarting() cuando todos listos
-    }
-
-    /**
-     * Transicionar de "starting" al primer round del juego.
-     *
-     * Este método se llama desde RoomController cuando todos los jugadores
-     * están conectados. Emite GameStartedEvent con countdown y luego inicia
-     * el primer round.
-     *
-     * @param GameMatch $match
-     * @return void
-     */
-    public function transitionFromStarting(GameMatch $match): void
-    {
-        $gameState = $match->game_state ?? [];
-        $currentPhase = $gameState['phase'] ?? null;
-
-        if ($currentPhase !== 'starting') {
-            Log::warning("[{$this->getGameSlug()}] Cannot transition - not in starting phase", [
-                'match_id' => $match->id,
-                'current_phase' => $currentPhase
-            ]);
-            return;
-        }
-
-        Log::info("[{$this->getGameSlug()}] All players connected - transitioning from starting", [
-            'match_id' => $match->id,
-            'room_code' => $match->room->code
-        ]);
-
-        // 1. Emitir GameStartedEvent con timing metadata (countdown)
-        $timing = $this->getGameStartTiming($match);
-
-        event(new \App\Events\Game\GameStartedEvent(
-            match: $match,
-            gameState: $match->game_state,
-            timing: $timing
-        ));
-
-        Log::info("[{$this->getGameSlug()}] GameStartedEvent emitted, waiting for frontend countdown", [
-            'match_id' => $match->id,
-            'timing' => $timing
-        ]);
-
-        // El frontend mostrará el countdown y notificará al backend cuando termine
-        // via endpoint /api/games/{match}/game-ready
-        // El backend ejecutará onGameStart() cuando reciba esa notificación
-    }
-
-    /**
-     * Método público para iniciar el juego después del countdown.
-     *
-     * Este método es llamado por el GameController cuando el frontend
-     * notifica que el countdown ha terminado. Internamente llama al
-     * método protected onGameStart() que cada juego implementa.
-     *
-     * @param GameMatch $match
-     * @return void
-     */
-    public function triggerGameStart(GameMatch $match): void
-    {
-        Log::info("[{$this->getGameSlug()}] Triggering game start", [
-            'match_id' => $match->id,
-            'current_phase' => $match->game_state['phase'] ?? 'unknown'
-        ]);
-
+        // 2. Llamar al hook específico del juego
+        // onGameStart() debe setear estado inicial y emitir RoundStartedEvent
         $this->onGameStart($match);
+
+        Log::info("[{$this->getGameSlug()}] onGameStart() completed", [
+            'match_id' => $match->id,
+            'phase' => $match->game_state['phase'] ?? 'unknown'
+        ]);
     }
 
     // ========================================================================
@@ -328,32 +252,6 @@ abstract class BaseGameEngine implements GameEngineInterface
         ]);
     }
 
-    /**
-     * Avanzar a la siguiente fase del juego.
-     *
-     * Método genérico que delega a startNewRound().
-     *
-     * @param GameMatch $match
-     * @return void
-     */
-    public function advancePhase(GameMatch $match): void
-    {
-        $currentPhase = $match->game_state['phase'] ?? null;
-
-        if ($currentPhase === 'starting') {
-            // Primer round: iniciar el juego
-            Log::info("[{$this->getGameSlug()}] Starting game from 'starting' phase", [
-                'match_id' => $match->id,
-            ]);
-            $this->onGameStart($match);
-        } else {
-            // Rondas subsecuentes: avanzar a la siguiente ronda
-            Log::info("[{$this->getGameSlug()}] Advancing to next round from '{$currentPhase}' phase", [
-                'match_id' => $match->id,
-            ]);
-            $this->startNewRound($match);
-        }
-    }
 
     /**
      * Completar la ronda actual y avanzar a la siguiente.
@@ -1500,59 +1398,4 @@ abstract class BaseGameEngine implements GameEngineInterface
         return $match->game_state ?? [];
     }
 
-    // ========================================================================
-    // TIMING MODULE - Configuration
-    // ========================================================================
-
-    /**
-     * Obtener timing metadata para GameStartedEvent desde config.json del juego.
-     *
-     * Lee la sección "timing.game_start" del config.json.
-     *
-     * CONVENCIÓN:
-     * Cada juego define su timing en config.json:
-     * {
-     *   "timing": {
-     *     "game_start": {
-     *       "auto_next": true,
-     *       "delay": 3,
-     *       "message": "Empezando"
-     *     },
-     *     "round_ended": {
-     *       "auto_next": true,
-     *       "delay": 5,
-     *       "message": "Siguiente pregunta"
-     *     }
-     *   }
-     * }
-     *
-     * @param GameMatch $match
-     * @return array|null Timing metadata o null si no está configurado
-     */
-    public function getGameStartTiming(GameMatch $match): ?array
-    {
-        // Obtener slug del juego
-        $gameSlug = $match->room->game->slug;
-        $configPath = base_path("games/{$gameSlug}/config.json");
-
-        if (!file_exists($configPath)) {
-            Log::warning("[{$gameSlug}] config.json not found, no timing available");
-            return null;
-        }
-
-        $config = json_decode(file_get_contents($configPath), true);
-        $timing = $config['timing']['game_start'] ?? null;
-
-        if ($timing) {
-            Log::info("[{$gameSlug}] Game start timing loaded", $timing);
-            return [
-                'auto_next' => $timing['auto_next'] ?? false,
-                'delay' => $timing['delay'] ?? 0,
-                'action' => 'game_ready',
-                'message' => $timing['message'] ?? 'Empezando'
-            ];
-        }
-
-        return null;
-    }
 }

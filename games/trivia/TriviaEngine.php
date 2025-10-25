@@ -23,26 +23,74 @@ use Illuminate\Support\Facades\Event;
  *
  * Juego de preguntas y respuestas donde todos los jugadores responden simultáneamente.
  *
- * ARQUITECTURA DESACOPLADA:
+ * FLUJO HÍBRIDO COMPLETO (Sistema Nuevo):
+ * ========================================
+ *
+ * FASE 1: LOBBY
+ * -------------
+ * 1. Master crea sala → Room (status: 'waiting')
+ * 2. Jugadores se unen vía Presence Channel
+ * 3. Master click "Iniciar Partida" → GameMatch::start()
+ *    - Backend: engine->initialize() - UNA VEZ (guarda config en _config)
+ *    - Backend: emite GameStartedEvent
+ * 4. Frontend: Todos redirigen a /rooms/{code}/transition
+ *
+ * FASE 2: TRANSITION
+ * ------------------
+ * 5. Presence Channel trackea conexiones en real-time
+ * 6. Cuando TODOS conectados:
+ *    - Frontend: apiReady() → Backend emite GameCountdownEvent (timestamp-based)
+ * 7. Frontend: TimingModule muestra countdown (3...2...1) sincronizado a 60fps
+ * 8. Countdown termina:
+ *    - Frontend: TODOS llaman apiInitializeEngine() (con lock protection)
+ *    - Backend: PRIMER cliente gana lock, ejecuta:
+ *       * engine->startGame() - Resetea módulos
+ *       * engine->onGameStart() - Setea estado + emite RoundStartedEvent
+ *    - Backend: emite GameInitializedEvent
+ * 9. Frontend: Todos redirigen a /rooms/{code} (game room)
+ *
+ * FASE 3: JUEGO
+ * -------------
+ * 10. Frontend: Muestra primera pregunta (desde RoundStartedEvent)
+ * 11. Jugadores responden:
+ *     - Frontend: POST /api/games/{match}/action {answer: 0}
+ *     - Backend: processRoundAction() → handleAnswer()
+ *     - Backend: Strategy decide si terminar ronda
+ *     - Si termina: endCurrentRound() → completeRound()
+ *        * Emite RoundEndedEvent (con resultados)
+ *        * Avanza RoundManager automáticamente
+ *        * Verifica si juego terminó
+ *        * Si NO terminó: startNewRound() + emite RoundStartedEvent
+ *     - Frontend: Muestra resultados + siguiente pregunta
+ * 12. Repeat hasta terminar todas las preguntas
+ * 13. Backend: finalize() → emite GameFinishedEvent
+ * 14. Frontend: Muestra ranking final
+ *
+ * ARQUITECTURA DE MÓDULOS:
  * ========================
- * - Extiende BaseGameEngine para coordinación con módulos
- * - Implementa solo la lógica específica de Trivia
- * - BaseGameEngine maneja cuándo terminar rondas
- * - RoundManager gestiona el flujo de rondas
- *
- * Módulos utilizados:
- * - SessionManager: Identificación de jugadores
- * - RoundManager: Gestión de rondas (1 ronda = 1 pregunta)
+ * - RoundManager: 1 ronda = 1 pregunta
  * - TurnManager: Modo simultáneo (todos juegan al mismo tiempo)
- * - ScoreManager: Puntos + bonus por velocidad
- * - TimerService: Tiempo límite por pregunta
+ * - ScoreManager: Puntos base + bonus por velocidad
+ * - TimerService: Tiempo límite por pregunta (15s default)
  *
- * Flujo del juego:
- * 1. initialize(): Cargar preguntas, inicializar módulos
- * 2. processRoundAction(): Jugador responde pregunta
- * 3. endCurrentRound(): Calcular puntos y mostrar resultados
- * 4. startNewRound(): Siguiente pregunta
- * 5. finalize(): Mostrar ganador y ranking final
+ * EVENTOS GENÉRICOS USADOS:
+ * =========================
+ * - GameStartedEvent: Lobby → Transition
+ * - GameCountdownEvent: Countdown timestamp-based
+ * - GameInitializedEvent: Transition → Game room
+ * - RoundStartedEvent: Nueva pregunta cargada
+ * - RoundEndedEvent: Pregunta finalizada con resultados
+ * - PlayerActionEvent: Jugador respondió
+ * - GameFinishedEvent: Juego terminado con ranking
+ *
+ * MÉTODOS CLAVE:
+ * ==============
+ * - initialize(): Cargar preguntas, guardar en _config, crear módulos
+ * - onGameStart(): Setear estado inicial, emitir RoundStartedEvent
+ * - processRoundAction(): Jugador responde pregunta
+ * - endCurrentRound(): Calcular puntos
+ * - startNewRound(): Cargar siguiente pregunta
+ * - finalize(): Ranking final
  */
 class TriviaEngine extends BaseGameEngine
 {
@@ -63,12 +111,30 @@ class TriviaEngine extends BaseGameEngine
     /**
      * Inicializar el juego - SOLO guarda configuración.
      *
-     * Este método se llama UNA VEZ al crear la partida.
-     * NO resetea scores ni inicia el juego - eso lo hace startGame().
+     * FLUJO HÍBRIDO - FASE 1 (LOBBY):
+     * ================================
+     * Este método se llama UNA VEZ desde GameMatch::start() cuando el master presiona "Iniciar Partida".
+     *
+     * RESPONSABILIDAD:
+     * 1. Cargar assets del juego (preguntas, palabras, etc.)
+     * 2. Guardar TODO en game_state['_config'] (NO cambiar después)
+     * 3. Llamar initializeModules() para crear módulos según config.json
+     * 4. NO emitir eventos (GameMatch::start() lo hace)
+     * 5. NO resetear scores (startGame() lo hace)
+     * 6. NO setear estado inicial (onGameStart() lo hace)
+     *
+     * DESPUÉS DE ESTO:
+     * - Backend emite GameStartedEvent → Todos redirigen a /rooms/{code}/transition
+     * - Transition trackea conexiones con Presence Channel
+     * - Cuando todos conectan → GameCountdownEvent → apiInitializeEngine()
+     * - apiInitializeEngine() llama startGame() → onGameStart()
+     *
+     * @param GameMatch $match
+     * @return void
      */
     public function initialize(GameMatch $match): void
     {
-        Log::info("Initializing Trivia configuration", ['match_id' => $match->id]);
+        Log::info("[Trivia] PHASE 1 - Initializing configuration (lobby)", ['match_id' => $match->id]);
 
         // Verificar que hay suficientes jugadores
         $players = $match->players;
@@ -160,12 +226,38 @@ class TriviaEngine extends BaseGameEngine
     /**
      * Hook específico de Trivia para iniciar el juego.
      *
-     * IMPORTANTE: BaseGameEngine::startGame() ya reseteó los módulos automáticamente.
-     * Este método solo debe setear el estado inicial específico de Trivia.
+     * FLUJO HÍBRIDO - FASE 3 (POST-COUNTDOWN):
+     * =========================================
+     * Este método se llama desde BaseGameEngine::startGame() después del countdown.
+     *
+     * CONTEXTO PREVIO (automático por BaseGameEngine):
+     * - resetModules() ya fue ejecutado (scores a 0, ronda a 1, etc.)
+     * - TimerService ya fue creado y conectado a TurnManager
+     * - RoundManager, ScoreManager, TurnManager ya existen en game_state
+     *
+     * RESPONSABILIDAD DE ESTE MÉTODO:
+     * 1. Leer configuración de game_state['_config'] (NO recalcular)
+     * 2. Setear estado inicial específico del juego:
+     *    - phase = 'question'
+     *    - current_question_index = 0
+     *    - current_question = preguntas[0]
+     *    - player_answers = []
+     * 3. Emitir RoundStartedEvent genérico (primera pregunta)
+     * 4. NO avanzar rondas (RoundManager ya está en ronda 1)
+     * 5. NO resetear scores (ya están en 0)
+     *
+     * DESPUÉS DE ESTO:
+     * - BaseGameEngine completa startGame()
+     * - GameMatch emite GameInitializedEvent
+     * - Frontend redirige a /rooms/{code}
+     * - Frontend muestra primera pregunta del RoundStartedEvent
+     *
+     * @param GameMatch $match
+     * @return void
      */
     protected function onGameStart(GameMatch $match): void
     {
-        Log::info("Trivia - onGameStart hook", ['match_id' => $match->id]);
+        Log::info("[Trivia] PHASE 3 - onGameStart hook (post-countdown)", ['match_id' => $match->id]);
 
         // 1. Leer configuración guardada
         $config = $match->game_state['_config'] ?? [];
