@@ -35,6 +35,10 @@ Route::prefix('rooms')->name('api.rooms.')->group(function () {
     Route::get('/{code}/stats', [RoomController::class, 'apiStats'])->name('stats');
     Route::post('/{code}/leave', [RoomController::class, 'apiLeave'])->name('leave');
 
+    // Transición Lobby → Game Room
+    Route::post('/{code}/ready', [RoomController::class, 'apiReady'])->name('ready');
+    Route::post('/{code}/initialize-engine', [RoomController::class, 'apiInitializeEngine'])->name('initialize-engine');
+
     // Presence Channel tracking
     Route::post('/{code}/presence/check', [RoomController::class, 'checkAllPlayersConnected'])
         ->middleware(['web'])

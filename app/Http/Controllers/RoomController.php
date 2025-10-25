@@ -547,6 +547,11 @@ class RoomController extends Controller
             return redirect()->route('rooms.lobby', ['code' => $code]);
         }
 
+        // Si la sala está en transición (ACTIVE), mostrar vista de countdown
+        if ($room->status === Room::STATUS_ACTIVE) {
+            return $this->showTransition($code, $room);
+        }
+
         // Si la sala terminó, mostrar resultados
         if ($room->status === Room::STATUS_FINISHED) {
             return redirect()->route('rooms.results', ['code' => $code]);
@@ -645,6 +650,48 @@ class RoomController extends Controller
     }
 
     /**
+     * Mostrar vista de transición (estado ACTIVE).
+     *
+     * Esta vista se muestra cuando el juego ha sido iniciado desde el lobby,
+     * pero el engine aún no ha sido cargado. Aquí se:
+     * 1. Verifica que todos los jugadores estén conectados (Presence Channel)
+     * 2. Emite el countdown cuando todos están listos
+     * 3. Inicializa el engine después del countdown
+     *
+     * @param string $code Código de la sala
+     * @param Room $room Modelo de la sala
+     */
+    private function showTransition(string $code, Room $room)
+    {
+        // Obtener lista de jugadores esperados (del evento game.started)
+        $expectedPlayers = $room->match->players()
+            ->where('is_connected', true)
+            ->get(['id', 'name', 'user_id'])
+            ->map(function ($player) {
+                return [
+                    'id' => $player->id,
+                    'name' => $player->name,
+                    'user_id' => $player->user_id,
+                ];
+            })->toArray();
+
+        $totalPlayers = count($expectedPlayers);
+
+        \Log::info("Transition view - Waiting for all players to connect", [
+            'room_code' => $code,
+            'total_players' => $totalPlayers,
+        ]);
+
+        return view('rooms.transition', [
+            'room' => $room,
+            'code' => $code,
+            'expectedPlayers' => $expectedPlayers,
+            'totalPlayers' => $totalPlayers,
+            'gameName' => $room->game->name,
+        ]);
+    }
+
+    /**
      * Mostrar resultados de una sala finalizada.
      *
      * @param string $code Código de la sala
@@ -717,6 +764,143 @@ class RoomController extends Controller
                 'success' => false,
                 'message' => $e->getMessage(),
             ], 400);
+        }
+    }
+
+    /**
+     * API: Marcar que todos los jugadores están listos en el room.
+     *
+     * Se llama desde el frontend cuando el Presence Channel confirma
+     * que todos los jugadores del evento game.started están conectados.
+     */
+    public function apiReady(Request $request, string $code)
+    {
+        $code = strtoupper($code);
+        $room = $this->roomService->findRoomByCode($code);
+
+        if (!$room) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Sala no encontrada',
+            ], 404);
+        }
+
+        // Verificar que la sala esté en estado 'active' (transición)
+        if ($room->status !== Room::STATUS_ACTIVE) {
+            return response()->json([
+                'success' => false,
+                'message' => 'La sala no está en estado de transición',
+            ], 400);
+        }
+
+        try {
+            // 1. Emitir evento de countdown
+            event(new \App\Events\Game\GameCountdownEvent($room, 3));
+
+            \Log::info("All players ready in room - Starting countdown", [
+                'room_code' => $code,
+                'players' => $room->match->players()->count(),
+            ]);
+
+            // 2. Después de 3 segundos, inicializar el engine
+            // IMPORTANTE: Esto debe hacerse en un job o delay, por ahora lo hacemos directo
+            // TODO: Mover a un job con delay de 3 segundos
+
+            // Por ahora, emitimos el evento y el frontend esperará countdown
+            // El engine se inicializará cuando el frontend notifique countdown finished
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Countdown iniciado',
+                'countdown_seconds' => 3,
+            ]);
+        } catch (\Exception $e) {
+            \Log::error("Error marking room as ready: {$e->getMessage()}");
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al iniciar countdown',
+            ], 500);
+        }
+    }
+
+    /**
+     * API: Inicializar el engine del juego (llamado después del countdown).
+     *
+     * IMPORTANTE: Protección contra Race Conditions
+     * - TODOS los clientes llaman a este endpoint cuando termina el countdown
+     * - Solo el PRIMERO que llega ejecuta initializeEngine()
+     * - Los demás reciben 200 OK con already_processing: true
+     * - Todos se sincronizan con el evento GameInitializedEvent
+     */
+    public function apiInitializeEngine(Request $request, string $code)
+    {
+        $code = strtoupper($code);
+        $room = $this->roomService->findRoomByCode($code);
+
+        if (!$room) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Sala no encontrada',
+            ], 404);
+        }
+
+        $match = $room->match;
+
+        // Verificar que la sala esté en estado 'active'
+        if ($room->status !== Room::STATUS_ACTIVE) {
+            return response()->json([
+                'success' => false,
+                'message' => 'La sala no está lista para inicializar engine',
+            ], 400);
+        }
+
+        // Intentar adquirir lock (solo el primer cliente lo consigue)
+        if (!$match->acquireRoundLock()) {
+            \Log::info('⏸️  [Transition] Lock already held, another client is initializing engine', [
+                'room_code' => $code,
+                'match_id' => $match->id,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'already_processing' => true,
+                'message' => 'Another client is initializing the engine, you will receive GameInitializedEvent shortly',
+            ], 200); // 200 OK para evitar errores en consola
+        }
+
+        // Lock adquirido - proceder a inicializar
+        try {
+            \Log::info('🔒 [Transition] Lock acquired, initializing engine', [
+                'room_code' => $code,
+                'match_id' => $match->id,
+                'game' => $room->game->slug,
+            ]);
+
+            // Inicializar engine
+            $match->initializeEngine();
+
+            \Log::info("✅ [Transition] Game engine initialized successfully", [
+                'room_code' => $code,
+                'game' => $room->game->slug,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Engine inicializado',
+            ]);
+        } catch (\Exception $e) {
+            \Log::error("❌ [Transition] Error initializing engine: {$e->getMessage()}");
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al inicializar engine: ' . $e->getMessage(),
+            ], 500);
+        } finally {
+            // SIEMPRE liberar el lock
+            $match->releaseRoundLock();
+            \Log::info('🔓 [Transition] Lock released', [
+                'room_code' => $code,
+                'match_id' => $match->id,
+            ]);
         }
     }
 

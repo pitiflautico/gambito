@@ -1,5 +1,9 @@
 # Arquitectura Event-Driven para Juegos
 
+> **📌 NOTA**: Este documento describe el flujo básico de eventos.
+> Para la **estrategia híbrida completa** con todos los detalles de implementación, ver:
+> **[HYBRID_EVENT_STRATEGY.md](./HYBRID_EVENT_STRATEGY.md)** ← **DOCUMENTO PRINCIPAL**
+
 ## Filosofía
 
 **TODO en el juego funciona con eventos**. No hay polling, no hay `location.reload()`, no hay consultas periódicas.

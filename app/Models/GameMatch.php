@@ -170,6 +170,9 @@ class GameMatch extends Model
             'engine' => $engineClass,
             'state' => $this->game_state,
         ]);
+
+        // 5. Emitir evento de inicialización completa
+        event(new \App\Events\Game\GameInitializedEvent($this, $this->game_state));
     }
 
     /**

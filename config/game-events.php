@@ -15,6 +15,14 @@ return [
                 'name' => 'game.started',
                 'handler' => 'handleGameStarted'
             ],
+            'GameCountdownEvent' => [
+                'name' => 'game.countdown',
+                'handler' => 'handleGameCountdown'
+            ],
+            'GameInitializedEvent' => [
+                'name' => 'game.initialized',
+                'handler' => 'handleGameInitialized'
+            ],
             'PlayerConnectedToGameEvent' => [
                 'name' => 'player.connected',
                 'handler' => 'handlePlayerConnected'
