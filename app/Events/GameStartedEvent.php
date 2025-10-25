@@ -13,21 +13,17 @@ class GameStartedEvent implements ShouldBroadcast
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
-    public string $roomCode;
-    public string $gameName;
-    public int $totalPlayers;
+    public Room $room;
 
-    public function __construct(Room $room, int $totalPlayers)
+    public function __construct(Room $room)
     {
-        $this->roomCode = $room->code;
-        $this->gameName = $room->game->name;
-        $this->totalPlayers = $totalPlayers;
+        $this->room = $room;
     }
 
     public function broadcastOn(): array
     {
         return [
-            new Channel('room.' . $this->roomCode),
+            new Channel('room.' . $this->room->code),
         ];
     }
 
@@ -39,8 +35,9 @@ class GameStartedEvent implements ShouldBroadcast
     public function broadcastWith(): array
     {
         return [
-            'game_name' => $this->gameName,
-            'total_players' => $this->totalPlayers,
+            'room_code' => $this->room->code,
+            'game_name' => $this->room->game->name,
+            'total_players' => $this->room->match->players()->count(),
             'timestamp' => now()->toIso8601String(),
         ];
     }

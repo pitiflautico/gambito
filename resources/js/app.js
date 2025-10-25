@@ -6,6 +6,7 @@ import EventManager from './modules/EventManager.js';
 import { BaseGameClient } from './core/BaseGameClient.js';
 import { PresenceChannelManager } from './core/PresenceChannelManager.js';
 import { LobbyManager } from './core/LobbyManager.js';
+import { TeamManager } from './core/TeamManager.js';
 
 // Global libraries available for all games
 window.Alpine = Alpine;
@@ -13,6 +14,7 @@ window.EventManager = EventManager;
 window.BaseGameClient = BaseGameClient;
 window.PresenceChannelManager = PresenceChannelManager;
 window.LobbyManager = LobbyManager;
+window.TeamManager = TeamManager;
 
 Alpine.start();
 

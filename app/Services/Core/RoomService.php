@@ -297,17 +297,15 @@ class RoomService
             throw new \RuntimeException($validation['reason']);
         }
 
-        // Cambiar estado de la sala
-        $room->update(['status' => Room::STATUS_PLAYING]);
-
-        // Iniciar la partida (esto emitirá GameStartedEvent)
+        // Iniciar la partida (esto cambiará estado a ACTIVE y emitirá GameStartedEvent)
         $room->match->start();
 
-        Log::info("Game started", [
+        Log::info("Game transition started - Players will be redirected to room", [
             'room_id' => $room->id,
             'code' => $room->code,
             'game' => $room->game->slug,
             'players' => $room->match->players()->count(),
+            'status' => $room->fresh()->status,
         ]);
 
         return true;

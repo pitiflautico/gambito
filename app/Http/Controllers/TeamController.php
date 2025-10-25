@@ -28,6 +28,13 @@ class TeamController extends Controller
      */
     public function enable(Request $request, string $roomCode): JsonResponse
     {
+        Log::info("[TeamController] enable() called", [
+            'room_code' => $roomCode,
+            'mode' => $request->input('mode'),
+            'num_teams' => $request->input('num_teams'),
+            'user_id' => auth()->id()
+        ]);
+
         $request->validate([
             'mode' => 'required|in:team_turns,all_teams,sequential_within_team',
             'num_teams' => 'required|integer|min:2|max:8'
@@ -36,23 +43,39 @@ class TeamController extends Controller
         try {
             $room = $this->roomRepository->findByCodeOrFail($roomCode);
 
+            Log::info("[TeamController] Room found", [
+                'room_id' => $room->id,
+                'master_id' => $room->master_id,
+                'is_master' => $this->isMaster($request, $room)
+            ]);
+
             // Solo el master puede configurar equipos
             if (!$this->isMaster($request, $room)) {
+                Log::warning("[TeamController] User is not master");
                 return response()->json(['error' => 'Solo el organizador puede configurar equipos'], 403);
             }
 
             $match = $room->match;
 
             if (!$match) {
+                Log::error("[TeamController] No match found");
                 return response()->json(['error' => 'No hay partida activa'], 404);
             }
 
+            Log::info("[TeamController] Match found", [
+                'match_id' => $match->id,
+                'started_at' => $match->started_at
+            ]);
+
             if ($match->started_at) {
+                Log::warning("[TeamController] Match already started");
                 return response()->json(['error' => 'No se puede cambiar la configuración después de iniciar'], 400);
             }
 
             $teamsManager = new TeamsManager($match);
             $teamsManager->enableTeams($request->mode, $request->num_teams);
+
+            Log::info("[TeamController] Teams enabled successfully");
 
             // Broadcast evento
             event(new \App\Events\Lobby\TeamsConfigUpdatedEvent($room));
@@ -62,7 +85,9 @@ class TeamController extends Controller
                 'teams' => $teamsManager->getTeams()
             ]);
         } catch (\Exception $e) {
-            Log::error("[TeamController] Error habilitando equipos: {$e->getMessage()}");
+            Log::error("[TeamController] Error habilitando equipos: {$e->getMessage()}", [
+                'trace' => $e->getTraceAsString()
+            ]);
             return response()->json(['error' => 'Error al habilitar equipos'], 500);
         }
     }

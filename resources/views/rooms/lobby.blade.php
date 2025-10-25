@@ -449,6 +449,17 @@
         }
 
         function startGame() {
+            // Validar equipos si están habilitados
+            @if(isset($room->game_settings['play_with_teams']) && $room->game_settings['play_with_teams'])
+            if (teamManager) {
+                const validation = teamManager.validateTeamsForStart();
+                if (!validation.valid) {
+                    alert('⚠️ ' + validation.message);
+                    return;
+                }
+            }
+            @endif
+
             if (!confirm('¿Iniciar la partida?')) return;
 
             // Hacer el fetch para iniciar el juego
@@ -518,458 +529,35 @@
         }
 
         // ========================================================================
-        // FUNCIONES PARA GESTIÓN DE EQUIPOS
+        // TEAM MANAGER - Gestión de equipos en tiempo real
         // ========================================================================
 
-        function changeTeamCount(delta) {
-            const input = document.getElementById('team-count');
-            let value = parseInt(input.value) + delta;
-            if (value >= 2 && value <= 4) {
-                input.value = value;
-            }
+        let teamManager = null;
+
+        // Inicializar TeamManager cuando DOM esté listo
+        @if(isset($room->game_settings['play_with_teams']) && $room->game_settings['play_with_teams'])
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initializeTeamManager);
+        } else {
+            initializeTeamManager();
         }
 
-        function initializeTeams() {
-            const count = parseInt(document.getElementById('team-count').value);
-            const mode = '{{ $gameConfig['modules']['teams_system']['default_mode'] ?? 'team_turns' }}';
-
-            // Llamar a API para crear equipos
-            fetch('/api/rooms/{{ $room->code }}/teams/enable', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
-                },
-                body: JSON.stringify({
-                    mode: mode,
-                    num_teams: count
-                })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    // Ocultar panel de creación y mostrar paneles activos
-                    document.getElementById('create-teams-panel').classList.add('hidden');
-                    document.getElementById('teams-created-panel').classList.remove('hidden');
-                    document.getElementById('assignment-mode-panel').classList.remove('hidden');
-
-                    // Mostrar área de equipos
-                    document.getElementById('teams-area').classList.remove('hidden');
-                    renderTeams(data.teams, false); // Al crear, auto-selección está deshabilitada por defecto
-                } else {
-                    alert('Error al crear equipos: ' + (data.error || 'Error desconocido'));
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('Error al crear equipos');
-            });
-        }
-
-        // Variable global para almacenar si la auto-selección está habilitada
-        let allowSelfSelection = false;
-        let currentPlayerId = {{ Auth::id() ?? 'null' }};
-
-        function renderTeams(teams, selfSelectionEnabled = false) {
-            allowSelfSelection = selfSelectionEnabled;
-            const container = document.getElementById('teams-container');
-            const colors = ['bg-red-100 border-red-300', 'bg-blue-100 border-blue-300', 'bg-green-100 border-green-300', 'bg-yellow-100 border-yellow-300'];
-            const isMaster = {{ $isMaster ? 'true' : 'false' }};
-
-            container.innerHTML = teams.map((team, index) => `
-                <div class="border-2 rounded-lg p-4 ${colors[index % colors.length]}">
-                    <div class="flex items-center justify-between mb-3">
-                        <h5 class="font-bold text-lg">${team.name}</h5>
-                        <span class="text-sm font-medium px-2 py-1 bg-white rounded-full">${team.members.length} jugadores</span>
-                    </div>
-                    <div
-                        id="team-${team.id}"
-                        data-team-id="${team.id}"
-                        class="space-y-2 min-h-[100px] ${isMaster ? 'drop-zone' : ''}"
-                    >
-                        ${team.members.length === 0 ? '<p class="text-sm text-gray-500 text-center py-4">Sin jugadores</p>' : ''}
-                        ${team.members.map(memberId => renderPlayerInTeam(memberId)).join('')}
-                    </div>
-                    ${allowSelfSelection && currentPlayerId && !team.members.includes(currentPlayerId) ? `
-                        <button
-                            onclick="joinTeam('${team.id}')"
-                            class="w-full mt-3 px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium rounded-lg transition"
-                        >
-                            Unirme a este equipo
-                        </button>
-                    ` : ''}
-                </div>
-            `).join('');
-
-            // Agregar event listeners a las drop zones después de renderizar
-            if (isMaster) {
-                document.querySelectorAll('.drop-zone').forEach(dropZone => {
-                    dropZone.addEventListener('dragover', handleDragOver);
-                    dropZone.addEventListener('dragenter', handleDragEnter);
-                    dropZone.addEventListener('dragleave', handleDragLeave);
-                    dropZone.addEventListener('drop', handleDrop);
-                });
-            }
-        }
-
-        function renderPlayerInTeam(playerId) {
-            // Buscar el jugador en la lista
-            const playerElements = document.querySelectorAll('[data-player-id]');
-            for (let elem of playerElements) {
-                if (elem.dataset.playerId == playerId) {
-                    const name = elem.querySelector('.font-medium')?.textContent || 'Jugador';
-                    return `
-                        <div class="bg-white p-2 rounded flex items-center justify-between">
-                            <span class="text-sm font-medium">${name}</span>
-                            <button onclick="removeFromTeam(${playerId})" class="text-red-500 hover:text-red-700 text-xs">✕</button>
-                        </div>
-                    `;
-                }
-            }
-            return '';
-        }
-
-        // =======================
-        // Drag & Drop para asignación manual
-        // =======================
-        let draggedPlayerId = null;
-
-        function handleDragStart(event) {
-            draggedPlayerId = event.target.dataset.playerId;
-            event.target.style.opacity = '0.4';
-            event.dataTransfer.effectAllowed = 'move';
-            event.dataTransfer.setData('text/html', event.target.innerHTML);
-        }
-
-        function handleDragEnd(event) {
-            event.target.style.opacity = '1';
-        }
-
-        function handleDragOver(event) {
-            if (event.preventDefault) {
-                event.preventDefault();
-            }
-            event.dataTransfer.dropEffect = 'move';
-            return false;
-        }
-
-        function handleDragEnter(event) {
-            const dropZone = event.currentTarget;
-            if (dropZone.classList.contains('drop-zone')) {
-                dropZone.classList.add('border-4', 'border-purple-500', 'bg-purple-50');
-            }
-        }
-
-        function handleDragLeave(event) {
-            const dropZone = event.currentTarget;
-            if (dropZone.classList.contains('drop-zone')) {
-                dropZone.classList.remove('border-4', 'border-purple-500', 'bg-purple-50');
-            }
-        }
-
-        function handleDrop(event) {
-            if (event.stopPropagation) {
-                event.stopPropagation();
-            }
-
-            const dropZone = event.currentTarget;
-            dropZone.classList.remove('border-4', 'border-purple-500', 'bg-purple-50');
-
-            if (!draggedPlayerId) return false;
-
-            const teamId = dropZone.dataset.teamId;
-
-            // Llamar al API para asignar el jugador
-            fetch('/api/rooms/{{ $room->code }}/teams/assign', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
-                },
-                body: JSON.stringify({
-                    player_id: parseInt(draggedPlayerId),
-                    team_id: teamId
-                })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    console.log('Jugador asignado correctamente');
-                    // La actualización se hará automáticamente via WebSocket
-                } else {
-                    alert('Error: ' + (data.error || 'No se pudo asignar el jugador'));
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('Error al asignar jugador');
-            });
-
-            draggedPlayerId = null;
-            return false;
-        }
-
-        // =======================
-        // Fin Drag & Drop
-        // =======================
-
-        function joinTeam(teamId) {
-            if (!currentPlayerId) {
-                alert('Debes estar logueado para unirte a un equipo');
+        function initializeTeamManager() {
+            if (typeof window.TeamManager === 'undefined') {
+                console.log('⏳ Waiting for TeamManager to load...');
+                setTimeout(initializeTeamManager, 100);
                 return;
             }
 
-            fetch('/api/rooms/{{ $room->code }}/teams/assign', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
-                },
-                body: JSON.stringify({
-                    player_id: currentPlayerId,
-                    team_id: teamId
-                })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    console.log('Unido al equipo exitosamente');
-                    // La actualización se hará automáticamente via WebSocket
-                } else {
-                    alert('Error: ' + (data.error || 'No se pudo unir al equipo'));
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('Error al unirse al equipo');
+            teamManager = new window.TeamManager('{{ $room->code }}', {
+                isMaster: {{ $isMaster ? 'true' : 'false' }},
+                currentPlayerId: {{ Auth::id() ?? 'null' }},
+                defaultTeamMode: '{{ $gameConfig['modules']['teams_system']['default_mode'] ?? 'team_turns' }}'
             });
+
+            teamManager.initialize();
         }
-
-        function removeFromTeam(playerId) {
-            if (!confirm('¿Remover este jugador del equipo?')) {
-                return;
-            }
-
-            fetch('/api/rooms/{{ $room->code }}/teams/players/' + playerId, {
-                method: 'DELETE',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
-                }
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    console.log('Jugador removido del equipo');
-                    // La actualización se hará automáticamente via WebSocket
-                } else {
-                    alert('Error: ' + (data.error || 'No se pudo remover el jugador'));
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('Error al remover jugador');
-            });
-        }
-
-        function balanceTeams() {
-            if (!confirm('¿Distribuir automáticamente todos los jugadores en los equipos de forma equitativa?')) {
-                return;
-            }
-
-            fetch('/api/rooms/{{ $room->code }}/teams/balance', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
-                }
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    // Actualizar vista de equipos
-                    loadExistingTeams(); // Recargar para obtener también allow_self_selection
-                    updatePlayerTeamBadges();
-                    alert('✓ Jugadores distribuidos en equipos');
-                } else {
-                    alert('Error: ' + (data.error || 'No se pudo balancear los equipos'));
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('Error al balancear equipos');
-            });
-        }
-
-        function resetTeams() {
-            if (!confirm('¿Estás seguro de reiniciar los equipos? Todos los jugadores serán desasignados.')) {
-                return;
-            }
-
-            fetch('/api/rooms/{{ $room->code }}/teams/disable', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
-                }
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    // Mostrar panel de creación
-                    document.getElementById('create-teams-panel').classList.remove('hidden');
-                    document.getElementById('teams-created-panel').classList.add('hidden');
-                    document.getElementById('assignment-mode-panel').classList.add('hidden');
-                    document.getElementById('teams-area').classList.add('hidden');
-                    alert('✓ Equipos reiniciados');
-                } else {
-                    alert('Error: ' + (data.error || 'No se pudo reiniciar'));
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('Error al reiniciar equipos');
-            });
-        }
-
-        function toggleSelfSelection(enabled) {
-            fetch('/api/rooms/{{ $room->code }}/teams/self-selection', {
-                method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
-                },
-                body: JSON.stringify({
-                    allow_self_selection: enabled
-                })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    console.log('Auto-selección actualizada:', enabled);
-                } else {
-                    alert('Error al actualizar configuración');
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-            });
-        }
-
-        // Actualizar badges de equipo en la lista de jugadores
-        function updatePlayerTeamBadges() {
-            @if(isset($room->game_settings['play_with_teams']) && $room->game_settings['play_with_teams'])
-                fetch('/api/rooms/{{ $room->code }}/teams')
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.success && data.teams) {
-                            const teamColors = {
-                                'team_1': 'bg-red-100 text-red-800',
-                                'team_2': 'bg-blue-100 text-blue-800',
-                                'team_3': 'bg-green-100 text-green-800',
-                                'team_4': 'bg-yellow-100 text-yellow-800'
-                            };
-
-                            // Limpiar badges anteriores
-                            document.querySelectorAll('.player-team-badge').forEach(badge => {
-                                badge.textContent = '';
-                                badge.className = 'text-xs text-purple-600 font-medium player-team-badge';
-                            });
-
-                            // Asignar badges según equipos
-                            data.teams.forEach(team => {
-                                team.members.forEach(playerId => {
-                                    const badge = document.querySelector(`.player-team-badge[data-player-id="${playerId}"]`);
-                                    if (badge) {
-                                        badge.textContent = `🏆 ${team.name}`;
-                                        badge.className = `text-xs font-medium px-2 py-0.5 rounded-full ${teamColors[team.id] || 'bg-purple-100 text-purple-800'} player-team-badge`;
-                                    }
-                                });
-                            });
-                        }
-                    })
-                    .catch(error => console.error('Error al actualizar badges:', error));
-            @endif
-        }
-
-        // Actualizar badges al cargar
-        // Cargar equipos existentes al inicio
-        function loadExistingTeams() {
-            console.log('Loading existing teams...');
-            fetch('/api/rooms/{{ $room->code }}/teams')
-                .then(response => response.json())
-                .then(data => {
-                    console.log('Teams data received:', data);
-                    if (data.success && data.enabled && data.teams && data.teams.length > 0) {
-                        // Ocultar panel de creación y mostrar paneles activos (solo para master)
-                        const createPanel = document.getElementById('create-teams-panel');
-                        const teamsCreatedPanel = document.getElementById('teams-created-panel');
-                        const assignmentPanel = document.getElementById('assignment-mode-panel');
-
-                        if (createPanel) createPanel.classList.add('hidden');
-                        if (teamsCreatedPanel) teamsCreatedPanel.classList.remove('hidden');
-                        if (assignmentPanel) assignmentPanel.classList.remove('hidden');
-
-                        // Mostrar área de equipos
-                        document.getElementById('teams-area').classList.remove('hidden');
-                        console.log('Rendering teams:', data.teams);
-                        renderTeams(data.teams, data.allow_self_selection || false);
-
-                        // Sincronizar el estado del radio button
-                        if (data.allow_self_selection) {
-                            const selfRadio = document.querySelector('input[name="assignment_mode"][value="self"]');
-                            if (selfRadio) selfRadio.checked = true;
-                        } else {
-                            const manualRadio = document.querySelector('input[name="assignment_mode"][value="manual"]');
-                            if (manualRadio) manualRadio.checked = true;
-                        }
-                    }
-                })
-                .catch(error => {
-                    console.error('Error loading teams:', error);
-                });
-        }
-
-        // Escuchar eventos de equipos vía WebSocket
-        function setupTeamsWebSocket() {
-            if (typeof Echo !== 'undefined') {
-                Echo.channel('lobby.{{ $room->code }}')
-                    .listen('.teams.balanced', (e) => {
-                        console.log('Equipos balanceados:', e);
-                        loadExistingTeams();
-                        updatePlayerTeamBadges();
-                    })
-                    .listen('.teams.config-updated', (e) => {
-                        console.log('Configuración de equipos actualizada:', e);
-                        loadExistingTeams();
-                    })
-                    .listen('.player.moved', (e) => {
-                        console.log('Jugador movido a equipo:', e);
-                        loadExistingTeams();
-                        updatePlayerTeamBadges();
-                    })
-                    .listen('.player.removed', (e) => {
-                        console.log('Jugador removido de equipo:', e);
-                        loadExistingTeams();
-                        updatePlayerTeamBadges();
-                    });
-            }
-        }
-
-        document.addEventListener('DOMContentLoaded', function() {
-            // DEBUG: Verificar si el drag está funcionando
-            console.log('Is Master:', {{ $isMaster ? 'true' : 'false' }});
-            console.log('Players with draggable:', document.querySelectorAll('[draggable="true"]').length);
-
-            // Cargar equipos si existen
-            loadExistingTeams();
-
-            // Actualizar badges de equipos
-            updatePlayerTeamBadges();
-
-            // Configurar WebSocket para actualizaciones en tiempo real
-            setupTeamsWebSocket();
-        });
+        @endif
     </script>
     @endpush
 </x-app-layout>

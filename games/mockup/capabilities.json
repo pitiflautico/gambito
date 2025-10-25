@@ -1,0 +1,12 @@
+{
+  "game_type": "generic",
+  "supports_teams": true,
+  "supports_spectators": true,
+  "supports_ai": false,
+  "max_duration_minutes": 30,
+  "features": [
+    "real_time_updates",
+    "turn_based",
+    "multiplayer"
+  ]
+}

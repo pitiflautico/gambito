@@ -105,12 +105,44 @@ class GameMatch extends Model
     }
 
     /**
-     * Iniciar la partida.
-     * Llama al motor del juego para inicializar el estado.
+     * Iniciar la partida (fase de transición Lobby → Game Room).
+     *
+     * IMPORTANTE: Este método NO carga el engine del juego.
+     * Solo marca el inicio y redirige a todos al game room.
+     * El engine se inicializará después, cuando todos estén conectados en el room.
      */
     public function start(): void
     {
-        // Obtener el motor del juego
+        // 1. Marcar partida como iniciada
+        $this->update([
+            'started_at' => now(),
+        ]);
+
+        // 2. Actualizar estado de la sala a 'active' (no 'playing' todavía)
+        $this->room->update(['status' => Room::STATUS_ACTIVE]);
+
+        // 3. Refrescar para obtener el estado actualizado
+        $this->refresh();
+
+        \Log::info("Match started - Players will be redirected to game room", [
+            'match_id' => $this->id,
+            'room_code' => $this->room->code,
+            'game' => $this->room->game->slug,
+            'players_count' => $this->players()->count(),
+        ]);
+
+        // 4. Emitir evento game.started para redirigir a todos al room
+        event(new \App\Events\GameStartedEvent($this->room));
+    }
+
+    /**
+     * Inicializar el engine del juego (se llama desde el game room cuando todos están conectados).
+     *
+     * IMPORTANTE: Este método SÍ carga el engine.
+     * Solo se debe llamar después de verificar que todos los jugadores están conectados en el room.
+     */
+    public function initializeEngine(): void
+    {
         $game = $this->room->game;
         $engineClass = $game->getEngineClass();
 
@@ -120,33 +152,24 @@ class GameMatch extends Model
 
         $engine = app($engineClass);
 
-        // 1. Inicializar configuración (se llama UNA VEZ al crear match)
+        // 1. Inicializar configuración (se llama UNA VEZ)
         $engine->initialize($this);
 
         // 2. Iniciar el juego (resetea módulos y empieza desde 0)
         $engine->startGame($this);
 
-        // 3. Marcar partida como iniciada
-        $this->update([
-            'started_at' => now(),
-        ]);
+        // 3. Actualizar estado de la sala a 'playing'
+        $this->room->update(['status' => Room::STATUS_PLAYING]);
 
-        // 4. Actualizar estado de la sala a 'playing'
-        $this->room->startMatch();
-
-        // 5. Refrescar para obtener el estado actualizado
+        // 4. Refrescar para obtener el estado actualizado
         $this->refresh();
 
-        \Log::info("Match started with game engine", [
+        \Log::info("Game engine initialized and started", [
             'match_id' => $this->id,
             'game' => $game->slug,
             'engine' => $engineClass,
             'state' => $this->game_state,
         ]);
-
-        // NOTA: El evento GameStartedEvent se emite automáticamente desde
-        // BaseGameEngine::startGame() con el timing metadata correcto.
-        // No es necesario emitirlo aquí.
     }
 
     /**

@@ -1,0 +1,30 @@
+{
+  "modules": {
+    "guest_system": {
+      "enabled": true,
+      "allow_guests": true,
+      "guest_name_prefix": "Guest"
+    },
+    "turn_system": {
+      "enabled": true,
+      "mode": "sequential",
+      "time_limit_seconds": null
+    },
+    "scoring_system": {
+      "enabled": true,
+      "score_type": "points",
+      "winning_condition": "highest_score"
+    },
+    "teams_system": {
+      "enabled": false,
+      "default_mode": "team_turns",
+      "allow_self_selection": false
+    },
+    "timer_system": {
+      "enabled": false
+    },
+    "round_system": {
+      "enabled": false
+    }
+  }
+}

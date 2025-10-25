@@ -35,8 +35,14 @@ class Room extends Model
 
     /**
      * Estados posibles de una sala.
+     *
+     * - waiting: En el lobby, esperando jugadores
+     * - active: Partida iniciada, jugadores redirigidos al room (sin engine todavía)
+     * - playing: Engine cargado y juego en curso
+     * - finished: Partida finalizada
      */
     const STATUS_WAITING = 'waiting';
+    const STATUS_ACTIVE = 'active';
     const STATUS_PLAYING = 'playing';
     const STATUS_FINISHED = 'finished';
 
