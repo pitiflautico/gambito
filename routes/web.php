@@ -16,6 +16,9 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
+// Broadcasting Auth - Requiere autenticación (invitados están autenticados)
+Broadcast::routes(['middleware' => ['web']]);
+
 Route::get('/', function () {
     return view('home');
 })->name('home');

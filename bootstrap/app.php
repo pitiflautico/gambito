@@ -24,6 +24,12 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'admin' => \App\Http\Middleware\IsAdmin::class,
         ]);
+
+        // Eximir rutas de verificación CSRF
+        $middleware->validateCsrfTokens(except: [
+            '/api/rooms/*/presence/check',  // Presence channel status check (guests need this)
+            '/broadcasting/auth',             // Broadcasting auth (guests + Presence Channel)
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //

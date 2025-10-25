@@ -22,6 +22,7 @@ class User extends Authenticatable
         'email',
         'password',
         'role',
+        'guest_expires_at',
     ];
 
     /**
@@ -43,6 +44,7 @@ class User extends Authenticatable
     {
         return [
             'email_verified_at' => 'datetime',
+            'guest_expires_at' => 'datetime',
             'password' => 'hashed',
         ];
     }
@@ -55,5 +57,10 @@ class User extends Authenticatable
     public function isUser(): bool
     {
         return $this->role === 'user';
+    }
+
+    public function isGuest(): bool
+    {
+        return $this->role === 'guest';
     }
 }

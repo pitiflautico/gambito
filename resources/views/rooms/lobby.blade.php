@@ -16,6 +16,20 @@
                 </div>
             </div>
 
+            <!-- Waiting for Players Indicator - OCULTO, usamos badges en lista de jugadores -->
+            <div id="waiting-indicator" class="bg-yellow-900 border-2 border-yellow-600 rounded-lg p-6 hidden" style="display: none;">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h2 class="text-2xl font-bold text-yellow-300">⏳ Esperando jugadores...</h2>
+                        <p class="text-gray-300 mt-2">Conectándose en tiempo real</p>
+                    </div>
+                    <div class="text-right">
+                        <p class="text-5xl font-bold text-yellow-300" id="connection-counter">0/0</p>
+                        <p class="text-sm text-gray-400 mt-1">jugadores</p>
+                    </div>
+                </div>
+            </div>
+
             <!-- Panel de Configuración de Equipos (Solo si está activado) -->
             @if(isset($room->game_settings['play_with_teams']) && $room->game_settings['play_with_teams'])
             <div class="bg-gradient-to-r from-purple-50 to-blue-50 border-2 border-purple-200 overflow-hidden shadow-lg sm:rounded-lg">
@@ -172,7 +186,7 @@
                             </h3>
 
                             @if($room->match && $room->match->players->count() > 0)
-                                <div class="space-y-2">
+                                <div id="players-list" class="space-y-2">
                                     @foreach($room->match->players as $player)
                                         <div
                                             class="flex items-center justify-between p-3 bg-gray-50 rounded-lg {{ $isMaster ? 'cursor-move hover:bg-gray-100' : '' }}"
@@ -286,23 +300,20 @@
                             <div class="p-6">
                                 <h3 class="text-sm font-medium text-gray-700 mb-3">Control de la Sala</h3>
 
-                                @if($canStart['can_start'])
-                                    <button
-                                        onclick="startGame()"
-                                        class="w-full px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 font-semibold"
-                                    >
-                                        🎮 Iniciar Partida
-                                    </button>
-                                @else
-                                    <button
-                                        disabled
-                                        class="w-full px-6 py-3 bg-gray-300 text-gray-500 rounded-lg cursor-not-allowed font-semibold"
-                                        title="{{ $canStart['reason'] }}"
-                                    >
-                                        🎮 Iniciar Partida
-                                    </button>
-                                    <p class="text-xs text-red-600 mt-2 text-center">{{ $canStart['reason'] }}</p>
-                                @endif
+                                <!-- Mensaje de estado dinámico -->
+                                <div id="start-game-status" class="mb-3 p-3 bg-gray-50 rounded-lg text-sm">
+                                    <p class="text-gray-600">Esperando jugadores...</p>
+                                </div>
+
+                                <!-- Botón controlado dinámicamente por JS -->
+                                <button
+                                    id="start-game-button"
+                                    onclick="startGame()"
+                                    disabled
+                                    class="w-full px-6 py-3 bg-gray-300 text-gray-500 rounded-lg cursor-not-allowed font-semibold"
+                                >
+                                    🎮 Iniciar Partida
+                                </button>
 
                                 <button
                                     onclick="closeRoom()"
@@ -480,76 +491,31 @@
             });
         }
 
-        // WebSocket: Conectar al canal de la sala para actualizaciones en tiempo real
-        function initializeWebSocket() {
-            if (typeof window.Echo === 'undefined') {
-                console.log('Echo not ready yet, waiting...');
-                setTimeout(initializeWebSocket, 100);
+        // ========================================================================
+        // LOBBY MANAGER - Presence Channel & Real-time Updates
+        // ========================================================================
+
+        let lobbyManager = null;
+
+        // Inicializar LobbyManager cuando DOM esté listo
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initializeLobbyManager);
+        } else {
+            initializeLobbyManager();
+        }
+
+        function initializeLobbyManager() {
+            if (typeof window.LobbyManager === 'undefined') {
+                console.log('⏳ Waiting for LobbyManager to load...');
+                setTimeout(initializeLobbyManager, 100);
                 return;
             }
 
-            console.log('Connecting to room channel: room.{{ $room->code }}');
-
-            const channel = window.Echo.channel('room.{{ $room->code }}');
-
-            // Evento: Jugador se unió
-            channel.listen('.player.joined', (data) => {
-                console.log('Player joined:', data);
-                // Recargar página para mostrar nuevo jugador
-                location.reload();
+            lobbyManager = new window.LobbyManager('{{ $room->code }}', {
+                isMaster: {{ $isMaster ? 'true' : 'false' }},
+                maxPlayers: {{ $room->game->max_players }}
             });
-
-            // Evento: Jugador salió
-            channel.listen('.player.left', (data) => {
-                console.log('Player left:', data);
-                // Recargar página para actualizar lista
-                location.reload();
-            });
-
-            // Evento: Partida iniciada
-            channel.listen('.game.started', (data) => {
-                console.log('Game started via WebSocket, redirecting immediately...');
-                // Redirigir INMEDIATAMENTE sin procesamiento adicional
-                window.location.replace('/rooms/{{ $room->code }}');
-            });
-
-            console.log('WebSocket listeners registered for lobby');
         }
-
-        // Iniciar WebSocket cuando DOM esté listo
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', initializeWebSocket);
-        } else {
-            initializeWebSocket();
-        }
-
-        // Polling de respaldo cada 10 segundos (por si WebSocket falla)
-        let refreshInterval = setInterval(() => {
-            fetch('/api/rooms/{{ $room->code }}/stats')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        // Si el número de jugadores cambió, recargar la página
-                        const currentPlayers = {{ $stats['players'] }};
-                        if (data.data.players !== currentPlayers) {
-                            console.log('Player count changed via polling, reloading...');
-                            location.reload();
-                        }
-
-                        // Si el estado de la sala cambió, redirigir
-                        @if($room->status === App\Models\Room::STATUS_WAITING)
-                            // Si la partida comenzó, redirigir a la sala activa
-                            if (data.data.status === 'playing') {
-                                console.log('Game started via polling, redirecting...');
-                                window.location.href = '/rooms/{{ $room->code }}';
-                            }
-                        @endif
-                    }
-                })
-                .catch(error => {
-                    console.error('Error refreshing:', error);
-                });
-        }, 10000); // Cada 10 segundos (menos frecuente ya que tenemos WebSockets)
 
         // ========================================================================
         // FUNCIONES PARA GESTIÓN DE EQUIPOS

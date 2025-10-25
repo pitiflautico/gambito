@@ -124,51 +124,48 @@
         const roomCode = '{{ $roomCode }}';
         const matchId = {{ $match->id ?? 'null' }};
         const myPlayerId = {{ $player->id ?? 'null' }};
-        const totalPlayers = {{ $match->players->count() }};
         let eventsCount = 0;
-        let connectedUsers = [];
+        let allConnectedLogged = false;
+        let presenceManager = null;
 
-        // Esperar a que Echo esté disponible
+        // Inicializar PresenceChannelManager
         function initializePresenceChannel() {
-            if (typeof window.Echo === 'undefined') {
-                console.log('⏳ Waiting for Echo to load...');
+            if (typeof window.PresenceChannelManager === 'undefined') {
+                console.log('⏳ Waiting for PresenceChannelManager to load...');
                 setTimeout(initializePresenceChannel, 100);
                 return;
             }
 
-            console.log('✅ Echo loaded, connecting to Presence Channel...');
+            console.log('✅ Initializing PresenceChannelManager...');
             console.log('👤 My Player ID:', myPlayerId);
 
-            // Connect to Presence Channel (trackea conexiones automáticamente)
-            // Laravel añade automáticamente el prefijo "presence-" con .join()
-            window.Echo.join(`room.${roomCode}`)
-            // Presence Channel callbacks
-            .here((users) => {
-                console.log('👥 [Presence:here] Users currently connected:', users.length, '/', totalPlayers);
-                console.log('   Players:', users.map(u => u.name).join(', '));
-                connectedUsers = users;
-                updateConnectedPlayers(users);
-                updateWaitingIndicator(users.length, totalPlayers);
-
-                logConnection('Presence: Here', `${users.length} jugadores conectados: ${users.map(u => u.name).join(', ')}`);
-            })
-            .joining((user) => {
-                console.log('✅ [Presence:joining] User joined:', user.name);
-                connectedUsers.push(user);
-                updateConnectedPlayers(connectedUsers);
-                updateWaitingIndicator(connectedUsers.length, totalPlayers);
-
-                logConnection('User Joined ✅', `${user.name} se ha conectado`);
-            })
-            .leaving((user) => {
-                console.log('❌ [Presence:leaving] User left:', user.name);
-                connectedUsers = connectedUsers.filter(u => u.id !== user.id);
-                updateConnectedPlayers(connectedUsers);
-                updateWaitingIndicator(connectedUsers.length, totalPlayers);
-
-                logConnection('User Left ❌', `${user.name} se ha desconectado`);
-            })
-            // No hay eventos de juego - solo testing de conexiones
+            // Crear instancia del manager con callbacks personalizados
+            presenceManager = new window.PresenceChannelManager(roomCode, {
+                onHere: (users) => {
+                    logConnection('Presence: Here', `${users.length} jugadores conectados: ${users.map(u => u.name).join(', ')}`);
+                    updateConnectedPlayers(users);
+                },
+                onJoining: (user) => {
+                    logConnection('User Joined ✅', `${user.name} se ha conectado`);
+                },
+                onLeaving: (user) => {
+                    logConnection('User Left ❌', `${user.name} se ha desconectado`);
+                },
+                onAllConnected: (data) => {
+                    if (!allConnectedLogged) {
+                        logConnection('Ready! ✅', `¡Todos los jugadores están conectados! (${data.connected}/${data.total}) - Puedes iniciar la partida`);
+                        allConnectedLogged = true;
+                    }
+                    // Forzar actualización del indicador cuando el backend confirma que todos están conectados
+                    updateWaitingIndicator(data.connected, data.total);
+                },
+                onConnectionChange: (connected, total) => {
+                    updateWaitingIndicator(connected, total);
+                    if (connected < total) {
+                        allConnectedLogged = false; // Reset si vuelve a faltar alguien
+                    }
+                }
+            });
         }
 
         // Inicializar cuando el DOM esté listo
@@ -309,6 +306,11 @@
                     }
                 }
             });
+
+            // Llamar a updateWaitingIndicator con los datos actuales del manager
+            if (presenceManager) {
+                updateWaitingIndicator(presenceManager.getConnectedCount(), presenceManager.getTotalPlayers());
+            }
         }
 
         function updateWaitingIndicator(connected, total) {
@@ -330,8 +332,12 @@
                 title.textContent = '⏳ Esperando jugadores...';
                 title.className = 'text-2xl font-bold text-yellow-300';
                 subtitle.textContent = 'Conectados en tiempo real';
-            } else {
+
+                // Reset la bandera si volvemos a estar esperando
+                allConnectedLogged = false;
+            } else if (total > 0) {
                 // Todos conectados - cambiar color a verde
+                indicator.classList.remove('hidden');
                 indicator.classList.remove('bg-yellow-900', 'border-yellow-600');
                 indicator.classList.add('bg-green-900', 'border-green-600');
 
@@ -339,12 +345,13 @@
                 const subtitle = indicator.querySelector('p');
                 title.textContent = '✅ ¡Todos los jugadores conectados!';
                 title.className = 'text-2xl font-bold text-green-300';
-                subtitle.textContent = 'Listo para empezar';
+                subtitle.textContent = '🎮 Listo para empezar la partida';
 
-                // Ocultar después de 3 segundos
-                setTimeout(() => {
-                    indicator.classList.add('hidden');
-                }, 3000);
+                // Log especial cuando todos están conectados (solo una vez)
+                if (!allConnectedLogged) {
+                    logConnection('Ready! ✅', `¡Todos los jugadores están conectados! (${connected}/${total}) - Puedes iniciar la partida`);
+                    allConnectedLogged = true;
+                }
             }
         }
 

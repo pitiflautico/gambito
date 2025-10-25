@@ -51,8 +51,6 @@ class TriviaEngine extends BaseGameEngine
      */
     public function __construct()
     {
-        parent::__construct();
-
         // Listener: Cuando el turno expira (timeout)
         Event::listen(TurnTimeoutEvent::class, function ($event) {
             if ($event->match->room->game->slug === 'trivia') {

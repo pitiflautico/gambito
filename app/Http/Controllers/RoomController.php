@@ -8,6 +8,7 @@ use App\Models\Game;
 use App\Models\GameMatch;
 use App\Models\Player;
 use App\Models\Room;
+use App\Models\User;
 use App\Services\Core\PlayerSessionService;
 use App\Services\Core\RoomService;
 use App\Services\Core\GameConfigService;
@@ -305,6 +306,34 @@ class RoomController extends Controller
                 'name' => $guestData['name'] ?? null,
             ]);
 
+            // IMPORTANTE: Verificar si el usuario invitado ya está autenticado
+            // Solo autenticar si NO está autenticado (evita desconexiones del Presence Channel)
+            if (!Auth::check()) {
+                // No está autenticado, buscar o crear User y autenticar
+                $guestUser = User::firstOrCreate(
+                    ['name' => $guestData['name'], 'role' => 'guest'],
+                    [
+                        'email' => null,
+                        'password' => null,
+                        'guest_expires_at' => now()->addHours(24),
+                    ]
+                );
+
+                Auth::login($guestUser);
+
+                \Log::info("Lobby - guest user authenticated", [
+                    'user_id' => $guestUser->id,
+                    'name' => $guestUser->name,
+                    'code' => $code,
+                ]);
+            } else {
+                \Log::info("Lobby - guest user already authenticated, skipping login", [
+                    'user_id' => Auth::id(),
+                    'name' => Auth::user()->name,
+                    'code' => $code,
+                ]);
+            }
+
             // Verificar si ya existe como jugador en esta partida
             $existingPlayerInThisMatch = $room->match->players()
                 ->where('session_id', $guestData['session_id'])
@@ -441,7 +470,7 @@ class RoomController extends Controller
             return back()->withErrors(['error' => 'Sala no encontrada.']);
         }
 
-        // Crear sesión de invitado
+        // Crear usuario temporal invitado y autenticarlo
         try {
             // IMPORTANTE: SIEMPRE limpiar sesión de invitado anterior antes de crear nueva
             // Esto evita conflictos de session_id duplicados
@@ -463,18 +492,32 @@ class RoomController extends Controller
                 $this->playerSessionService->clearGuestSession();
             }
 
+            // Crear un User temporal con rol 'guest'
+            $guestUser = User::create([
+                'name' => $validated['player_name'],
+                'email' => null, // Los invitados no tienen email
+                'password' => null, // Los invitados no tienen password
+                'role' => 'guest',
+                'guest_expires_at' => now()->addHours(24), // Expira en 24 horas
+            ]);
+
+            // Autenticar automáticamente al usuario invitado
+            Auth::login($guestUser);
+
             // Ahora sí, crear la nueva sesión limpia
             $this->playerSessionService->createGuestSession($validated['player_name']);
 
-            \Log::info("New guest session created", [
+            \Log::info("Guest user created and authenticated", [
+                'user_id' => $guestUser->id,
                 'name' => $validated['player_name'],
                 'room' => $code,
+                'expires_at' => $guestUser->guest_expires_at,
             ]);
 
             return redirect()->route('rooms.lobby', ['code' => $code])
                 ->with('success', '¡Bienvenido ' . $validated['player_name'] . '!');
         } catch (\Exception $e) {
-            \Log::error("Error creating guest session", [
+            \Log::error("Error creating guest user", [
                 'error' => $e->getMessage(),
                 'code' => $code,
             ]);
@@ -820,6 +863,60 @@ class RoomController extends Controller
                 'message' => $e->getMessage(),
             ], 400);
         }
+    }
+
+    /**
+     * Verificar si todos los jugadores están conectados
+     *
+     * El frontend llama a este endpoint cuando hay cambios en el Presence Channel
+     * (alguien se conecta o desconecta). El backend verifica si todos están
+     * conectados y dispara el evento correspondiente.
+     */
+    public function checkAllPlayersConnected(Request $request, string $code)
+    {
+        $room = Room::where('code', $code)->firstOrFail();
+        $match = $room->match;
+
+        if (!$match) {
+            return response()->json([
+                'success' => false,
+                'error' => 'No match found'
+            ], 404);
+        }
+
+        // Obtener número de jugadores conectados desde el request
+        $connectedCount = $request->input('connected_count', 0);
+
+        // Jugadores mínimos para empezar (no el máximo)
+        $minPlayers = $room->game->min_players;
+        $totalPlayers = $match->players()->count();
+
+        \Log::info('🔍 [Presence Check]', [
+            'room_code' => $code,
+            'connected' => $connectedCount,
+            'min_players' => $minPlayers,
+            'total_players' => $totalPlayers,
+        ]);
+
+        // Si alcanzamos el mínimo de jugadores conectados, disparar evento
+        if ($connectedCount > 0 && $connectedCount >= $minPlayers) {
+            \Log::info('✅ [Presence] Minimum players connected! Broadcasting event...', [
+                'room_code' => $code,
+                'connected' => $connectedCount,
+                'min_required' => $minPlayers,
+            ]);
+
+            // Disparar evento broadcast
+            event(new \App\Events\AllPlayersConnectedEvent($room, $connectedCount, $minPlayers));
+        }
+
+        return response()->json([
+            'success' => true,
+            'connected' => $connectedCount,
+            'min_players' => $minPlayers,
+            'total' => $minPlayers, // Para compatibilidad con frontend
+            'all_connected' => $connectedCount >= $minPlayers,
+        ]);
     }
 }
 
