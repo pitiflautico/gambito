@@ -1,6 +1,6 @@
 <?php
 
-use App\Http\Controllers\GameController;
+use App\Http\Controllers\PlayController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\RoomController;
 use Illuminate\Support\Facades\Route;
@@ -37,9 +37,8 @@ Route::middleware('auth')->group(function () {
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 });
 
-// Rutas de Juegos
-Route::get('/games', [GameController::class, 'index'])->name('games.index');
-Route::get('/games/{slug}', [GameController::class, 'show'])->name('games.show');
+// Rutas de vista de Juego Activo (FASE 3: Game)
+Route::get('/play/{code}', [PlayController::class, 'show'])->name('play.show');
 
 // Ruta de test de WebSocket (solo desarrollo)
 Route::get('/test-websocket', function () {

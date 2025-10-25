@@ -46,6 +46,12 @@ use Illuminate\Support\Facades\Log;
  * - El Engine NO programa delays manualmente (lo hace RoundManager)
  * - El Engine SOLO define qué pasa en cada ronda (lógica del juego)
  *
+ * CONVENCIONES DE VISTAS:
+ * ======================
+ * - Vista principal del juego: games/{slug}/views/game.blade.php
+ * - NUNCA usar canvas.blade.php, siempre game.blade.php
+ * - El controlador busca la vista como: {slug}::game
+ *
  * @see docs/ENGINE_ARCHITECTURE.md
  * @see docs/strategies/END_ROUND_STRATEGIES.md
  */

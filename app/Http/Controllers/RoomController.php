@@ -526,7 +526,13 @@ class RoomController extends Controller
     }
 
     /**
-     * Mostrar sala activa (partida en curso).
+     * Router de sala - Redirige según el estado de la sala.
+     *
+     * SEPARACIÓN DE RESPONSABILIDADES:
+     * - WAITING → Lobby (rooms.lobby)
+     * - ACTIVE → Transition (showTransition)
+     * - PLAYING → Game (play.show) ← PlayController
+     * - FINISHED → Results (rooms.results)
      *
      * @param string $code Código de la sala
      */
@@ -552,101 +558,18 @@ class RoomController extends Controller
             return $this->showTransition($code, $room);
         }
 
+        // Si la sala está jugando (PLAYING), redirigir a PlayController
+        if ($room->status === Room::STATUS_PLAYING) {
+            return redirect()->route('play.show', ['code' => $code]);
+        }
+
         // Si la sala terminó, mostrar resultados
         if ($room->status === Room::STATUS_FINISHED) {
             return redirect()->route('rooms.results', ['code' => $code]);
         }
 
-        // IMPORTANTE: Verificar si el master (creador) está conectado
-        // Si el master no está conectado, cerrar la sala automáticamente
-        if (!$this->roomService->isMasterConnected($room)) {
-            \Log::warning("Show - master disconnected, closing room", [
-                'code' => $code,
-                'master_id' => $room->master_id,
-            ]);
-
-            $this->roomService->closeRoom($room);
-
-            return redirect()->route('home')
-                ->with('error', 'El creador de la sala se desconectó. La sala ha sido cerrada.');
-        }
-
-        // Obtener el jugador actual (guest o autenticado)
-        $player = null;
-        if (Auth::check()) {
-            // Usuario autenticado
-            $player = $room->match->players()->where('user_id', Auth::id())->first();
-        } elseif ($this->playerSessionService->hasGuestSession()) {
-            // Invitado
-            $guestData = $this->playerSessionService->getGuestData();
-            $player = $room->match->players()->where('session_id', $guestData['session_id'])->first();
-        }
-
-        // Si no se encontró jugador, redirigir al lobby
-        if (!$player) {
-            return redirect()->route('rooms.lobby', ['code' => $code])
-                ->with('error', 'Debes unirte a la partida primero');
-        }
-
-        $playerId = $player->id;
-
-        // Obtener el rol del jugador desde el motor del juego
-        $gameState = $room->match->game_state ?? [];
-        $currentDrawerId = $gameState['current_drawer_id'] ?? null;
-        $role = ($player->id === $currentDrawerId) ? 'drawer' : 'guesser';
-
-        // Obtener lista de jugadores con sus datos
-        $players = $room->match->players->map(function ($p) use ($currentDrawerId, $gameState) {
-            return [
-                'id' => $p->id,
-                'name' => $p->name,
-                'score' => $gameState['scores'][$p->id] ?? 0,
-                'is_drawer' => ($p->id === $currentDrawerId),
-                'is_eliminated' => in_array($p->id, $gameState['eliminated_this_round'] ?? [])
-            ];
-        });
-
-        // Cargar event_config mergeando base events con eventos del juego
-        $gameSlug = $room->game->slug;
-        $capabilitiesPath = base_path("games/{$gameSlug}/capabilities.json");
-
-        // Cargar base events
-        $baseEventsPath = config_path('game-events.php');
-        $baseEventsConfig = require $baseEventsPath;
-        $baseEvents = $baseEventsConfig['base_events'] ?? [];
-
-        // Cargar eventos del juego
-        $gameEvents = [];
-        $channel = 'room.{roomCode}';
-        if (file_exists($capabilitiesPath)) {
-            $capabilities = json_decode(file_get_contents($capabilitiesPath), true);
-            $gameEvents = $capabilities['event_config']['events'] ?? [];
-            $channel = $capabilities['event_config']['channel'] ?? 'room.{roomCode}';
-        }
-
-        // Merge eventos base + eventos del juego
-        $eventConfig = [
-            'channel' => $channel,
-            'events' => array_merge(
-                $baseEvents['events'] ?? [],
-                $gameEvents
-            ),
-        ];
-
-        // Renderizar vista específica del juego usando su namespace
-        $gameViewName = "{$gameSlug}::canvas";
-        if (view()->exists($gameViewName)) {
-            return view($gameViewName, [
-                'room' => $room,
-                'match' => $room->match,
-                'playerId' => $playerId,
-                'role' => $role,
-                'eventConfig' => $eventConfig,
-            ]);
-        }
-
-        // Fallback: Cargar vista genérica si el juego no tiene vista específica
-        return view('rooms.show', compact('room', 'playerId', 'role', 'players', 'eventConfig'));
+        // Estado no reconocido, redirigir al lobby
+        return redirect()->route('rooms.lobby', ['code' => $code]);
     }
 
     /**

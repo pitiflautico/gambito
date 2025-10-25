@@ -6,59 +6,60 @@
     </x-slot>
 
 <div class="py-12">
-    <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
-        <div class="container py-5">
-    <div class="row justify-content-center">
-        <div class="col-md-8">
-            <div class="card shadow">
-                <div class="card-header bg-primary text-white">
-                    <h4 class="mb-0">🎮 {{ $gameName }}</h4>
-                    <small>Sala: {{ $code }}</small>
+    <div class="max-w-4xl mx-auto sm:px-6 lg:px-8">
+        <div class="bg-white overflow-hidden shadow-xl sm:rounded-lg">
+            <!-- Header -->
+            <div class="bg-indigo-600 px-6 py-4">
+                <h4 class="text-2xl font-bold text-white">🎮 {{ $gameName }}</h4>
+                <p class="text-indigo-200 text-sm mt-1">Sala: {{ $code }}</p>
+            </div>
+
+            <!-- Body -->
+            <div class="px-6 py-12 text-center">
+                <!-- Estado: Esperando jugadores -->
+                <div id="waiting-state">
+                    <!-- Spinner -->
+                    <div class="flex justify-center mb-6">
+                        <div class="animate-spin rounded-full h-16 w-16 border-b-2 border-indigo-600"></div>
+                    </div>
+
+                    <h3 class="text-2xl font-bold text-gray-800 mb-3">Esperando a todos los jugadores...</h3>
+                    <p class="text-gray-600 mb-8">
+                        <span id="connected-count" class="font-bold text-indigo-600">0</span> /
+                        <span id="total-count" class="font-bold">{{ $totalPlayers }}</span> conectados
+                    </p>
+
+                    <!-- Lista de jugadores -->
+                    <div class="max-w-md mx-auto">
+                        <div id="players-list" class="space-y-2">
+                            @foreach($expectedPlayers as $player)
+                                <div data-player-id="{{ $player['id'] }}"
+                                     class="flex justify-between items-center bg-gray-50 px-4 py-3 rounded-lg border border-gray-200">
+                                    <span class="text-gray-800 font-medium">{{ $player['name'] }}</span>
+                                    <span class="player-status px-3 py-1 text-xs font-semibold rounded-full bg-gray-200 text-gray-600">
+                                        Esperando...
+                                    </span>
+                                </div>
+                            @endforeach
+                        </div>
+                    </div>
                 </div>
 
-                <div class="card-body text-center py-5">
-                    <!-- Estado: Esperando jugadores -->
-                    <div id="waiting-state">
-                        <div class="spinner-border text-primary mb-4" role="status" style="width: 4rem; height: 4rem;">
-                            <span class="visually-hidden">Esperando...</span>
-                        </div>
-                        <h3 class="mb-3">Esperando a todos los jugadores...</h3>
-                        <p class="text-muted mb-4">
-                            <span id="connected-count">0</span> / <span id="total-count">{{ $totalPlayers }}</span> conectados
-                        </p>
+                <!-- Estado: Countdown -->
+                <div id="countdown-state" class="hidden">
+                    <div class="text-9xl font-bold text-indigo-600 mb-6" id="countdown-number">3</div>
+                    <h3 class="text-2xl font-semibold text-gray-700" id="countdown-message">El juego comenzará en...</h3>
+                </div>
 
-                        <!-- Lista de jugadores esperados -->
-                        <div class="row justify-content-center">
-                            <div class="col-md-6">
-                                <div class="list-group" id="players-list">
-                                    @foreach($expectedPlayers as $player)
-                                        <div class="list-group-item d-flex justify-content-between align-items-center" data-player-id="{{ $player['id'] }}">
-                                            <span>{{ $player['name'] }}</span>
-                                            <span class="badge bg-secondary player-status">Esperando...</span>
-                                        </div>
-                                    @endforeach
-                                </div>
-                            </div>
-                        </div>
+                <!-- Estado: Inicializando -->
+                <div id="initializing-state" class="hidden">
+                    <div class="flex justify-center mb-6">
+                        <div class="animate-spin rounded-full h-16 w-16 border-b-2 border-green-600"></div>
                     </div>
-
-                    <!-- Estado: Countdown -->
-                    <div id="countdown-state" class="d-none">
-                        <h1 class="display-1 mb-4" id="countdown-number">3</h1>
-                        <h3 id="countdown-message">El juego comenzará en...</h3>
-                    </div>
-
-                    <!-- Estado: Inicializando -->
-                    <div id="initializing-state" class="d-none">
-                        <div class="spinner-border text-success mb-4" role="status" style="width: 4rem; height: 4rem;">
-                            <span class="visually-hidden">Inicializando...</span>
-                        </div>
-                        <h3 class="mb-3">Inicializando juego...</h3>
-                        <p class="text-muted">Preparando el motor del juego</p>
-                    </div>
+                    <h3 class="text-2xl font-bold text-gray-800 mb-3">Inicializando juego...</h3>
+                    <p class="text-gray-600">Preparando el motor del juego</p>
                 </div>
             </div>
-        </div>
         </div>
     </div>
 </div>
@@ -153,12 +154,12 @@ function updatePlayerStatus(users) {
 
         if (isConnected) {
             badge.textContent = 'Conectado ✓';
-            badge.classList.remove('bg-secondary');
-            badge.classList.add('bg-success');
+            badge.classList.remove('bg-gray-200', 'text-gray-600');
+            badge.classList.add('bg-green-100', 'text-green-700');
         } else {
             badge.textContent = 'Esperando...';
-            badge.classList.remove('bg-success');
-            badge.classList.add('bg-secondary');
+            badge.classList.remove('bg-green-100', 'text-green-700');
+            badge.classList.add('bg-gray-200', 'text-gray-600');
         }
     });
 }
@@ -218,8 +219,8 @@ function initializeGameEvents() {
         }
 
         // Ocultar estado de espera
-        document.getElementById('waiting-state').classList.add('d-none');
-        document.getElementById('countdown-state').classList.remove('d-none');
+        document.getElementById('waiting-state').classList.add('hidden');
+        document.getElementById('countdown-state').classList.remove('hidden');
 
         const countdownElement = document.getElementById('countdown-number');
         const messageElement = document.getElementById('countdown-message');
@@ -272,8 +273,8 @@ function initializeGameEvents() {
  * Mostrar estado de inicialización
  */
 function showInitializing() {
-    document.getElementById('countdown-state').classList.add('d-none');
-    document.getElementById('initializing-state').classList.remove('d-none');
+    document.getElementById('countdown-state').classList.add('hidden');
+    document.getElementById('initializing-state').classList.remove('hidden');
 }
 
 // Inicializar
