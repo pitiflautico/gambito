@@ -95,3 +95,41 @@ Broadcast::channel('room.{code}', function ($user, string $code) {
         'role' => $player->role,
     ];
 });
+
+/*
+|--------------------------------------------------------------------------
+| WebSocket Bidirectional Communication (Fase 3-4)
+|--------------------------------------------------------------------------
+|
+| NOTA: Laravel Broadcasting/Reverb no soporta "whispers handlers" nativamente.
+| Los whispers son eventos peer-to-peer (cliente-a-cliente) que no pasan por
+| el servidor de aplicación.
+|
+| Para comunicación bidireccional (cliente → servidor → cliente), usamos:
+|
+| FASE 3 (Backend - COMPLETADO):
+| ✅ HandleClientGameAction listener creado
+| ✅ PlayerActionEvent para respuestas
+| ✅ Procesamiento de acciones desacoplado del controlador
+|
+| FASE 4 (Frontend - PENDIENTE):
+| - Opción A: Mantener HTTP POST pero optimizado (rápido, simple)
+| - Opción B: Usar eventos personalizados via WebSocket
+| - Opción C: Implementar custom protocol con Laravel Reverb
+|
+| El listener app/Listeners/HandleClientGameAction está preparado para:
+| 1. Recibir eventos desde HTTP (actual)
+| 2. Recibir eventos desde WebSocket (futuro)
+| 3. Procesar acciones de forma unificada
+| 4. Emitir PlayerActionEvent con resultados
+|
+| Uso actual (HTTP):
+| PlayController::apiProcessAction() → HandleClientGameAction::handle()
+|
+| Uso futuro (WebSocket - a implementar en Fase 4):
+| Frontend: channel.whisper('game.action', {action, data})
+| Backend: Middleware/Handler → HandleClientGameAction::handle()
+| Backend: emit PlayerActionEvent
+| Frontend: channel.listen('.game.player.action', handler)
+|
+*/
