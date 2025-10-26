@@ -948,6 +948,121 @@ abstract class BaseGameEngine implements GameEngineInterface
             ?? [];
     }
 
+    /**
+     * Agregar puntos a un jugador (helper simplificado).
+     *
+     * Este método es un helper conveniente para agregar puntos directamente.
+     * Internamente usa ScoreManager.
+     *
+     * @param GameMatch $match
+     * @param int $playerId
+     * @param int $points
+     * @param string $reason
+     * @return void
+     */
+    protected function addScore(GameMatch $match, int $playerId, int $points, string $reason = 'action'): void
+    {
+        $scoreManager = $this->getScoreManager($match);
+        $scoreManager->addScore($playerId, $points);
+        $this->saveScoreManager($match, $scoreManager);
+
+        Log::info("[{$this->getGameSlug()}] Score added", [
+            'player_id' => $playerId,
+            'points' => $points,
+            'reason' => $reason,
+            'new_score' => $scoreManager->getScore($playerId)
+        ]);
+    }
+
+    // ========================================================================
+    // HELPERS: Player Cache (elimina queries durante el juego)
+    // ========================================================================
+
+    /**
+     * Cachear datos de jugadores en game_state durante initialize().
+     *
+     * Esto se llama UNA VEZ al inicializar el juego para guardar todos los
+     * datos de los jugadores en _config['players'] y evitar queries durante el gameplay.
+     *
+     * @param GameMatch $match
+     * @return void
+     */
+    protected function cachePlayersInState(GameMatch $match): void
+    {
+        $players = $match->players; // ← Query SOLO aquí (1 vez)
+
+        $playersData = [];
+
+        foreach ($players as $player) {
+            $playersData[$player->id] = [
+                'id' => $player->id,
+                'name' => $player->name,
+                'user_id' => $player->user_id,
+                'avatar' => $player->avatar ?? null,
+            ];
+        }
+
+        $gameState = $match->game_state;
+        $gameState['_config']['players'] = $playersData;
+        $gameState['_config']['total_players'] = count($playersData);
+        $match->game_state = $gameState;
+        $match->save();
+
+        Log::info("[{$this->getGameSlug()}] Players cached in game_state", [
+            'match_id' => $match->id,
+            'player_count' => count($playersData)
+        ]);
+    }
+
+    /**
+     * Obtener datos del jugador desde game_state (SIN query).
+     *
+     * Los datos del jugador se guardan en _config['players'] al inicializar el juego.
+     *
+     * @param GameMatch $match
+     * @param int $playerId
+     * @return Player|null
+     */
+    protected function getPlayerFromState(GameMatch $match, int $playerId): ?Player
+    {
+        $playerData = $match->game_state['_config']['players'][$playerId] ?? null;
+
+        if (!$playerData) {
+            Log::warning("[{$this->getGameSlug()}] Player not found in cached state", [
+                'player_id' => $playerId,
+                'match_id' => $match->id
+            ]);
+            return null;
+        }
+
+        // Crear Player object desde datos en memoria (NO query!)
+        $player = new Player();
+        $player->id = $playerData['id'];
+        $player->name = $playerData['name'];
+        $player->user_id = $playerData['user_id'];
+        $player->avatar = $playerData['avatar'] ?? null;
+        $player->exists = true;
+
+        return $player;
+    }
+
+    /**
+     * Broadcast helper optimizado para enviar eventos a una sala.
+     *
+     * @param mixed $event Evento a broadcast
+     * @param GameMatch $match
+     * @return void
+     */
+    protected function broadcastToRoom($event, GameMatch $match): void
+    {
+        broadcast($event)->toOthers();
+
+        Log::debug("[{$this->getGameSlug()}] Event broadcasted to room", [
+            'event' => class_basename($event),
+            'room_code' => $match->room->code ?? 'unknown'
+        ]);
+    }
+
     // ========================================================================
     // HELPERS: PlayerStateManager
     // ========================================================================

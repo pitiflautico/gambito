@@ -212,6 +212,35 @@ export class BaseGameClient {
      */
     showMessage(message, type = 'info') {
         // Los juegos pueden sobrescribir esto para mostrar mensajes en UI
+        console.log(`[${type.toUpperCase()}] ${message}`);
+    }
+
+    /**
+     * Ocultar elemento del DOM.
+     *
+     * @param {string} id - ID del elemento
+     */
+    hideElement(id) {
+        const element = document.getElementById(id);
+        if (element) {
+            element.classList.add('hidden');
+        } else {
+            console.warn(`[BaseGameClient] Element with id "${id}" not found`);
+        }
+    }
+
+    /**
+     * Mostrar elemento del DOM.
+     *
+     * @param {string} id - ID del elemento
+     */
+    showElement(id) {
+        const element = document.getElementById(id);
+        if (element) {
+            element.classList.remove('hidden');
+        } else {
+            console.warn(`[BaseGameClient] Element with id "${id}" not found`);
+        }
     }
 
     /**

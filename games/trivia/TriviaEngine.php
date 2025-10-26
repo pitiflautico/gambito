@@ -78,6 +78,10 @@ class TriviaEngine extends BaseGameEngine
 
         $match->save();
 
+        // ✅ NUEVO (Fase 1): Cachear players en _config (1 query, 1 sola vez)
+        // Esto evita queries durante el juego
+        $this->cachePlayersInState($match);
+
         // Inicializar módulos automáticamente desde config.json
         $scoringConfig = $questionsData['scoring'] ?? [];
         $this->initializeModules($match, [
