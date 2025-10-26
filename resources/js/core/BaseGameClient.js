@@ -78,15 +78,11 @@ export class BaseGameClient {
      * El backend se encargará de iniciar el primer round automáticamente.
      */
     async handleGameStarted(event) {
-        console.log('🎮 [BaseGameClient] GameStartedEvent received:', event);
-
         // Actualizar game state con el estado inicial
         this.gameState = event.game_state;
 
         // Mostrar countdown si existe (solo visual, el backend inicia el round)
         if (event.timing) {
-            console.log('⏰ [BaseGameClient] Showing countdown:', event.timing);
-
             await this.timing.processTimingPoint(
                 event.timing,
                 () => this.notifyGameReady(),
@@ -105,10 +101,28 @@ export class BaseGameClient {
      * Este método se ejecuta para TODOS los juegos cuando inicia una ronda.
      * Los juegos específicos pueden sobrescribirlo para añadir lógica custom.
      */
-    handleRoundStarted(event) {
+    async handleRoundStarted(event) {
         // Actualizar información de ronda
         this.currentRound = event.current_round;
         this.totalRounds = event.total_rounds;
+
+        // Mostrar timer si existe timing metadata
+        if (event.timing && event.timing.server_time && event.timing.duration) {
+            const timerElement = this.getTimerElement();
+
+            if (timerElement) {
+                // Convertir duración de segundos a milisegundos
+                const durationMs = event.timing.duration * 1000;
+
+                this.timing.startServerSyncedCountdown(
+                    event.timing.server_time,
+                    durationMs,
+                    timerElement,
+                    () => this.onTimerExpired(this.currentRound),
+                    'round_timer'
+                );
+            }
+        }
 
         // Los juegos específicos sobrescriben este método para renderizar su contenido
     }
@@ -136,9 +150,6 @@ export class BaseGameClient {
 
         // Procesar timing metadata si existe
         if (event.timing) {
-            console.log('⏰ [BaseGameClient] Processing timing metadata:', event.timing);
-            console.log(`🔒 [BaseGameClient] Captured from_round=${fromRound} for countdown callback`);
-
             await this.timing.processTimingPoint(
                 event.timing,
                 () => this.notifyReadyForNextRound(fromRound),
@@ -164,7 +175,6 @@ export class BaseGameClient {
      * Se ejecuta cuando el juego cambia de fase (ej: lobby -> playing -> finished)
      */
     handlePhaseChanged(event) {
-        console.log('🔄 [BaseGameClient] Phase changed:', event);
         // Los juegos específicos sobrescriben este método para manejar transiciones de fase
     }
 
@@ -174,7 +184,6 @@ export class BaseGameClient {
      * Se ejecuta cuando cambia el turno en juegos por turnos
      */
     handleTurnChanged(event) {
-        console.log('↪️ [BaseGameClient] Turn changed:', event);
         // Los juegos específicos sobrescriben este método para actualizar UI de turnos
     }
 
@@ -184,7 +193,6 @@ export class BaseGameClient {
      * Se ejecuta cuando el juego finaliza
      */
     handleGameFinished(event) {
-        console.log('🏁 [BaseGameClient] Game finished:', event);
         // Los juegos específicos sobrescriben este método para mostrar pantalla de resultados finales
     }
 
@@ -292,8 +300,6 @@ export class BaseGameClient {
      * @returns {Promise<object>} Resultado de la acción
      */
     async sendGameAction(action, data = {}, optimistic = false) {
-        console.log(`📤 [BaseGameClient] Sending game action: ${action}`, { data, optimistic });
-
         // Aplicar actualización optimista si está habilitada
         if (optimistic) {
             this.applyOptimisticUpdate(action, data);
@@ -323,8 +329,6 @@ export class BaseGameClient {
                 if (optimistic) {
                     this.revertOptimisticUpdate(action, data);
                 }
-            } else {
-                console.log(`✅ [BaseGameClient] Action successful:`, result);
             }
 
             return result;
@@ -355,7 +359,6 @@ export class BaseGameClient {
      */
     applyOptimisticUpdate(action, data) {
         // Stub method - los juegos específicos sobrescriben esto
-        console.log(`🔄 [BaseGameClient] Optimistic update (override in subclass):`, action, data);
     }
 
     /**
@@ -372,7 +375,6 @@ export class BaseGameClient {
      */
     revertOptimisticUpdate(action, data) {
         // Stub method - los juegos específicos sobrescriben esto
-        console.log(`↩️  [BaseGameClient] Reverting optimistic update (override in subclass):`, action, data);
     }
 
     // ========================================================================
@@ -388,8 +390,6 @@ export class BaseGameClient {
      * - Los demás clientes reciben 409 Conflict y esperan el evento del juego (ej: QuestionStartedEvent)
      */
     async notifyGameReady() {
-        console.log('📤 [BaseGameClient] Notifying backend: game ready, starting first round');
-
         try {
             const response = await fetch(`/api/games/${this.matchId}/game-ready`, {
                 method: 'POST',
@@ -408,8 +408,6 @@ export class BaseGameClient {
                 if (data.already_processing) {
                     // Otro cliente ya está iniciando el juego (normal, no es error)
                     console.log('⏸️  [BaseGameClient] Another client is starting the game, waiting for first event...');
-                } else {
-                    console.log('✅ [BaseGameClient] Successfully started game');
                 }
             } else {
                 console.error('❌ [BaseGameClient] Error starting game:', data.error);
@@ -434,12 +432,6 @@ export class BaseGameClient {
         // Si no se especifica fromRound, usar currentRound actual (fallback)
         const roundToSend = fromRound !== null ? fromRound : this.currentRound;
 
-        console.log('📤 [BaseGameClient] Notifying backend: ready for next round', {
-            from_round: roundToSend,
-            current_round: this.currentRound,
-            captured_from_countdown: fromRound !== null
-        });
-
         try {
             const response = await fetch(`/api/games/${this.matchId}/start-next-round`, {
                 method: 'POST',
@@ -455,12 +447,10 @@ export class BaseGameClient {
 
             const data = await response.json();
 
-            if (response.ok && data.success) {
-                console.log('✅ [BaseGameClient] Successfully started next round');
-            } else if (response.status === 409) {
+            if (response.status === 409) {
                 // 409 Conflict: Otro cliente ya está iniciando la ronda
                 console.log('⏸️  [BaseGameClient] Another client is starting the round, waiting for RoundStartedEvent...');
-            } else {
+            } else if (!response.ok || !data.success) {
                 console.error('❌ [BaseGameClient] Error starting next round:', data.error);
             }
 
@@ -498,8 +488,6 @@ export class BaseGameClient {
      * - Hacer transiciones de UI
      */
     onGameReady() {
-        console.log('✅ [BaseGameClient] Game is ready');
-
         // Los juegos específicos sobrescriben esto
     }
 
@@ -565,8 +553,68 @@ export class BaseGameClient {
 
             podiumContainer.appendChild(playerCard);
         });
+    }
 
-        console.log(`✅ [BaseGameClient] Podium rendered with ${ranking.length} players`);
+    // ========================================================================
+    // TIMER SYSTEM METHODS
+    // ========================================================================
+
+    /**
+     * Obtener elemento para mostrar el timer.
+     *
+     * Los juegos específicos pueden sobrescribir este método para especificar
+     * dónde se muestra el countdown del timer.
+     *
+     * @returns {HTMLElement|null} Elemento donde mostrar el timer
+     */
+    getTimerElement() {
+        // Por defecto busca un elemento con id="timer"
+        return document.getElementById('timer');
+    }
+
+    /**
+     * Callback cuando el timer de ronda expira.
+     *
+     * Este método se ejecuta en el frontend cuando el countdown llega a 0.
+     * Notifica al backend para que ejecute checkTimerAndAutoAdvance(), que
+     * llama internamente a completeRound() si el timer realmente expiró.
+     *
+     * Flujo correcto: check-timer → checkTimerAndAutoAdvance() → completeRound()
+     * → RoundEndedEvent → advance → RoundStartedEvent
+     *
+     * @param {number} roundNumber - Número de ronda que expiró
+     */
+    async onTimerExpired(roundNumber) {
+        // Mostrar mensaje visual
+        const timerElement = this.getTimerElement();
+        if (timerElement) {
+            timerElement.textContent = '¡Tiempo agotado!';
+            timerElement.classList.add('timer-expired');
+        }
+
+        try {
+            const response = await fetch(`/api/rooms/${this.roomCode}/check-timer`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                },
+                body: JSON.stringify({
+                    from_round: roundNumber
+                })
+            });
+
+            const result = await response.json();
+
+            if (!result.success) {
+                console.warn(`⚠️ [BaseGameClient] Failed to check timer:`, result.message);
+            }
+        } catch (error) {
+            console.error(`❌ [BaseGameClient] Error checking timer expiration:`, error);
+        }
+
+        // Los juegos específicos pueden sobrescribir este método
+        // para agregar efectos visuales o sonoros adicionales
     }
 }
 

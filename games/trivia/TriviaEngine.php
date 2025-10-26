@@ -216,19 +216,41 @@ class TriviaEngine extends BaseGameEngine
                 'question_id' => $currentQuestion['id']
             ]);
 
-            // Sumar puntos (más puntos según dificultad)
-            $points = $this->calculatePoints($currentQuestion['difficulty']);
-            
-            // Obtener configuración de scoring desde el config.json
+            // Obtener configuración de scoring y timer
             $gameConfig = $this->getGameConfig();
             $scoringConfig = $gameConfig['scoring'] ?? [];
             $calculator = new TriviaScoreCalculator($scoringConfig);
-            
-            $this->awardPoints($match, $player->id, 'correct_answer', ['points' => $points], $calculator);
+
+            // Preparar context con dificultad y timing (para speed bonus)
+            $context = [
+                'difficulty' => $currentQuestion['difficulty'] ?? 'medium',
+            ];
+
+            // Si hay timer de ronda, calcular elapsed time para speed bonus
+            $timerDuration = $gameConfig['modules']['timer_system']['round_duration'] ?? null;
+            if ($timerDuration) {
+                try {
+                    $elapsedTime = $this->getElapsedTime($match, 'round');
+                    $context['time_taken'] = $elapsedTime;
+                    $context['time_limit'] = $timerDuration;
+
+                    Log::info("[Trivia] Speed bonus calculation", [
+                        'elapsed' => $elapsedTime,
+                        'limit' => $timerDuration
+                    ]);
+                } catch (\Exception $e) {
+                    // Timer no existe o expiró - no hay speed bonus
+                    Log::debug("[Trivia] No timer available for speed bonus");
+                }
+            }
+
+            // Calcular puntos con speed bonus incluido
+            $totalPoints = $calculator->calculate('correct_answer', $context);
+            $this->awardPoints($match, $player->id, 'correct_answer', $context, $calculator);
 
             $resultData = [
                 'is_correct' => true,
-                'points' => $points,
+                'points' => $totalPoints,
                 'answer_index' => $answerIndex,
             ];
 
@@ -314,6 +336,9 @@ class TriviaEngine extends BaseGameEngine
         // 2. Cargar siguiente pregunta
         $question = $this->loadNextQuestion($match);
 
+        // NOTA: El timer de ronda se inicia automáticamente por BaseGameEngine::handleNewRound()
+        // No es necesario llamar a startRoundTimer() aquí
+
         Log::info("[Trivia] Question loaded and players unlocked", [
             'match_id' => $match->id,
             'question_id' => $question['id'],
@@ -322,6 +347,37 @@ class TriviaEngine extends BaseGameEngine
 
         // Emitir evento específico de Trivia (opcional)
         // event(new QuestionStartedEvent($match, $question));
+    }
+
+    /**
+     * Hook opcional: Lógica ANTES de avanzar por timer expiration.
+     *
+     * En Trivia, el comportamiento por defecto de BaseGameEngine es correcto
+     * (timer expira → completar ronda → siguiente pregunta), así que usamos
+     * este hook solo para logging o estadísticas específicas de Trivia.
+     *
+     * Si Trivia necesitara comportamiento diferente (ej: penalizar puntos),
+     * podría sobrescribir completamente onRoundTimerExpired().
+     *
+     * @param GameMatch $match
+     * @param string $timerName
+     * @return void
+     */
+    protected function beforeTimerExpiredAdvance(GameMatch $match, string $timerName = 'round'): void
+    {
+        Log::info("[Trivia] Preparing to advance round due to timer expiration", [
+            'match_id' => $match->id,
+            'timer_name' => $timerName,
+            'current_question' => $match->game_state['current_question']['id'] ?? null
+        ]);
+
+        // Aquí podríamos:
+        // - Registrar estadística de "preguntas sin respuesta"
+        // - Penalizar puntos de todos los jugadores
+        // - Emitir evento custom de Trivia
+        // - Etc.
+
+        // Por ahora, solo logging - el comportamiento por defecto nos sirve
     }
 
     // ========================================================================

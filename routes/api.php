@@ -45,6 +45,7 @@ Route::prefix('rooms')->name('api.rooms.')->group(function () {
 
     // Gestión de Rondas
     Route::post('/{code}/next-round', [\App\Http\Controllers\PlayController::class, 'apiNextRound'])->name('next-round');
+    Route::post('/{code}/check-timer', [\App\Http\Controllers\PlayController::class, 'apiCheckTimer'])->name('check-timer');
 
     // Información del Jugador
     Route::get('/{code}/player-info', [RoomController::class, 'apiGetPlayerInfo'])

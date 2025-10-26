@@ -215,8 +215,11 @@ class PlayController extends Controller
         } catch (\Exception $e) {
             \Log::error("[PlayController] Error processing action", [
                 'room_code' => $code,
+                'player_id' => $player->id ?? null,
                 'action' => $validated['action'],
+                'data' => $validated['data'] ?? [],
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
@@ -261,6 +264,71 @@ class PlayController extends Controller
 
         // Delegar toda la lógica a startNextRound()
         return $this->startNextRound($request, $match);
+    }
+
+    /**
+     * API: Verificar si el timer expiró y completar ronda si es necesario.
+     *
+     * Este endpoint se llama desde el frontend cuando el timer de ronda expira.
+     * Ejecuta checkTimerAndAutoAdvance() que verifica si el timer realmente expiró
+     * y si es así, llama a completeRound() para seguir el flujo correcto:
+     * completeRound() → RoundEndedEvent → advance → RoundStartedEvent
+     */
+    public function apiCheckTimer(Request $request, string $code)
+    {
+        $code = strtoupper($code);
+        $room = $this->roomService->findRoomByCode($code);
+
+        if (!$room) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Sala no encontrada',
+            ], 404);
+        }
+
+        $match = $room->match;
+
+        if (!$match) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No hay partida activa en esta sala',
+            ], 404);
+        }
+
+        try {
+            // Obtener el engine del juego
+            $engine = $match->getEngine();
+
+            // Verificar si el timer expiró y auto-advance si es necesario
+            // Este método llama internamente a completeRound() si el timer expiró
+            $wasCompleted = $engine->checkTimerAndAutoAdvance($match);
+
+            if ($wasCompleted) {
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Round completed due to timer expiration',
+                    'completed' => true,
+                ], 200);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Timer not expired or already processed',
+                'completed' => false,
+            ], 200);
+
+        } catch (\Exception $e) {
+            \Log::error('[PlayController] Error checking timer', [
+                'room_code' => $code,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al verificar timer: ' . $e->getMessage(),
+            ], 500);
+        }
     }
 
     // ========================================================================
