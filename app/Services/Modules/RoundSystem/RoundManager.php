@@ -35,9 +35,9 @@ class RoundManager
     protected int $totalRounds;
 
     /**
-     * TurnManager interno para gestionar turnos.
+     * TurnManager interno para gestionar turnos (opcional).
      */
-    protected TurnManager $turnManager;
+    protected ?TurnManager $turnManager;
 
     /**
      * Si se acaba de completar una ronda.
@@ -47,12 +47,12 @@ class RoundManager
     /**
      * Constructor.
      *
-     * @param TurnManager $turnManager Gestor de turnos
+     * @param TurnManager|null $turnManager Gestor de turnos (opcional)
      * @param int $totalRounds Total de rondas (0 = infinitas)
      * @param int $currentRound Ronda inicial
      */
     public function __construct(
-        TurnManager $turnManager,
+        ?TurnManager $turnManager = null,
         int $totalRounds = 0,
         int $currentRound = 1
     ) {
@@ -70,6 +70,10 @@ class RoundManager
      */
     public function nextTurn(): array
     {
+        if (!$this->turnManager) {
+            throw new \RuntimeException('TurnManager is not initialized. This game does not use turn system.');
+        }
+
         $this->roundJustCompleted = false;
 
         // Delegar al TurnManager
@@ -167,7 +171,7 @@ class RoundManager
      *
      * @return TurnManager
      */
-    public function getTurnManager(): TurnManager
+    public function getTurnManager(): ?TurnManager
     {
         return $this->turnManager;
     }
@@ -264,14 +268,19 @@ class RoundManager
      */
     public function toArray(): array
     {
-        return [
+        $data = [
             'round_system' => [
                 'current_round' => $this->currentRound,
                 'total_rounds' => $this->totalRounds,
             ],
-            // TurnManager mantiene su propio namespace
-            'turn_system' => $this->turnManager->toArray(),
         ];
+
+        // Solo incluir turn_system si TurnManager está inicializado
+        if ($this->turnManager) {
+            $data['turn_system'] = $this->turnManager->toArray();
+        }
+
+        return $data;
     }
 
     /**
@@ -285,13 +294,16 @@ class RoundManager
         // Soporte para ambos formatos: nuevo (round_system) y legacy (claves directas)
         $roundData = $data['round_system'] ?? $data;
 
-        // Restaurar TurnManager primero
-        $turnManager = TurnManager::fromArray($data['turn_system'] ?? []);
+        // Restaurar TurnManager solo si existe en el state
+        $turnManager = null;
+        if (isset($data['turn_system'])) {
+            $turnManager = TurnManager::fromArray($data['turn_system']);
 
-        // Si existe TimerService en el state, conectarlo automáticamente al TurnManager
-        if (isset($data['timer_system'])) {
-            $timerService = \App\Services\Modules\TimerSystem\TimerService::fromArray($data);
-            $turnManager->setTimerService($timerService);
+            // Si existe TimerService en el state, conectarlo automáticamente al TurnManager
+            if (isset($data['timer_system'])) {
+                $timerService = \App\Services\Modules\TimerSystem\TimerService::fromArray($data);
+                $turnManager->setTimerService($timerService);
+            }
         }
 
         $instance = new self(

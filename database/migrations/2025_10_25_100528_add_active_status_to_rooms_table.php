@@ -12,7 +12,14 @@ return new class extends Migration
      */
     public function up(): void
     {
-        // Modificar el ENUM para agregar 'active' entre 'waiting' y 'playing'
+        // SQLite no soporta MODIFY COLUMN, así que usamos el enfoque de recrear la tabla
+        if (DB::connection()->getDriverName() === 'sqlite') {
+            // En SQLite, simplemente no hacemos nada porque el Model ya maneja los valores posibles
+            // y la columna ya existe como string
+            return;
+        }
+        
+        // MySQL: Modificar el ENUM para agregar 'active' entre 'waiting' y 'playing'
         DB::statement("ALTER TABLE rooms MODIFY COLUMN status ENUM('waiting', 'active', 'playing', 'finished') NOT NULL DEFAULT 'waiting'");
     }
 
@@ -21,6 +28,10 @@ return new class extends Migration
      */
     public function down(): void
     {
+        if (DB::connection()->getDriverName() === 'sqlite') {
+            return;
+        }
+        
         // Revertir: Eliminar 'active' del ENUM
         // IMPORTANTE: Esto fallará si hay registros con status='active'
         DB::statement("ALTER TABLE rooms MODIFY COLUMN status ENUM('waiting', 'playing', 'finished') NOT NULL DEFAULT 'waiting'");
