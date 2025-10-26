@@ -15,37 +15,35 @@
 
                 <!-- Body -->
                 <div id="game-container" class="px-6 py-12">
-                    <!-- Loading State -->
-                    <div id="loading-state" class="text-center">
-                        <div class="mb-6">
-                            <span class="text-6xl">⏳</span>
-                        </div>
-                        <h2 class="text-2xl font-bold text-gray-800 mb-4">Esperando primera pregunta...</h2>
-                        <p class="text-gray-600">
-                            Sala: <strong class="text-gray-900">{{ $code }}</strong>
-                        </p>
-                    </div>
+                    <!-- Loading State (usando componente Blade) -->
+                    <x-game.loading-state
+                        id="loading-state"
+                        emoji="⏳"
+                        message="Esperando primera pregunta..."
+                        :roomCode="$code"
+                    />
 
                     <!-- Question State (hidden initially) -->
                     <div id="question-state" class="hidden relative">
-                        <!-- Locked Overlay (shown when player is locked) -->
+                        <!-- Locked Overlay (usando componente Blade) -->
                         <div id="locked-overlay" class="hidden absolute inset-0 bg-gray-900 bg-opacity-60 backdrop-blur-sm z-10 flex items-center justify-center rounded-lg">
-                            <div class="bg-white px-8 py-6 rounded-lg shadow-xl text-center">
-                                <div class="text-6xl mb-4">🔒</div>
-                                <h3 class="text-2xl font-bold text-gray-800 mb-2">Ya respondiste</h3>
-                                <p class="text-gray-600">Esperando a los demás jugadores...</p>
+                            <div class="bg-white px-8 py-6 rounded-lg shadow-xl">
+                                <x-game.player-lock
+                                    message="Ya respondiste"
+                                    icon="🔒"
+                                />
                             </div>
                         </div>
 
-                        <!-- Round Info -->
-                        <div class="text-center mb-8">
-                            <p class="text-lg text-gray-600">
-                                Ronda <strong id="current-round" class="text-blue-600">1</strong> de <strong id="total-rounds" class="text-blue-600">10</strong>
-                            </p>
-                            <p id="players-answered" class="text-sm text-gray-500 mt-2">
-                                <!-- Se actualizará vía JavaScript -->
-                            </p>
-                        </div>
+                        <!-- Round Info (usando componente Blade) -->
+                        <x-game.round-info
+                            :current="1"
+                            :total="10"
+                            label="Ronda"
+                        />
+                        <p id="players-answered" class="text-sm text-gray-500 mt-2 text-center">
+                            <!-- Se actualizará vía JavaScript -->
+                        </p>
 
                         <!-- Category -->
                         <div class="text-center mb-6">
