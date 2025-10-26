@@ -181,7 +181,7 @@
                 <div class="lg:col-span-2">
                     <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg">
                         <div class="p-6">
-                            <h3 class="text-lg font-semibold mb-4">
+                            <h3 id="players-header" class="text-lg font-semibold mb-4">
                                 Jugadores ({{ $stats['players'] }}/{{ $room->game->max_players }})
                             </h3>
 

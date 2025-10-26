@@ -203,9 +203,15 @@ abstract class BaseGameEngine implements GameEngineInterface
      */
     public function handleNewRound(GameMatch $match, bool $advanceRound = true): void
     {
+        // RACE CONDITION PROTECTION: Re-leer match desde BD antes de procesar
+        // Esto evita que múltiples requests procesen la misma ronda
+        $match->refresh();
+
+        $currentRound = $match->game_state['round_system']['current_round'] ?? 1;
+
         Log::info("[{$this->getGameSlug()}] Handling new round", [
             'match_id' => $match->id,
-            'current_round' => $match->game_state['round_system']['current_round'] ?? 1,
+            'current_round' => $currentRound,
             'advance_round' => $advanceRound
         ]);
 

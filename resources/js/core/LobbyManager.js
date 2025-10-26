@@ -84,17 +84,28 @@ export class LobbyManager {
     handleHere(users) {
         console.log('👥 [Lobby] Users here:', users.length);
         this.updatePlayerConnectionStatus(users);
+
+        // 🔥 FIX: Actualizar contador con datos del Presence Channel
+        if (this.presenceManager) {
+            const connected = this.presenceManager.connectedUsers.length;
+            this.updatePlayerCount(connected, this.maxPlayers);
+        }
     }
 
     /**
      * Handler: Usuario se unió
      */
     handleJoining(user) {
-        console.log('✅ [Lobby] User joining:', user.name);
+        console.log('✅ [Lobby] User joining:', user.name, user.id);
+
         this.addPlayerToList(user);
 
         if (this.presenceManager) {
             this.updatePlayerConnectionStatus(this.presenceManager.connectedUsers);
+
+            // 🔥 FIX: Actualizar contador con datos del Presence Channel
+            const connected = this.presenceManager.connectedUsers.length;
+            this.updatePlayerCount(connected, this.maxPlayers);
         }
     }
 
@@ -107,6 +118,10 @@ export class LobbyManager {
 
         if (this.presenceManager) {
             this.updatePlayerConnectionStatus(this.presenceManager.connectedUsers);
+
+            // 🔥 FIX: Actualizar contador con datos del Presence Channel
+            const connected = this.presenceManager.connectedUsers.length;
+            this.updatePlayerCount(connected, this.maxPlayers);
         }
     }
 
@@ -119,6 +134,7 @@ export class LobbyManager {
             this.allConnectedLogged = true;
         }
         this.updateStartGameButton(data.connected, data.total);
+        this.updatePlayerCount(data.connected, this.maxPlayers);
     }
 
     /**
@@ -126,6 +142,7 @@ export class LobbyManager {
      */
     handleConnectionChange(connected, total) {
         this.updateStartGameButton(connected, total);
+        this.updatePlayerCount(connected, this.maxPlayers);
         if (connected < total) {
             this.allConnectedLogged = false;
         }
@@ -255,7 +272,7 @@ export class LobbyManager {
         `;
 
         playersList.insertAdjacentHTML('beforeend', playerHtml);
-        this.updatePlayerCount();
+        // ✅ NO actualizar contador aquí - se actualiza desde handleJoining() con datos del Presence
     }
 
     /**
@@ -267,27 +284,39 @@ export class LobbyManager {
         if (playerElement) {
             console.log('➖ Removing player from list:', user.name);
             playerElement.remove();
-            this.updatePlayerCount();
+            // ✅ NO actualizar contador aquí - se actualiza desde handleLeaving() con datos del Presence
         } else {
             console.warn('⚠️ Player not found in list:', user.id);
         }
     }
 
     /**
-     * Actualizar contador de jugadores
+     * Actualizar contador de jugadores en el header "Jugadores (X/Y)"
+     *
+     * @param {number} connected - Número de jugadores conectados (del Presence Channel)
+     * @param {number} total - Máximo de jugadores de la sala (NO el mínimo del Presence!)
      */
-    updatePlayerCount() {
-        const playersList = document.getElementById('players-list');
-        if (!playersList) return;
-
-        const currentCount = playersList.querySelectorAll('[data-player-id]').length;
-        const header = document.querySelector('h3.text-lg.font-semibold.mb-4');
-
-        if (header) {
-            header.textContent = `Jugadores (${currentCount}/${this.maxPlayers})`;
+    updatePlayerCount(connected = null, total = null) {
+        const header = document.getElementById('players-header');
+        if (!header) {
+            console.warn('⚠️ [Lobby] players-header not found');
+            return;
         }
 
-        console.log(`📊 Updated player count: ${currentCount}/${this.maxPlayers}`);
+        // Usar connected del Presence Channel (número real de jugadores conectados)
+        // Usar total = maxPlayers de la sala (capacidad máxima, ej: 10)
+        const currentCount = connected !== null ? connected :
+            document.getElementById('players-list')?.querySelectorAll('[data-player-id]').length || 0;
+        const totalCount = total !== null ? total : this.maxPlayers;
+
+        // Actualizar solo si el número cambió
+        const currentText = header.textContent;
+        const newText = `Jugadores (${currentCount}/${totalCount})`;
+
+        if (currentText !== newText) {
+            header.textContent = newText;
+            console.log(`📊 Updated player count: ${currentCount}/${totalCount}`);
+        }
     }
 
     /**

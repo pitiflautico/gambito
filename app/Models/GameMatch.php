@@ -40,6 +40,14 @@ class GameMatch extends Model
     ];
 
     /**
+     * Lock key adquirido para prevenir race conditions.
+     * Se guarda al adquirir el lock y se usa al liberarlo.
+     *
+     * @var string|null
+     */
+    protected ?string $acquiredLockKey = null;
+
+    /**
      * Relación: La partida pertenece a una sala.
      */
     public function room(): BelongsTo
@@ -257,6 +265,11 @@ class GameMatch extends Model
         $acquired = \Cache::add($lockKey, true, $ttl);
 
         if ($acquired) {
+            // 🔥 FIX RACE CONDITION: Guardar el lock key para usarlo al liberar
+            // Esto previene que releaseRoundLock() calcule un key diferente
+            // si la ronda avanza entre adquirir y liberar
+            $this->acquiredLockKey = $lockKey;
+
             \Log::info('🔒 [Lock] Round lock acquired', [
                 'match_id' => $this->id,
                 'lock_key' => $lockKey,
@@ -279,14 +292,21 @@ class GameMatch extends Model
      */
     public function releaseRoundLock(): void
     {
-        $lockKey = $this->getRoundLockKey();
+        // 🔥 FIX RACE CONDITION: Usar el lock key guardado, NO recalcular
+        // Si recalculamos con getRoundLockKey(), podríamos obtener un key diferente
+        // porque la ronda pudo haber avanzado entre adquirir y liberar
+        $lockKey = $this->acquiredLockKey ?? $this->getRoundLockKey();
 
         \Cache::forget($lockKey);
 
         \Log::info('🔓 [Lock] Round lock released', [
             'match_id' => $this->id,
             'lock_key' => $lockKey,
+            'was_saved' => $this->acquiredLockKey !== null,
         ]);
+
+        // Limpiar el lock key guardado
+        $this->acquiredLockKey = null;
     }
 
     /**
@@ -309,13 +329,18 @@ class GameMatch extends Model
      */
     protected function getRoundLockKey(): string
     {
-        $currentRound = $this->game_state['round_system']['current_round'] ?? 0;
         $phase = $this->game_state['phase'] ?? 'unknown';
 
+        // 🔥 FIX RACE CONDITION: NO incluir current_round en el lock key
+        // Si incluimos current_round, dos requests pueden adquirir locks diferentes:
+        // - Request A: lock para round:1
+        // - Request A avanza a round:2 y guarda en BD
+        // - Request B lee round:2, intenta lock para round:2 → ¡disponible!
+        //
+        // Solución: Lock global por match+phase, sin depender de la ronda
         return sprintf(
-            'match:%d:round:%d:phase:%s:lock',
+            'match:%d:phase:%s:lock',
             $this->id,
-            $currentRound,
             $phase
         );
     }

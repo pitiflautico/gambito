@@ -341,9 +341,23 @@ class RoundManager
             $timingConfig = $gameConfig['timing']['round_ended'] ?? null;
             $roundPerTurn = $gameConfig['modules']['turn_system']['round_per_turn'] ?? false;
 
+            // Si es la última ronda, NO auto-avanzar (el juego ya terminó o va a terminar)
+            if ($this->currentRound >= $this->totalRounds) {
+                \Log::info('[RoundManager] Last round detected, disabling auto_next', [
+                    'current_round' => $this->currentRound,
+                    'total_rounds' => $this->totalRounds
+                ]);
+
+                // Eliminar auto_next del timing para evitar countdown
+                if ($timingConfig !== null) {
+                    $timingConfig['auto_next'] = false;
+                }
+            }
+
             \Log::info('[RoundManager] Timing config', [
                 'timing_config' => $timingConfig,
-                'round_per_turn' => $roundPerTurn
+                'round_per_turn' => $roundPerTurn,
+                'is_last_round' => $this->currentRound >= $this->totalRounds
             ]);
 
             // 2. Emitir evento RoundEndedEvent con timing metadata

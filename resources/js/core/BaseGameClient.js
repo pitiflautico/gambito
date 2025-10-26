@@ -129,13 +129,19 @@ export class BaseGameClient {
         this.lastResults = event.results;
         this.lastRoundNumber = event.round_number;
 
+        // 🔥 RACE CONDITION FIX: Capturar currentRound AHORA
+        // Durante el countdown, otro jugador puede avanzar la ronda y actualizar this.currentRound
+        // Por eso capturamos el valor aquí y lo usamos en el callback
+        const fromRound = this.currentRound;
+
         // Procesar timing metadata si existe
         if (event.timing) {
             console.log('⏰ [BaseGameClient] Processing timing metadata:', event.timing);
+            console.log(`🔒 [BaseGameClient] Captured from_round=${fromRound} for countdown callback`);
 
             await this.timing.processTimingPoint(
                 event.timing,
-                () => this.notifyReadyForNextRound(),
+                () => this.notifyReadyForNextRound(fromRound),
                 this.getCountdownElement()
             );
         }
@@ -271,6 +277,105 @@ export class BaseGameClient {
     }
 
     // ========================================================================
+    // GAME ACTIONS - Fase 4: WebSocket Bidirectional Communication
+    // ========================================================================
+
+    /**
+     * Enviar acción de juego al backend (Fase 4).
+     *
+     * Este método encapsula el envío de acciones del jugador al servidor.
+     * Soporta actualizaciones optimistas para mejor UX.
+     *
+     * @param {string} action - Nombre de la acción (ej: 'answer', 'play_card', 'draw')
+     * @param {object} data - Datos de la acción
+     * @param {boolean} optimistic - Si true, aplica actualización optimista antes de enviar
+     * @returns {Promise<object>} Resultado de la acción
+     */
+    async sendGameAction(action, data = {}, optimistic = false) {
+        console.log(`📤 [BaseGameClient] Sending game action: ${action}`, { data, optimistic });
+
+        // Aplicar actualización optimista si está habilitada
+        if (optimistic) {
+            this.applyOptimisticUpdate(action, data);
+        }
+
+        try {
+            // Por ahora usa HTTP POST (Fase 3 backend está listo)
+            // En el futuro se puede cambiar a WebSocket sin tocar el resto del código
+            const response = await fetch(`/api/rooms/${this.roomCode}/action`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                },
+                body: JSON.stringify({
+                    action: action,
+                    data: data
+                })
+            });
+
+            const result = await response.json();
+
+            if (!result.success) {
+                console.error(`❌ [BaseGameClient] Action failed:`, result);
+
+                // Revertir actualización optimista si falló
+                if (optimistic) {
+                    this.revertOptimisticUpdate(action, data);
+                }
+            } else {
+                console.log(`✅ [BaseGameClient] Action successful:`, result);
+            }
+
+            return result;
+
+        } catch (error) {
+            console.error(`❌ [BaseGameClient] Error sending game action:`, error);
+
+            // Revertir actualización optimista si hubo error
+            if (optimistic) {
+                this.revertOptimisticUpdate(action, data);
+            }
+
+            throw error;
+        }
+    }
+
+    /**
+     * Aplicar actualización optimista (Fase 4).
+     *
+     * Este método se ejecuta ANTES de enviar la acción al servidor,
+     * para dar feedback inmediato al usuario.
+     *
+     * Los juegos específicos deben sobrescribir este método para implementar
+     * su lógica de actualización optimista (ej: deshabilitar botones, mostrar loading).
+     *
+     * @param {string} action - Nombre de la acción
+     * @param {object} data - Datos de la acción
+     */
+    applyOptimisticUpdate(action, data) {
+        // Stub method - los juegos específicos sobrescriben esto
+        console.log(`🔄 [BaseGameClient] Optimistic update (override in subclass):`, action, data);
+    }
+
+    /**
+     * Revertir actualización optimista (Fase 4).
+     *
+     * Este método se ejecuta si la acción falla en el servidor,
+     * para revertir los cambios optimistas aplicados.
+     *
+     * Los juegos específicos deben sobrescribir este método para revertir
+     * sus cambios optimistas (ej: re-habilitar botones, ocultar loading).
+     *
+     * @param {string} action - Nombre de la acción
+     * @param {object} data - Datos de la acción
+     */
+    revertOptimisticUpdate(action, data) {
+        // Stub method - los juegos específicos sobrescriben esto
+        console.log(`↩️  [BaseGameClient] Reverting optimistic update (override in subclass):`, action, data);
+    }
+
+    // ========================================================================
     // TIMING MODULE - Race Condition Protection
     // ========================================================================
 
@@ -325,8 +430,15 @@ export class BaseGameClient {
      * - Los demás clientes reciben 409 Conflict y se sincronizan con RoundStartedEvent
      * - Esto previene avanzar la ronda múltiples veces
      */
-    async notifyReadyForNextRound() {
-        console.log('📤 [BaseGameClient] Notifying backend: ready for next round');
+    async notifyReadyForNextRound(fromRound = null) {
+        // Si no se especifica fromRound, usar currentRound actual (fallback)
+        const roundToSend = fromRound !== null ? fromRound : this.currentRound;
+
+        console.log('📤 [BaseGameClient] Notifying backend: ready for next round', {
+            from_round: roundToSend,
+            current_round: this.currentRound,
+            captured_from_countdown: fromRound !== null
+        });
 
         try {
             const response = await fetch(`/api/games/${this.matchId}/start-next-round`, {
@@ -336,7 +448,8 @@ export class BaseGameClient {
                     'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
                 },
                 body: JSON.stringify({
-                    room_code: this.roomCode
+                    room_code: this.roomCode,
+                    from_round: roundToSend  // ← RACE CONDITION PROTECTION: usar valor capturado
                 })
             });
 
@@ -388,6 +501,72 @@ export class BaseGameClient {
         console.log('✅ [BaseGameClient] Game is ready');
 
         // Los juegos específicos sobrescriben esto
+    }
+
+    // ========================================================================
+    // UI HELPERS - Pantalla de Resultados Finales
+    // ========================================================================
+
+    /**
+     * Renderizar podio de resultados finales (genérico para todos los juegos).
+     *
+     * Este método muestra el ranking final con:
+     * - Medallas para top 3 (🥇🥈🥉)
+     * - Colores según posición
+     * - Nombre y puntuación de cada jugador
+     *
+     * @param {Array} ranking - Array de {position, player_id, score}
+     * @param {Object} scores - Objeto {playerId: score}
+     * @param {string} containerId - ID del contenedor DOM (default: 'podium')
+     */
+    renderPodium(ranking, scores, containerId = 'podium') {
+        const podiumContainer = document.getElementById(containerId);
+        if (!podiumContainer) {
+            console.warn(`⚠️ [BaseGameClient] Podium container '${containerId}' not found`);
+            return;
+        }
+
+        podiumContainer.innerHTML = '';
+
+        ranking.forEach((entry, index) => {
+            const player = this.getPlayer(entry.player_id);
+            const playerName = player ? player.name : `Jugador ${entry.player_id}`;
+            const score = entry.score;
+            const position = index + 1;
+
+            // Emojis según posición
+            const medals = ['🥇', '🥈', '🥉'];
+            const medal = position <= 3 ? medals[position - 1] : `${position}º`;
+
+            // Colores según posición
+            const colors = {
+                1: 'bg-yellow-100 border-yellow-400 text-yellow-900',
+                2: 'bg-gray-100 border-gray-400 text-gray-900',
+                3: 'bg-orange-100 border-orange-400 text-orange-900',
+            };
+            const colorClass = colors[position] || 'bg-blue-50 border-blue-300 text-blue-900';
+
+            const playerCard = document.createElement('div');
+            playerCard.className = `border-2 ${colorClass} rounded-lg p-4 mb-3 flex items-center justify-between`;
+
+            playerCard.innerHTML = `
+                <div class="flex items-center gap-3">
+                    <span class="text-3xl">${medal}</span>
+                    <div class="text-left">
+                        <p class="font-bold text-lg">${playerName}</p>
+                        <p class="text-sm opacity-75">Posición ${position}</p>
+                    </div>
+                </div>
+                <div class="text-right">
+                    <p class="text-2xl font-bold">${score}</p>
+                    <p class="text-sm opacity-75">puntos</p>
+                </div>
+            `;
+
+            podiumContainer.appendChild(playerCard);
+        });
+
+        console.log(`✅ [BaseGameClient] Podium rendered with ${ranking.length} players`);
     }
 }
 

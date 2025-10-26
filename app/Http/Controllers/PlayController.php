@@ -231,6 +231,7 @@ class PlayController extends Controller
      */
     public function apiNextRound(Request $request, string $code)
     {
+        // Wrapper que busca el room por código y delega a startNextRound()
         $code = strtoupper($code);
         $room = $this->roomService->findRoomByCode($code);
 
@@ -243,6 +244,13 @@ class PlayController extends Controller
 
         $match = $room->match;
 
+        if (!$match) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No hay partida activa en esta sala',
+            ], 404);
+        }
+
         // Verificar que la sala esté jugando
         if ($room->status !== Room::STATUS_PLAYING) {
             return response()->json([
@@ -251,79 +259,275 @@ class PlayController extends Controller
             ], 400);
         }
 
-        // VALIDACIÓN DE RONDA: Detectar llamadas obsoletas
-        $requestedFromRound = $request->input('from_round');
-        $currentRound = $match->game_state['round_system']['current_round'] ?? 1;
-        
-        if ($requestedFromRound && $requestedFromRound < $currentRound) {
-            \Log::info('⏭️ [NextRound] Obsolete request detected', [
-                'room_code' => $code,
-                'match_id' => $match->id,
-                'requested_from_round' => $requestedFromRound,
-                'current_round' => $currentRound,
-            ]);
+        // Delegar toda la lógica a startNextRound()
+        return $this->startNextRound($request, $match);
+    }
 
-            return response()->json([
-                'success' => true,
-                'message' => 'Solicitud obsoleta - la ronda ya avanzó',
-                'obsolete' => true,
-                'current_round' => $currentRound,
-            ]);
-        }
+    // ========================================================================
+    // API ENDPOINTS - TIMING & RACE CONDITION PROTECTION
+    // ========================================================================
 
-        // PROTECCIÓN CONTRA RACE CONDITION
-        // Múltiples jugadores van a llamar este endpoint simultáneamente cuando termine el countdown.
-        // Solo el primero debe ejecutarlo, los demás reciben confirmación de que ya se está procesando.
-        if (!$match->acquireRoundLock()) {
-            \Log::info('⏭️ [NextRound] Already processing (race condition prevented)', [
-                'room_code' => $code,
-                'match_id' => $match->id,
-            ]);
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Ronda ya está siendo procesada',
-                'already_processing' => true,
-            ]);
-        }
-
+    /**
+     * API: Notificar que el juego está listo para empezar (con protección contra race conditions).
+     *
+     * Este endpoint es llamado por el frontend cuando el countdown del
+     * GameStartedEvent termina. Usa un lock mechanism para prevenir que múltiples
+     * clientes inicien el juego simultáneamente.
+     *
+     * Race Condition Protection:
+     * - Solo el primer cliente en adquirir el lock iniciará el juego
+     * - Otros clientes recibirán 200 OK con flag already_processing=true
+     * - Todos los clientes se sincronizarán con RoundStartedEvent via WebSocket
+     *
+     * @param \Illuminate\Http\Request $request
+     * @param \App\Models\GameMatch $match
+     */
+    public function gameReady(Request $request, \App\Models\GameMatch $match)
+    {
         try {
-            \Log::info('🔄 [NextRound] Starting new round', [
-                'room_code' => $code,
+            \Log::info('📥 [API] gameReady request received', [
                 'match_id' => $match->id,
-                'from_round' => $requestedFromRound,
-                'current_round' => $currentRound
+                'room_code' => $match->room->code,
+                'current_phase' => $match->game_state['phase'] ?? 'unknown',
             ]);
 
-            // Llamar al método handleNewRound del engine
-            $engine = $match->getEngine();
-            $engine->handleNewRound($match);
+            // 1. Validar que el juego está en fase "starting"
+            $currentPhase = $match->game_state['phase'] ?? null;
 
-            // Refrescar match para obtener la nueva ronda
-            $match->refresh();
+            if ($currentPhase !== 'starting') {
+                \Log::warning('⚠️  [API] Invalid phase for game ready', [
+                    'match_id' => $match->id,
+                    'expected_phase' => 'starting',
+                    'actual_phase' => $currentPhase,
+                ]);
 
-            \Log::info('✅ [NextRound] New round started successfully', [
-                'room_code' => $code,
-                'match_id' => $match->id,
-                'new_round' => $match->game_state['round_system']['current_round'] ?? 1
-            ]);
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Game is not in starting phase',
+                    'current_phase' => $currentPhase,
+                ], 400);
+            }
 
-            // Liberar el lock
-            $match->releaseRoundLock();
+            // 2. Intentar adquirir lock (solo el primer cliente lo consigue)
+            if (!$match->acquireRoundLock()) {
+                \Log::info('⏸️  [API] Lock already held, another client is starting the game', [
+                    'match_id' => $match->id,
+                ]);
 
-            return response()->json([
-                'success' => true,
-                'message' => 'Nueva ronda iniciada',
-                'current_round' => $match->game_state['round_system']['current_round'] ?? 1,
-            ]);
+                return response()->json([
+                    'success' => true,
+                    'already_processing' => true,
+                    'message' => 'Another client is starting the game, you will receive events shortly',
+                ], 200); // 200 OK para evitar errores en consola del navegador
+            }
+
+            // 3. Lock adquirido - proceder a iniciar el juego
+            try {
+                \Log::info('🔒 [API] Lock acquired, starting game', [
+                    'match_id' => $match->id,
+                ]);
+
+                // Obtener el engine del juego
+                $game = $match->room->game;
+                $engineClass = $game->getEngineClass();
+
+                if (!$engineClass || !class_exists($engineClass)) {
+                    throw new \RuntimeException("Game engine not found for game: {$game->slug}");
+                }
+
+                $engine = app($engineClass);
+
+                // Llamar a triggerGameStart() para iniciar el juego
+                $engine->triggerGameStart($match);
+
+                \Log::info('✅ [API] Game started successfully', [
+                    'match_id' => $match->id,
+                    'new_phase' => $match->game_state['phase'] ?? 'unknown',
+                ]);
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Game started',
+                    'phase' => $match->game_state['phase'] ?? null,
+                ]);
+
+            } finally {
+                // 4. SIEMPRE liberar el lock (incluso si hubo excepción)
+                $match->releaseRoundLock();
+            }
+
         } catch (\Exception $e) {
-            // Liberar el lock en caso de error
-            $match->releaseRoundLock();
-            
-            \Log::error("❌ [NextRound] Error starting new round: {$e->getMessage()}");
+            \Log::error('❌ [API] Error starting game', [
+                'match_id' => $match->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
             return response()->json([
                 'success' => false,
-                'message' => 'Error al iniciar nueva ronda: ' . $e->getMessage(),
+                'error' => 'Internal server error',
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * API: Iniciar siguiente ronda (con protección contra race conditions).
+     *
+     * Este endpoint es llamado por el frontend cuando el countdown del
+     * TimingModule termina. Usa un lock mechanism para prevenir que múltiples
+     * clientes avancen la ronda simultáneamente.
+     *
+     * Race Condition Protection:
+     * - Solo el primer cliente en adquirir el lock avanzará la ronda
+     * - Otros clientes recibirán 409 Conflict
+     * - Todos los clientes se sincronizarán con RoundStartedEvent via WebSocket
+     *
+     * @param \Illuminate\Http\Request $request
+     * @param \App\Models\GameMatch $match
+     */
+    public function startNextRound(Request $request, \App\Models\GameMatch $match)
+    {
+        try {
+            \Log::info('📥 [API] startNextRound request received', [
+                'match_id' => $match->id,
+                'room_code' => $match->room->code,
+                'current_phase' => $match->game_state['phase'] ?? 'unknown',
+            ]);
+
+            // 0. VALIDACIÓN DE RONDA: Detectar llamadas obsoletas
+            $requestedFromRound = $request->input('from_round');
+            $currentRound = $match->game_state['round_system']['current_round'] ?? 1;
+
+            if ($requestedFromRound && $requestedFromRound < $currentRound) {
+                \Log::info('⏭️ [NextRound] Obsolete request detected', [
+                    'room_code' => $match->room->code,
+                    'match_id' => $match->id,
+                    'requested_from_round' => $requestedFromRound,
+                    'current_round' => $currentRound,
+                ]);
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Solicitud obsoleta - la ronda ya avanzó',
+                    'obsolete' => true,
+                    'current_round' => $currentRound,
+                ], 200);
+            }
+
+            // 1. Validar que el juego está en fase correcta
+            $currentPhase = $match->game_state['phase'] ?? null;
+
+            // Si el juego ya terminó, retornar éxito sin hacer nada
+            if ($currentPhase === 'finished') {
+                \Log::info('🏁 [API] Game already finished, ignoring startNextRound request', [
+                    'match_id' => $match->id,
+                ]);
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Game already finished',
+                    'game_finished' => true,
+                ], 200);
+            }
+
+            // Aceptar "starting", "playing" o "results"
+            // - starting: primer round (después de GameStartedEvent)
+            // - playing: siguientes rounds en juegos como Trivia que no usan "results"
+            // - results: siguientes rounds en juegos que sí usan fase "results"
+            if ($currentPhase !== 'results' && $currentPhase !== 'starting' && $currentPhase !== 'playing') {
+                \Log::warning('⚠️  [API] Invalid phase for starting next round', [
+                    'match_id' => $match->id,
+                    'expected_phases' => ['starting', 'playing', 'results'],
+                    'actual_phase' => $currentPhase,
+                ]);
+
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Game is not in valid phase (expected: starting, playing or results)',
+                    'current_phase' => $currentPhase,
+                ], 400);
+            }
+
+            // 2. Intentar adquirir lock (solo el primer cliente lo consigue)
+            if (!$match->acquireRoundLock()) {
+                \Log::info('⏸️  [API] Lock already held, another client is advancing round', [
+                    'match_id' => $match->id,
+                ]);
+
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Another client is already starting the round',
+                    'message' => 'You will receive RoundStartedEvent shortly',
+                ], 409); // 409 Conflict
+            }
+
+            // 3. Lock adquirido - proceder a avanzar la ronda
+            try {
+                \Log::info('🔒 [API] Lock acquired, advancing to next round', [
+                    'match_id' => $match->id,
+                ]);
+
+                // DOBLE VERIFICACIÓN: Re-leer match DESPUÉS de adquirir lock
+                // Esto detecta si otro request ya avanzó la ronda antes de que adquiriéramos el lock
+                $match->refresh();
+                $currentRoundAfterLock = $match->game_state['round_system']['current_round'] ?? 1;
+
+                if ($requestedFromRound && $requestedFromRound < $currentRoundAfterLock) {
+                    \Log::warning('⏭️ [NextRound] Round already advanced by another client (after lock)', [
+                        'match_id' => $match->id,
+                        'requested_from_round' => $requestedFromRound,
+                        'current_round_after_lock' => $currentRoundAfterLock,
+                    ]);
+
+                    return response()->json([
+                        'success' => true,
+                        'message' => 'La ronda ya fue avanzada por otro cliente',
+                        'obsolete' => true,
+                        'current_round' => $currentRoundAfterLock,
+                    ], 200);
+                }
+
+                // Obtener el engine del juego
+                $game = $match->room->game;
+                $engineClass = $game->getEngineClass();
+
+                if (!$engineClass || !class_exists($engineClass)) {
+                    throw new \RuntimeException("Game engine not found for game: {$game->slug}");
+                }
+
+                $engine = app($engineClass);
+
+                // Avanzar a la siguiente ronda
+                $engine->handleNewRound($match);
+
+                \Log::info('✅ [API] Next round started successfully', [
+                    'match_id' => $match->id,
+                    'new_round' => $match->game_state['round_system']['current_round'] ?? 'unknown',
+                ]);
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Next round started',
+                    'round' => $match->game_state['round_system']['current_round'] ?? null,
+                ]);
+
+            } finally {
+                // 4. SIEMPRE liberar el lock (incluso si hubo excepción)
+                $match->releaseRoundLock();
+            }
+
+        } catch (\Exception $e) {
+            \Log::error('❌ [API] Error starting next round', [
+                'match_id' => $match->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Internal server error',
+                'message' => $e->getMessage(),
             ], 500);
         }
     }

@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\GameController;
+use App\Http\Controllers\PlayController;
 use App\Http\Controllers\RoomController;
 use App\Http\Controllers\TeamController;
 use Illuminate\Support\Facades\Route;
@@ -28,12 +29,10 @@ Route::prefix('rooms')->name('api.rooms.')->group(function () {
 });
 
 // API de Partidas (Match Control)
-Route::post('/games/{match}/game-ready', [GameController::class, 'gameReady'])
+Route::post('/games/{match}/game-ready', [PlayController::class, 'gameReady'])
     ->name('api.matches.game-ready');
-Route::post('/games/{match}/start-next-round', [GameController::class, 'startNextRound'])
+Route::post('/games/{match}/start-next-round', [PlayController::class, 'startNextRound'])
     ->name('api.matches.start-next-round');
-Route::post('/games/{match}/turn-timeout', [GameController::class, 'turnTimeout'])
-    ->name('api.matches.turn-timeout');
 
 // API de Salas
 Route::prefix('rooms')->name('api.rooms.')->group(function () {
