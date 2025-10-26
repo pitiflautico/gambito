@@ -25,6 +25,14 @@ Contiene:
 - Patrones específicos por tipo de tarea
 - Checklist rápido antes de cada implementación
 
+### `.claude/commands/`
+**Slash commands personalizados** para automatizar tareas comunes.
+
+Comandos disponibles:
+- `/create-game` - Asistente interactivo para crear nuevos juegos
+
+Ver [commands/README.md](commands/README.md) para más detalles.
+
 ### `.claude/README.md` (este archivo)
 Guía de uso del sistema de convenciones.
 

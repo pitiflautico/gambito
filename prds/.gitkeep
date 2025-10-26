@@ -1,0 +1,21 @@
+# Product Requirements Documents (PRDs)
+
+Este directorio contiene los PRDs de los juegos del proyecto.
+
+## Estructura
+
+Cada juego tiene su PRD en formato Markdown:
+- `game-{slug}.md` - PRD del juego
+
+## Generación automática
+
+Los PRDs se generan automáticamente con el comando `/create-game`.
+
+## Uso con ai-dev-tasks
+
+Estos PRDs son compatibles con el sistema `ai-dev-tasks`:
+```bash
+/generate-tasks prds/game-{slug}.md
+```
+
+Esto generará el archivo de tareas correspondiente en `tasks/`.

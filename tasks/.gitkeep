@@ -1,0 +1,24 @@
+# Task Lists
+
+Este directorio contiene las listas de tareas para implementar los juegos.
+
+## Estructura
+
+Cada juego tiene su lista de tareas:
+- `tasks-{slug}.md` - Lista de tareas detalladas
+
+## Generación
+
+Las listas de tareas se generan con `/generate-tasks`:
+```bash
+/generate-tasks prds/game-{slug}.md
+```
+
+## Procesamiento
+
+Una vez generadas, se procesan con `/process-task-list`:
+```bash
+/process-task-list tasks/tasks-{slug}.md
+```
+
+Esto permite implementar el juego paso a paso con seguimiento de progreso.
