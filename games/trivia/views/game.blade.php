@@ -24,28 +24,14 @@
                     />
 
                     <!-- Finished State (pantalla de resultados finales) -->
-                    <div id="finished-state" class="hidden text-center">
-                        <div class="mb-8">
-                            <h2 class="text-4xl font-bold text-gray-900 mb-2">🏆 ¡Partida terminada!</h2>
-                            <p class="text-gray-600">Resultados finales</p>
-                        </div>
-
-                        <!-- Podio -->
-                        <div id="podium" class="max-w-2xl mx-auto mb-8">
-                            <!-- Se llenará dinámicamente vía JavaScript -->
-                        </div>
-
-                        <!-- Botones de acción -->
-                        <div class="flex gap-4 justify-center">
-                            <a href="/rooms/{{ $code }}/lobby"
-                               class="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
-                                🏠 Volver al Lobby
-                            </a>
-                            <a href="/"
-                               class="px-6 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors">
-                                🎮 Crear Nueva Partida
-                            </a>
-                        </div>
+                    {{-- Usando componente Blade genérico reutilizable --}}
+                    <div id="finished-state" class="hidden">
+                        <x-game.results-screen
+                            :roomCode="$code"
+                            gameTitle="Trivia"
+                            containerId="podium"
+                            :embedded="true"
+                        />
                     </div>
 
                     <!-- Question State (hidden initially) -->
@@ -154,7 +140,26 @@
                         triviaClient.scores = gameState.scores;
                     }
 
-                    // Si hay una pregunta activa, mostrarla
+                    // 🎯 PRIORIDAD 1: Si el juego terminó, mostrar pantalla de resultados
+                    if (gameState?.phase === 'finished') {
+                        console.log('🏁 [Trivia] Game finished, showing results screen');
+
+                        // Ocultar loading y question states
+                        triviaClient.hideElement('loading-state');
+                        triviaClient.hideElement('question-state');
+
+                        // Mostrar finished state
+                        triviaClient.showElement('finished-state');
+
+                        // Renderizar podio con ranking y scores finales
+                        if (gameState.ranking && gameState.final_scores) {
+                            triviaClient.renderPodium(gameState.ranking, gameState.final_scores, 'podium');
+                        }
+
+                        return; // ← No cargar más estados si ya terminó
+                    }
+
+                    // 🎯 PRIORIDAD 2: Si hay una pregunta activa, mostrarla
                     if (gameState?.current_question) {
                         // Crear evento simulado con la misma estructura que RoundStartedEvent
                         const eventData = {

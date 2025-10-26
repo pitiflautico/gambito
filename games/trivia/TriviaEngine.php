@@ -580,69 +580,27 @@ class TriviaEngine extends BaseGameEngine
     }
 
     /**
-     * Finalizar el juego.
+     * Obtener scores finales (implementación específica de Trivia).
+     *
+     * Este método es llamado por BaseGameEngine::finalize() (Template Method).
+     * Implementa la lógica específica de cómo Trivia calcula los scores finales.
+     *
+     * @param GameMatch $match
+     * @return array Array asociativo [player_id => score]
      */
-    public function finalize(GameMatch $match): array
+    protected function getFinalScores(GameMatch $match): array
     {
-        Log::info("[Trivia] Finalizing game", ['match_id' => $match->id]);
+        Log::info("[Trivia] Calculating final scores", ['match_id' => $match->id]);
 
-        // 1. Obtener scores finales
+        // Obtener configuración de scoring específica de Trivia
         $gameConfig = $this->getGameConfig();
         $scoringConfig = $gameConfig['scoring'] ?? [];
-        $calculator = new TriviaScoreCalculator($scoringConfig);
-        
-        $scoreManager = $this->getScoreManager($match, $calculator);
-        $scores = $scoreManager->getScores();
-        
-        // 2. Crear ranking ordenado por puntos
-        arsort($scores);
-        $ranking = [];
-        $position = 1;
-        
-        foreach ($scores as $playerId => $score) {
-            $ranking[] = [
-                'position' => $position++,
-                'player_id' => $playerId,
-                'score' => $score,
-            ];
-        }
-        
-        // 3. Determinar ganador (el primero en ranking)
-        $winner = !empty($ranking) ? $ranking[0]['player_id'] : null;
-        
-        // 4. Marcar partida como terminada
-        $match->game_state = array_merge($match->game_state, [
-            'phase' => 'finished',
-            'finished_at' => now()->toDateTimeString(),
-            'final_scores' => $scores,
-            'ranking' => $ranking,
-            'winner' => $winner,
-        ]);
-        
-        $match->save();
-        
-        // 5. Emitir evento de juego terminado
-        event(new \App\Events\Game\GameEndedEvent(
-            match: $match,
-            winner: $winner,
-            ranking: $ranking,
-            scores: $scores
-        ));
-        
-        Log::info("[Trivia] Game finalized", [
-            'match_id' => $match->id,
-            'winner' => $winner,
-            'total_players' => count($ranking)
-        ]);
 
-        return [
-            'winner' => $winner,
-            'ranking' => $ranking,
-            'statistics' => [
-                'total_rounds' => $this->getRoundManager($match)->getCurrentRound(),
-                'final_scores' => $scores,
-            ],
-        ];
+        // Usar TriviaScoreCalculator para calcular scores
+        $calculator = new TriviaScoreCalculator($scoringConfig);
+        $scoreManager = $this->getScoreManager($match, $calculator);
+
+        return $scoreManager->getScores();
     }
 
     /**

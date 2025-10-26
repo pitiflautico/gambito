@@ -1459,4 +1459,91 @@ abstract class BaseGameEngine implements GameEngineInterface
         return $match->game_state ?? [];
     }
 
+    // ========================================================================
+    // GAME FINALIZATION - Template Method Pattern
+    // ========================================================================
+
+    /**
+     * Finalizar el juego (Template Method).
+     *
+     * Este método implementa el Template Method Pattern:
+     * - Define el flujo general de finalización (genérico)
+     * - Delega el cálculo de scores a getFinalScores() (específico de cada juego)
+     *
+     * Flujo de finalización:
+     * 1. Obtener scores finales (delegado a cada juego)
+     * 2. Crear ranking ordenado por puntos
+     * 3. Determinar ganador (primer lugar en ranking)
+     * 4. Actualizar game_state a 'finished'
+     * 5. Emitir GameEndedEvent
+     *
+     * @param GameMatch $match
+     * @return array Resultado con ranking y scores
+     */
+    public function finalize(GameMatch $match): array
+    {
+        Log::info("[{$this->getGameSlug()}] Finalizing game", ['match_id' => $match->id]);
+
+        // 1. Obtener scores finales (delegado a cada juego)
+        $scores = $this->getFinalScores($match);
+
+        // 2. Crear ranking ordenado por puntos
+        arsort($scores);
+        $ranking = [];
+        $position = 1;
+
+        foreach ($scores as $playerId => $score) {
+            $ranking[] = [
+                'position' => $position++,
+                'player_id' => $playerId,
+                'score' => $score,
+            ];
+        }
+
+        // 3. Determinar ganador (el primero en ranking)
+        $winner = !empty($ranking) ? $ranking[0]['player_id'] : null;
+
+        // 4. Marcar partida como terminada
+        $match->game_state = array_merge($match->game_state, [
+            'phase' => 'finished',
+            'finished_at' => now()->toDateTimeString(),
+            'final_scores' => $scores,
+            'ranking' => $ranking,
+            'winner' => $winner,
+        ]);
+
+        $match->save();
+
+        // 5. Emitir evento de juego terminado
+        event(new \App\Events\Game\GameEndedEvent(
+            match: $match,
+            winner: $winner,
+            ranking: $ranking,
+            scores: $scores
+        ));
+
+        Log::info("[{$this->getGameSlug()}] Game finalized", [
+            'match_id' => $match->id,
+            'winner' => $winner,
+            'total_players' => count($ranking)
+        ]);
+
+        return [
+            'ranking' => $ranking,
+            'scores' => $scores,
+            'winner' => $winner,
+        ];
+    }
+
+    /**
+     * Obtener scores finales (método abstracto).
+     *
+     * Cada juego debe implementar este método para calcular sus scores finales
+     * usando su propio ScoreCalculator y lógica específica.
+     *
+     * @param GameMatch $match
+     * @return array Array asociativo [player_id => score]
+     */
+    abstract protected function getFinalScores(GameMatch $match): array;
+
 }
