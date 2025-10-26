@@ -331,6 +331,162 @@ class PlayController extends Controller
         }
     }
 
+    /**
+     * Notificar que un jugador se desconectó durante la partida.
+     *
+     * Este endpoint es llamado por el frontend cuando Laravel Echo
+     * detecta que un jugador abandonó el presence channel durante
+     * una partida activa.
+     */
+    public function apiPlayerDisconnected(Request $request, string $code)
+    {
+        $code = strtoupper($code);
+        $room = $this->roomService->findRoomByCode($code);
+
+        if (!$room) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Sala no encontrada',
+            ], 404);
+        }
+
+        $match = $room->match;
+
+        if (!$match) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No hay partida activa en esta sala',
+            ], 404);
+        }
+
+        // Solo procesar si el juego está en fase "playing"
+        if ($match->game_state['phase'] !== 'playing') {
+            return response()->json([
+                'success' => false,
+                'message' => 'El juego no está en fase de juego',
+            ], 400);
+        }
+
+        try {
+            $playerId = $request->input('player_id');
+
+            if (!$playerId) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'player_id es requerido',
+                ], 400);
+            }
+
+            $player = \App\Models\Player::find($playerId);
+
+            if (!$player) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Jugador no encontrado',
+                ], 404);
+            }
+
+            // Obtener el engine y llamar al método de desconexión
+            $engine = $match->getEngine();
+            $engine->onPlayerDisconnected($match, $player);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Desconexión procesada correctamente',
+            ], 200);
+
+        } catch (\Exception $e) {
+            \Log::error('[PlayController] Error processing player disconnection', [
+                'room_code' => $code,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al procesar desconexión: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Notificar que un jugador se reconectó durante la partida.
+     *
+     * Este endpoint es llamado por el frontend cuando Laravel Echo
+     * detecta que un jugador volvió al presence channel después de
+     * haberse desconectado.
+     */
+    public function apiPlayerReconnected(Request $request, string $code)
+    {
+        $code = strtoupper($code);
+        $room = $this->roomService->findRoomByCode($code);
+
+        if (!$room) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Sala no encontrada',
+            ], 404);
+        }
+
+        $match = $room->match;
+
+        if (!$match) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No hay partida activa en esta sala',
+            ], 404);
+        }
+
+        // Solo procesar si el juego está pausado por desconexión
+        if (!isset($match->game_state['paused']) || !$match->game_state['paused']) {
+            return response()->json([
+                'success' => false,
+                'message' => 'El juego no está pausado',
+            ], 400);
+        }
+
+        try {
+            $playerId = $request->input('player_id');
+
+            if (!$playerId) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'player_id es requerido',
+                ], 400);
+            }
+
+            $player = \App\Models\Player::find($playerId);
+
+            if (!$player) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Jugador no encontrado',
+                ], 404);
+            }
+
+            // Obtener el engine y llamar al método de reconexión
+            $engine = $match->getEngine();
+            $engine->onPlayerReconnected($match, $player);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Reconexión procesada correctamente',
+            ], 200);
+
+        } catch (\Exception $e) {
+            \Log::error('[PlayController] Error processing player reconnection', [
+                'room_code' => $code,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al procesar reconexión: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
     // ========================================================================
     // API ENDPOINTS - TIMING & RACE CONDITION PROTECTION
     // ========================================================================

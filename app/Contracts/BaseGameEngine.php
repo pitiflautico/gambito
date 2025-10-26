@@ -190,6 +190,169 @@ abstract class BaseGameEngine implements GameEngineInterface
         // Implementación vacía por defecto - juegos la sobrescriben si necesitan
     }
 
+    /**
+     * Hook cuando un jugador se desconecta DURANTE la partida.
+     *
+     * COMPORTAMIENTO POR DEFECTO:
+     * - Pausar timer de ronda si existe
+     * - Marcar juego como pausado
+     * - Llamar hook beforePlayerDisconnectedPause()
+     * - Emitir PlayerDisconnectedEvent
+     *
+     * Los juegos pueden:
+     * 1. Usar comportamiento por defecto (pausa automática)
+     * 2. Sobrescribir beforePlayerDisconnectedPause() para lógica específica
+     * 3. Sobrescribir completamente onPlayerDisconnected() si necesitan otro comportamiento
+     *    (ej: continuar sin el jugador, AI replacement, etc.)
+     *
+     * @param GameMatch $match
+     * @param Player $player Jugador que se desconectó
+     * @return void
+     */
+    public function onPlayerDisconnected(GameMatch $match, \App\Models\Player $player): void
+    {
+        Log::info("[{$this->getGameSlug()}] Player disconnected - pausing game", [
+            'match_id' => $match->id,
+            'player_id' => $player->id,
+            'player_name' => $player->name,
+        ]);
+
+        // 1. Hook opcional antes de pausar
+        $this->beforePlayerDisconnectedPause($match, $player);
+
+        // 2. Obtener game_state como array para modificarlo
+        $gameState = $match->game_state;
+
+        // 3. Pausar timer si existe
+        if (isset($gameState['timer_system'])) {
+            $timerService = \App\Services\Modules\TimerSystem\TimerService::fromArray($gameState);
+            $timerService->pauseTimer('round');
+            $gameState['timer_system'] = $timerService->toArray()['timer_system'];
+        }
+
+        // 4. Marcar juego como pausado
+        $gameState['paused'] = true;
+        $gameState['paused_reason'] = 'player_disconnected';
+        $gameState['disconnected_player_id'] = $player->id;
+        $gameState['paused_at'] = now()->toDateTimeString();
+
+        // 5. Asignar de vuelta y guardar
+        $match->game_state = $gameState;
+        $match->save();
+
+        // 4. Emitir evento (broadcast a todos los clientes)
+        event(new \App\Events\Game\PlayerDisconnectedEvent($match, $player));
+
+        Log::info("[{$this->getGameSlug()}] Game paused due to disconnection", [
+            'match_id' => $match->id,
+        ]);
+    }
+
+    /**
+     * Hook cuando un jugador se reconecta DURANTE la partida.
+     *
+     * COMPORTAMIENTO POR DEFECTO:
+     * - Resumir/reiniciar timer
+     * - Marcar juego como activo
+     * - Llamar hook afterPlayerReconnected()
+     * - Reiniciar ronda actual (resetear locks, nuevo timer)
+     * - Emitir PlayerReconnectedEvent
+     *
+     * Los juegos pueden:
+     * 1. Usar comportamiento por defecto (reinicio de ronda)
+     * 2. Sobrescribir afterPlayerReconnected() para lógica específica
+     * 3. Sobrescribir completamente onPlayerReconnected() si necesitan otro comportamiento
+     *    (ej: solo resumir sin reiniciar ronda)
+     *
+     * @param GameMatch $match
+     * @param Player $player Jugador que se reconectó
+     * @return void
+     */
+    public function onPlayerReconnected(GameMatch $match, \App\Models\Player $player): void
+    {
+        Log::info("[{$this->getGameSlug()}] Player reconnected - resuming game", [
+            'match_id' => $match->id,
+            'player_id' => $player->id,
+            'player_name' => $player->name,
+        ]);
+
+        // 1. Obtener game_state como array para modificarlo
+        $gameState = $match->game_state;
+
+        // 2. Marcar juego como activo (quitar pausa)
+        $gameState['paused'] = false;
+        unset($gameState['paused_reason']);
+        unset($gameState['disconnected_player_id']);
+        unset($gameState['paused_at']);
+
+        // 3. Asignar de vuelta y guardar
+        $match->game_state = $gameState;
+        $match->save();
+
+        // 2. Hook opcional después de reconectar
+        $this->afterPlayerReconnected($match, $player);
+
+        // 3. Comportamiento por defecto: Reiniciar ronda actual
+        // Esto garantiza que todos empiecen de cero con el jugador reconectado
+        $shouldRestartRound = true;
+
+        if ($shouldRestartRound) {
+            Log::info("[{$this->getGameSlug()}] Restarting current round", [
+                'match_id' => $match->id,
+                'round' => $match->game_state['round_system']['current_round'] ?? null,
+            ]);
+
+            // Reiniciar ronda: llama startNewRound() del juego + inicia nuevo timer
+            $this->handleNewRound($match, advanceRound: false);
+        }
+
+        // 4. Emitir evento (broadcast a todos los clientes)
+        event(new \App\Events\Game\PlayerReconnectedEvent($match, $player, $shouldRestartRound));
+
+        Log::info("[{$this->getGameSlug()}] Game resumed after reconnection", [
+            'match_id' => $match->id,
+        ]);
+    }
+
+    /**
+     * Hook opcional ejecutado ANTES de pausar el juego por desconexión.
+     *
+     * Los juegos pueden sobrescribir este método para:
+     * - Guardar estado temporal
+     * - Registrar estadísticas
+     * - Notificar a otros jugadores
+     * - Preparar UI de pausa
+     *
+     * NO debe modificar el estado de pausa, solo preparar.
+     *
+     * @param GameMatch $match
+     * @param Player $player
+     * @return void
+     */
+    protected function beforePlayerDisconnectedPause(GameMatch $match, \App\Models\Player $player): void
+    {
+        // Implementación vacía por defecto - juegos la sobrescriben si necesitan
+    }
+
+    /**
+     * Hook opcional ejecutado DESPUÉS de reconectar y quitar pausa.
+     *
+     * Los juegos pueden sobrescribir este método para:
+     * - Restaurar estado temporal
+     * - Registrar estadísticas de reconexión
+     * - Compensar tiempo perdido
+     *
+     * Se ejecuta ANTES de reiniciar la ronda.
+     *
+     * @param GameMatch $match
+     * @param Player $player
+     * @return void
+     */
+    protected function afterPlayerReconnected(GameMatch $match, \App\Models\Player $player): void
+    {
+        // Implementación vacía por defecto - juegos la sobrescriben si necesitan
+    }
+
     // ========================================================================
     // IMPLEMENTACIÓN BASE: startGame (común para todos los juegos)
     // ========================================================================

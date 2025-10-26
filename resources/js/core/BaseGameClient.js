@@ -1,4 +1,5 @@
 import TimingModule from '../modules/TimingModule.js';
+import PresenceMonitor from '../modules/PresenceMonitor.js';
 
 /**
  * BaseGameClient - Clase base para todos los juegos
@@ -9,6 +10,7 @@ import TimingModule from '../modules/TimingModule.js';
  * - Gestión de scores y jugadores
  * - Sistema de mensajes
  * - Sistema de timing (TimingModule)
+ * - Monitoreo de presencia (PresenceMonitor)
  *
  * Cada juego extiende esta clase e implementa solo su lógica específica.
  */
@@ -34,6 +36,13 @@ export class BaseGameClient {
         this.timing = new TimingModule();
         this.timing.configure(config.timing || {});
 
+        // Inicializar PresenceMonitor
+        this.presenceMonitor = new PresenceMonitor(
+            this.roomCode,
+            this.gameState?.phase || 'waiting'
+        );
+        this.presenceMonitor.start();
+
         // Solo mostrar el estado
         console.log('state:', this.gameState?.phase || 'unknown');
     }
@@ -53,6 +62,8 @@ export class BaseGameClient {
             handlePhaseChanged: (event) => this.handlePhaseChanged(event),
             handleTurnChanged: (event) => this.handleTurnChanged(event),
             handleGameFinished: (event) => this.handleGameFinished(event),
+            handlePlayerDisconnected: (event) => this.handlePlayerDisconnected(event),
+            handlePlayerReconnected: (event) => this.handlePlayerReconnected(event),
         };
 
         // Combinar handlers por defecto con handlers custom del juego
@@ -105,6 +116,12 @@ export class BaseGameClient {
         // Actualizar información de ronda
         this.currentRound = event.current_round;
         this.totalRounds = event.total_rounds;
+
+        // Actualizar fase a "playing" cuando empieza la primera ronda
+        if (this.presenceMonitor && this.currentRound === 1) {
+            this.presenceMonitor.setPhase('playing');
+            console.log('[BaseGameClient] Game started - PresenceMonitor set to playing');
+        }
 
         // Mostrar timer si existe timing metadata
         if (event.timing && event.timing.server_time && event.timing.duration) {
@@ -175,6 +192,11 @@ export class BaseGameClient {
      * Se ejecuta cuando el juego cambia de fase (ej: lobby -> playing -> finished)
      */
     handlePhaseChanged(event) {
+        // Actualizar fase en PresenceMonitor
+        if (this.presenceMonitor && event.phase) {
+            this.presenceMonitor.setPhase(event.phase);
+        }
+
         // Los juegos específicos sobrescriben este método para manejar transiciones de fase
     }
 
@@ -194,6 +216,48 @@ export class BaseGameClient {
      */
     handleGameFinished(event) {
         // Los juegos específicos sobrescriben este método para mostrar pantalla de resultados finales
+    }
+
+    /**
+     * Handler genérico: Jugador desconectado
+     *
+     * Se ejecuta cuando un jugador se desconecta DURANTE la partida.
+     * Por defecto, muestra un popup indicando que el juego está pausado.
+     */
+    handlePlayerDisconnected(event) {
+        console.log('[BaseGameClient] Player disconnected:', event);
+
+        // Pausar timer si está activo
+        if (this.timing && this.timing.activeTimers && this.timing.activeTimers.has('round_timer')) {
+            this.timing.clearTimer('round_timer');
+        }
+
+        // Dispatch custom event para que el Blade component muestre el popup
+        window.dispatchEvent(new CustomEvent('game:player:disconnected', {
+            detail: event
+        }));
+
+        // Los juegos específicos pueden sobrescribir este método para lógica custom
+    }
+
+    /**
+     * Handler genérico: Jugador reconectado
+     *
+     * Se ejecuta cuando un jugador se reconecta.
+     * Por defecto, oculta el popup y espera a que el backend reinicie la ronda.
+     */
+    handlePlayerReconnected(event) {
+        console.log('[BaseGameClient] Player reconnected:', event);
+
+        // Dispatch custom event para que el Blade component oculte el popup
+        window.dispatchEvent(new CustomEvent('game:player:reconnected', {
+            detail: event
+        }));
+
+        // El backend se encarga de reiniciar la ronda automáticamente
+        // handleRoundStarted() será llamado cuando llegue RoundStartedEvent
+
+        // Los juegos específicos pueden sobrescribir este método para lógica custom
     }
 
     // ========================================================================

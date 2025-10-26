@@ -51,6 +51,14 @@ return [
                 'name' => 'game.finished',
                 'handler' => 'handleGameFinished'
             ],
+            'PlayerDisconnectedEvent' => [
+                'name' => 'game.player.disconnected',
+                'handler' => 'handlePlayerDisconnected'
+            ],
+            'PlayerReconnectedEvent' => [
+                'name' => 'game.player.reconnected',
+                'handler' => 'handlePlayerReconnected'
+            ],
         ]
     ]
 ];

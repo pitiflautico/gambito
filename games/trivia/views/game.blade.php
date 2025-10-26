@@ -85,6 +85,9 @@
         </div>
     </div>
 
+    {{-- Player Disconnected Popup (component genérico para todos los juegos) --}}
+    <x-game.player-disconnected-popup />
+
     <style>
         /* Timer warning styles */
         #timer.countdown-warning {

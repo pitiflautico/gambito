@@ -47,6 +47,10 @@ Route::prefix('rooms')->name('api.rooms.')->group(function () {
     Route::post('/{code}/next-round', [\App\Http\Controllers\PlayController::class, 'apiNextRound'])->name('next-round');
     Route::post('/{code}/check-timer', [\App\Http\Controllers\PlayController::class, 'apiCheckTimer'])->name('check-timer');
 
+    // Player Disconnection/Reconnection (during game)
+    Route::post('/{code}/player-disconnected', [PlayController::class, 'apiPlayerDisconnected'])->name('player-disconnected');
+    Route::post('/{code}/player-reconnected', [PlayController::class, 'apiPlayerReconnected'])->name('player-reconnected');
+
     // Información del Jugador
     Route::get('/{code}/player-info', [RoomController::class, 'apiGetPlayerInfo'])
         ->middleware(['web'])
