@@ -20,5 +20,10 @@ window.TeamManager = TeamManager;
 
 Alpine.start();
 
-// Game-specific JavaScript is loaded separately in each game view
-// See vite.config.js for game entry points
+// Lazy load game-specific clients (loaded on demand)
+// TriviaGameClient will be loaded when needed
+window.loadTriviaGameClient = async () => {
+    if (window.TriviaGameClient) return; // Ya cargado
+    const module = await import('../../games/trivia/js/TriviaGameClient.js');
+    // El módulo ya expone window.TriviaGameClient internamente
+};

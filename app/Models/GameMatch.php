@@ -368,12 +368,19 @@ class GameMatch extends Model
     public function processAction(Player $player, string $action, array $data = []): array
     {
         $engine = $this->getEngine();
-        
-        return $engine->processAction(
+
+        // Procesar la acción del jugador
+        $result = $engine->processAction(
             match: $this,
             player: $player,
             action: $action,
             data: $data
         );
+
+        // Verificar si el timer expiró y auto-advance si es necesario
+        // Esto se ejecuta después de cada acción para detectar timeouts
+        $engine->checkTimerAndAutoAdvance($this);
+
+        return $result;
     }
 }

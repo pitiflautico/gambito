@@ -21,7 +21,7 @@ class TimingModule {
         this.activeCountdowns = new Map();
         this.config = {
             countdownWarningThreshold: 3, // Segundos para cambiar a warning
-            debug: true                    // Logging detallado
+            debug: false                   // Logging detallado (desactivado por defecto)
         };
     }
 
@@ -45,6 +45,11 @@ class TimingModule {
      * @returns {Function} Cleanup function para cancelar el countdown
      */
     startServerSyncedCountdown(serverTime, durationMs, element, callback, name = 'default') {
+        // 🔥 FIX: Cancelar countdown existente con el mismo nombre para evitar duplicados
+        if (this.activeCountdowns.has(name)) {
+            this.cancelCountdown(name);
+        }
+
         // Timestamps en milisegundos
         const startTime = serverTime * 1000;
         const endTime = startTime + durationMs;
@@ -167,8 +172,6 @@ class TimingModule {
      * @deprecated Use startServerSyncedCountdown() instead
      */
     delayWithCountdown(seconds, element, template = '{seconds}s', name = 'default') {
-        console.warn('⚠️ [TimingModule] delayWithCountdown is deprecated. Use startServerSyncedCountdown() instead.');
-
         return new Promise((resolve) => {
             let remaining = seconds;
 

@@ -1,4 +1,5 @@
-import { BaseGameClient } from '/resources/js/core/BaseGameClient.js';
+// BaseGameClient ya está disponible globalmente a través de resources/js/app.js
+const { BaseGameClient } = window;
 
 /**
  * TriviaGameClient - Cliente específico para el juego de Trivia
@@ -11,7 +12,7 @@ import { BaseGameClient } from '/resources/js/core/BaseGameClient.js';
  *
  * Fase 4: WebSocket Bidirectional Communication (Frontend)
  */
-export class TriviaGameClient extends BaseGameClient {
+class TriviaGameClient extends BaseGameClient {
     constructor(config) {
         super(config);
 
@@ -31,24 +32,17 @@ export class TriviaGameClient extends BaseGameClient {
         this.currentQuestion = null;
         this.hasAnswered = false;
         this.answersCount = 0;
-
-        console.log('🎮 [TriviaGameClient] Initialized');
     }
 
     /**
      * Override: Manejar inicio de ronda (nueva pregunta)
      */
-    handleRoundStarted(event) {
-        super.handleRoundStarted(event);
-
-        console.log('❓ [TriviaGameClient] Round started:', event);
+    async handleRoundStarted(event) {
+        await super.handleRoundStarted(event);
 
         // Extraer pregunta del evento
         // El evento genérico envía game_state completo, necesitamos extraer current_question
         const questionData = event.game_state?.current_question || event;
-
-        console.log('🔍 [TriviaGameClient] questionData:', questionData);
-        console.log('🔍 [TriviaGameClient] event:', event);
 
         this.currentQuestion = {
             question: questionData.question || event.question,
@@ -58,8 +52,6 @@ export class TriviaGameClient extends BaseGameClient {
             questionNumber: event.current_round,
             totalQuestions: event.total_rounds
         };
-
-        console.log('🔍 [TriviaGameClient] this.currentQuestion:', this.currentQuestion);
 
         // Resetear estado de respuesta
         this.hasAnswered = false;
@@ -77,8 +69,6 @@ export class TriviaGameClient extends BaseGameClient {
             console.warn('⚠️ [TriviaGameClient] No current question to display');
             return;
         }
-
-        console.log('📝 [TriviaGameClient] Displaying question:', this.currentQuestion);
 
         // Ocultar loading, mostrar pregunta
         this.hideElement('loading-state');
@@ -138,8 +128,6 @@ export class TriviaGameClient extends BaseGameClient {
 
             this.optionsContainer.appendChild(button);
         });
-
-        console.log('✅ [TriviaGameClient] Options rendered:', this.currentQuestion.options.length);
     }
 
     /**
@@ -152,8 +140,6 @@ export class TriviaGameClient extends BaseGameClient {
             return;
         }
 
-        console.log(`📤 [TriviaGameClient] Submitting answer: ${answerIndex}`);
-
         // Marcar como respondido (local)
         this.hasAnswered = true;
 
@@ -162,8 +148,6 @@ export class TriviaGameClient extends BaseGameClient {
             const result = await this.sendGameAction('answer', {
                 answer_index: answerIndex
             }, true); // ← optimistic = true
-
-            console.log('✅ [TriviaGameClient] Answer submitted successfully:', result);
 
         } catch (error) {
             console.error('❌ [TriviaGameClient] Error submitting answer:', error);
@@ -182,8 +166,6 @@ export class TriviaGameClient extends BaseGameClient {
      */
     applyOptimisticUpdate(action, data) {
         if (action === 'answer') {
-            console.log('🔄 [TriviaGameClient] Applying optimistic update: locking player');
-
             // Deshabilitar todos los botones de respuesta
             if (this.optionsContainer) {
                 const buttons = this.optionsContainer.querySelectorAll('button');
@@ -196,8 +178,6 @@ export class TriviaGameClient extends BaseGameClient {
 
             // Mostrar overlay de "bloqueado"
             this.showElement('locked-overlay');
-
-            console.log('🔒 [TriviaGameClient] Player locked (optimistic)');
         }
     }
 
@@ -208,8 +188,6 @@ export class TriviaGameClient extends BaseGameClient {
      */
     revertOptimisticUpdate(action, data) {
         if (action === 'answer') {
-            console.log('↩️  [TriviaGameClient] Reverting optimistic update: unlocking player');
-
             // Re-habilitar botones de respuesta
             if (this.optionsContainer) {
                 const buttons = this.optionsContainer.querySelectorAll('button');
@@ -222,8 +200,6 @@ export class TriviaGameClient extends BaseGameClient {
 
             // Ocultar overlay de "bloqueado"
             this.hideElement('locked-overlay');
-
-            console.log('🔓 [TriviaGameClient] Player unlocked (reverted)');
         }
     }
 
@@ -234,8 +210,6 @@ export class TriviaGameClient extends BaseGameClient {
      * Lo usamos para actualizar el contador de "X de Y jugadores han respondido"
      */
     handlePlayerAction(event) {
-        console.log('👤 [TriviaGameClient] Player action:', event);
-
         // Si es una respuesta, actualizar contador
         if (event.action_type === 'answer' && event.success) {
             this.answersCount++;
@@ -259,8 +233,6 @@ export class TriviaGameClient extends BaseGameClient {
     handleRoundEnded(event) {
         super.handleRoundEnded(event);
 
-        console.log('🏁 [TriviaGameClient] Round ended:', event);
-
         // Resetear estado
         this.hasAnswered = false;
         this.answersCount = 0;
@@ -280,8 +252,6 @@ export class TriviaGameClient extends BaseGameClient {
      */
     handleGameFinished(event) {
         super.handleGameFinished(event);
-
-        console.log('🏆 [TriviaGameClient] Game finished, showing results:', event);
 
         // Ocultar todos los demás estados
         this.hideElement('loading-state');

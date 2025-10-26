@@ -29,12 +29,9 @@ export class PresenceChannelManager {
      */
     initialize() {
         if (typeof window.Echo === 'undefined') {
-            console.log('⏳ [Presence] Waiting for Echo to load...');
             setTimeout(() => this.initialize(), 100);
             return;
         }
-
-        console.log('✅ [Presence] Connecting to room:', this.roomCode);
 
         // Conectar al Presence Channel (para trackear quién está conectado)
         this.channel = window.Echo.join(`room.${this.roomCode}`)
@@ -51,7 +48,6 @@ export class PresenceChannelManager {
      * Handler: Usuarios actualmente conectados
      */
     async handleHere(users) {
-        console.log('👥 [Presence:here] Users connected:', users.length);
         this.connectedUsers = users;
 
         // Callback personalizado
@@ -72,7 +68,6 @@ export class PresenceChannelManager {
      * Handler: Un usuario se conectó
      */
     async handleJoining(user) {
-        console.log('✅ [Presence:joining]', user.name);
         this.connectedUsers.push(user);
 
         // Callback personalizado
@@ -93,7 +88,6 @@ export class PresenceChannelManager {
      * Handler: Un usuario se desconectó
      */
     async handleLeaving(user) {
-        console.log('❌ [Presence:leaving]', user.name);
         this.connectedUsers = this.connectedUsers.filter(u => u.id !== user.id);
 
         // Callback personalizado
@@ -114,8 +108,6 @@ export class PresenceChannelManager {
      * Handler: Evento del backend - Todos conectados
      */
     handleAllConnected(data) {
-        console.log('🎉 [Presence] All players connected!', data);
-
         // Callback personalizado
         if (this.onAllConnected) {
             this.onAllConnected(data);
@@ -142,7 +134,6 @@ export class PresenceChannelManager {
 
             if (data.success) {
                 this.totalPlayers = data.total;
-                console.log(`📊 [Presence] Status: ${data.connected}/${data.total}`);
             }
         } catch (error) {
             console.error('❌ [Presence] Error notifying backend:', error);
@@ -176,7 +167,6 @@ export class PresenceChannelManager {
     disconnect() {
         if (this.channel) {
             window.Echo.leave(`room.${this.roomCode}`);
-            console.log('👋 [Presence] Disconnected from room:', this.roomCode);
         }
     }
 }

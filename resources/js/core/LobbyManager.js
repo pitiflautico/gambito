@@ -22,11 +22,6 @@ export class LobbyManager {
      * Inicializar Presence Channel y WebSocket
      */
     initialize() {
-        console.log('🎮 [Lobby] Initializing...', {
-            roomCode: this.roomCode,
-            isMaster: this.isMaster,
-        });
-
         this.initializeWebSocket();
         this.initializePresenceChannel();
     }
@@ -36,12 +31,10 @@ export class LobbyManager {
      */
     initializeWebSocket() {
         if (typeof window.Echo === 'undefined') {
-            console.log('⏳ [Lobby] Waiting for Echo to load...');
             setTimeout(() => this.initializeWebSocket(), 100);
             return;
         }
 
-        console.log('📡 [Lobby] Connecting to WebSocket channel...');
         const channel = window.Echo.channel(`room.${this.roomCode}`);
 
         // IMPORTANTE: NO escuchamos .player.joined/.player.left
@@ -50,11 +43,8 @@ export class LobbyManager {
 
         // Evento: Partida iniciada
         channel.listen('.game.started', (data) => {
-            console.log('🎮 [Lobby] Game started, redirecting...');
             window.location.replace(`/rooms/${this.roomCode}`);
         });
-
-        console.log('✅ [Lobby] WebSocket listeners registered');
     }
 
     /**
@@ -62,12 +52,9 @@ export class LobbyManager {
      */
     initializePresenceChannel() {
         if (typeof window.PresenceChannelManager === 'undefined') {
-            console.log('⏳ [Lobby] Waiting for PresenceChannelManager...');
             setTimeout(() => this.initializePresenceChannel(), 100);
             return;
         }
-
-        console.log('✅ [Lobby] Initializing PresenceChannelManager...');
 
         this.presenceManager = new window.PresenceChannelManager(this.roomCode, {
             onHere: (users) => this.handleHere(users),
@@ -82,7 +69,6 @@ export class LobbyManager {
      * Handler: Usuarios actualmente conectados
      */
     handleHere(users) {
-        console.log('👥 [Lobby] Users here:', users.length);
         this.updatePlayerConnectionStatus(users);
 
         // 🔥 FIX: Actualizar contador con datos del Presence Channel
@@ -96,8 +82,6 @@ export class LobbyManager {
      * Handler: Usuario se unió
      */
     handleJoining(user) {
-        console.log('✅ [Lobby] User joining:', user.name, user.id);
-
         this.addPlayerToList(user);
 
         if (this.presenceManager) {
@@ -113,7 +97,6 @@ export class LobbyManager {
      * Handler: Usuario se fue
      */
     handleLeaving(user) {
-        console.log('❌ [Lobby] User leaving:', user.name);
         this.removePlayerFromList(user);
 
         if (this.presenceManager) {
@@ -129,10 +112,7 @@ export class LobbyManager {
      * Handler: Todos los jugadores mínimos conectados
      */
     handleAllConnected(data) {
-        if (!this.allConnectedLogged) {
-            console.log('🎉 [Lobby] All players connected!', data);
-            this.allConnectedLogged = true;
-        }
+        this.allConnectedLogged = true;
         this.updateStartGameButton(data.connected, data.total);
         this.updatePlayerCount(data.connected, this.maxPlayers);
     }
@@ -205,10 +185,7 @@ export class LobbyManager {
                 <p class="text-green-600 text-xs mt-1">${connected} jugador${connected > 1 ? 'es' : ''} conectado${connected > 1 ? 's' : ''} (mínimo: ${minPlayers})</p>
             `;
 
-            if (!this.allConnectedLogged) {
-                console.log('🎉 [Master] Puede iniciar la partida', `${connected}/${minPlayers}`);
-                this.allConnectedLogged = true;
-            }
+            this.allConnectedLogged = true;
         } else {
             // Desactivar botón
             button.disabled = true;
@@ -239,12 +216,9 @@ export class LobbyManager {
         // Verificar si ya existe
         const existingPlayer = document.querySelector(`[data-player-id="${user.id}"]`);
         if (existingPlayer) {
-            console.log('ℹ️ Player already in list:', user.id);
             this.updatePlayerConnectionStatus([user]);
             return;
         }
-
-        console.log('➕ Adding player to list:', user.name);
 
         const playerHtml = `
             <div
@@ -282,7 +256,6 @@ export class LobbyManager {
         const playerElement = document.querySelector(`[data-player-id="${user.id}"]`);
 
         if (playerElement) {
-            console.log('➖ Removing player from list:', user.name);
             playerElement.remove();
             // ✅ NO actualizar contador aquí - se actualiza desde handleLeaving() con datos del Presence
         } else {
@@ -315,7 +288,6 @@ export class LobbyManager {
 
         if (currentText !== newText) {
             header.textContent = newText;
-            console.log(`📊 Updated player count: ${currentCount}/${totalCount}`);
         }
     }
 

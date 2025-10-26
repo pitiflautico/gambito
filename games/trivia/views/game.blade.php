@@ -74,7 +74,10 @@
 
                         <!-- Timer (if present) -->
                         <div class="text-center mt-8">
-                            <p id="timer" class="text-xl font-mono text-gray-600"></p>
+                            <div class="inline-block bg-blue-100 px-6 py-3 rounded-lg">
+                                <p class="text-sm text-blue-600 font-semibold mb-1">Tiempo restante</p>
+                                <p id="timer" class="text-4xl font-mono font-bold text-blue-900"></p>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -82,19 +85,38 @@
         </div>
     </div>
 
+    <style>
+        /* Timer warning styles */
+        #timer.countdown-warning {
+            color: #DC2626 !important;
+            animation: pulse 1s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.6;
+            }
+        }
+
+        #timer.timer-expired {
+            color: #EF4444 !important;
+        }
+    </style>
+
     <script type="module">
         // ========================================================================
         // Trivia Game Client - Fase 4: WebSocket Bidirectional Communication
         // ========================================================================
-        
-        import EventManager from '/resources/js/modules/EventManager.js';
-        import TimingModule from '/resources/js/modules/TimingModule.js';
-        import { BaseGameClient } from '/resources/js/core/BaseGameClient.js';
-        import { TriviaGameClient } from '/games/games/trivia/js/TriviaGameClient.js';
 
-        // Hacer disponibles globalmente (requerido por BaseGameClient)
-        window.EventManager = EventManager;
-        window.TimingModule = TimingModule;
+        // EventManager, TimingModule y BaseGameClient ya están disponibles globalmente
+        // a través de resources/js/app.js cargado en el layout
+
+        // Cargar TriviaGameClient de forma lazy
+        await window.loadTriviaGameClient();
+        const { TriviaGameClient } = window;
 
         // Configuración del juego desde PHP
         const config = {
@@ -109,30 +131,21 @@
             timing: {}
         };
 
-        console.log('🎮 [Trivia] Initializing TriviaGameClient with config:', config);
-
         // Crear instancia del cliente de Trivia
         const triviaClient = new TriviaGameClient(config);
 
-        // Configurar Event Manager (conecta WebSockets y registra handlers)
-        triviaClient.setupEventManager();
-
-        console.log('✅ [Trivia] Game client initialized and ready');
-
-        // Cargar estado inicial (por si ya hay una pregunta activa)
-        window.addEventListener('load', async () => {
+        // 🔥 FIX: Cargar estado inicial ANTES de conectar WebSockets
+        // Esto previene race conditions donde los eventos llegan antes del estado inicial
+        (async () => {
             try {
                 const response = await fetch(`/api/rooms/{{ $code }}/state`);
                 if (response.ok) {
                     const data = await response.json();
                     const gameState = data.game_state;
 
-                    console.log('📦 [Trivia] Initial state loaded:', gameState);
-
                     // Cargar players desde el estado
                     if (gameState?._config?.players) {
                         triviaClient.players = Object.values(gameState._config.players);
-                        console.log('👥 [Trivia] Players loaded:', triviaClient.players);
                     }
 
                     // Cargar scores desde el estado
@@ -142,7 +155,6 @@
 
                     // 🎯 PRIORIDAD 1: Si el juego terminó, mostrar pantalla de resultados
                     if (gameState?.phase === 'finished') {
-                        console.log('🏁 [Trivia] Game finished, showing results screen');
 
                         // Ocultar loading y question states
                         triviaClient.hideElement('loading-state');
@@ -168,14 +180,28 @@
                             game_state: gameState
                         };
 
-                        console.log('🔄 [Trivia] Displaying current question from initial state');
+                        // Agregar timing metadata si hay un timer activo
+                        const timerData = gameState.timer_system?.timers?.round;
+                        if (timerData) {
+                            // Reconstruir timing metadata desde el timer del backend
+                            const startedAt = new Date(timerData.started_at).getTime() / 1000; // a segundos UNIX
+                            const pausedAt = timerData.paused_at ? new Date(timerData.paused_at).getTime() / 1000 : null;
+                            const duration = timerData.duration;
+
+                            eventData.timing = {
+                                duration: duration,
+                                server_time: startedAt,
+                                countdown_visible: true,
+                                warning_threshold: 3
+                            };
+                        }
+
                         triviaClient.handleRoundStarted(eventData);
 
                         // Si ya respondimos, mostrar overlay de bloqueado
                         // Los locks se guardan en player_state_system.locks como objeto {playerId: true/false}
                         const locks = gameState.player_state_system?.locks || {};
                         if (locks[config.playerId] === true) {
-                            console.log('🔒 [Trivia] Player already answered, showing locked overlay');
                             triviaClient.hasAnswered = true;
                             triviaClient.showElement('locked-overlay');
                         }
@@ -186,6 +212,9 @@
             } catch (error) {
                 console.error('❌ [Trivia] Error loading initial state:', error);
             }
-        });
+
+            // Configurar Event Manager DESPUÉS de cargar el estado inicial
+            triviaClient.setupEventManager();
+        })();
     </script>
 </x-app-layout>

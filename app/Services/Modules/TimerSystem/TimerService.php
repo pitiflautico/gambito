@@ -49,15 +49,17 @@ class TimerService
      * @param string $timerName Nombre único del timer
      * @param int $durationSeconds Duración en segundos
      * @param DateTime|null $startTime Tiempo de inicio (default: now)
+     * @param bool $restart Si true, reinicia el timer si ya existe (default: false)
      * @return Timer El timer creado
-     * @throws \InvalidArgumentException Si el timer ya existe
+     * @throws \InvalidArgumentException Si el timer ya existe y $restart es false
      */
     public function startTimer(
         string $timerName,
         int $durationSeconds,
-        ?DateTime $startTime = null
+        ?DateTime $startTime = null,
+        bool $restart = false
     ): Timer {
-        if (isset($this->timers[$timerName])) {
+        if (isset($this->timers[$timerName]) && !$restart) {
             throw new \InvalidArgumentException("Timer '{$timerName}' ya existe");
         }
 

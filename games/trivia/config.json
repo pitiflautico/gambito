@@ -101,7 +101,8 @@
       "allow_negative_scores": false
     },
     "timer_system": {
-      "enabled": true
+      "enabled": true,
+      "round_duration": 15
     },
     "round_system": {
       "enabled": true,
