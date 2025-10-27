@@ -350,4 +350,21 @@ class MockupEngine extends BaseGameEngine
             ],
         ];
     }
+
+    /**
+     * Obtener scores finales (implementación específica de Mockup).
+     *
+     * Este método es llamado por BaseGameEngine::finalize() (Template Method).
+     * Implementa la lógica específica de cómo Mockup calcula los scores finales.
+     *
+     * @param GameMatch $match
+     * @return array Array asociativo [player_id => score]
+     */
+    protected function getFinalScores(GameMatch $match): array
+    {
+        Log::info("[Mockup] Calculating final scores", ['match_id' => $match->id]);
+
+        $scoreManager = $this->getScoreManager($match);
+        return $scoreManager->getScores();
+    }
 }

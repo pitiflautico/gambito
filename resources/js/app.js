@@ -27,3 +27,10 @@ window.loadTriviaGameClient = async () => {
     const module = await import('../../games/trivia/js/TriviaGameClient.js');
     // El módulo ya expone window.TriviaGameClient internamente
 };
+
+// PictionaryGameClient will be loaded when needed
+window.loadPictionaryGameClient = async () => {
+    if (window.PictionaryGameClient) return; // Ya cargado
+    await import('../../games/pictionary/js/PictionaryGameClient.js');
+    // El módulo ya expone window.PictionaryGameClient internamente
+};
