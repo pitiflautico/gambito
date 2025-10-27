@@ -17,6 +17,22 @@ use Illuminate\Support\Facades\Log;
 class TriviaEngine extends BaseGameEngine
 {
     /**
+     * Score calculator instance (reutilizado para evitar instanciación repetida)
+     */
+    protected TriviaScoreCalculator $scoreCalculator;
+
+    public function __construct()
+    {
+        // Cargar configuración del juego para scoring
+        $questionsPath = base_path('games/trivia/questions.json');
+        $questionsData = json_decode(file_get_contents($questionsPath), true);
+        $scoringConfig = $questionsData['scoring'] ?? [];
+
+        // Inicializar calculator con la configuración
+        $this->scoreCalculator = new TriviaScoreCalculator($scoringConfig);
+    }
+
+    /**
      * Inicializar el juego - FASE 1 (LOBBY)
      *
      * Carga las preguntas desde questions.json y las mezcla aleatoriamente.
@@ -83,22 +99,27 @@ class TriviaEngine extends BaseGameEngine
         $this->cachePlayersInState($match);
 
         // Inicializar módulos automáticamente desde config.json
-        $scoringConfig = $questionsData['scoring'] ?? [];
         $this->initializeModules($match, [
             'scoring_system' => [
-                'calculator' => new TriviaScoreCalculator($scoringConfig)
+                'calculator' => $this->scoreCalculator
             ],
             'round_system' => [
                 'total_rounds' => count($questions) // Número real de preguntas cargadas
             ]
         ]);
 
-        // Inicializar PlayerStateManager con los IDs de jugadores
+        // Inicializar PlayerManager (unificado: scores + state)
         $playerIds = $match->players->pluck('id')->toArray();
-        $playerState = new \App\Services\Modules\PlayerStateSystem\PlayerStateManager(
-            playerIds: $playerIds
+        $playerManager = new \App\Services\Modules\PlayerSystem\PlayerManager(
+            $playerIds,
+            $this->scoreCalculator,
+            [
+                'available_roles' => [], // Trivia no usa roles
+                'allow_multiple_persistent_roles' => false,
+                'track_score_history' => false,
+            ]
         );
-        $this->savePlayerStateManager($match, $playerState);
+        $this->savePlayerManager($match, $playerManager);
 
         Log::info("[Trivia] Questions loaded and shuffled", [
             'match_id' => $match->id,
@@ -174,9 +195,9 @@ class TriviaEngine extends BaseGameEngine
         $answerIndex = (int) $data['answer_index'];
 
         // 2. Verificar que el jugador no esté bloqueado
-        $playerState = $this->getPlayerStateManager($match);
+        $playerManager =$this->getPlayerManager($match, $this->scoreCalculator);
 
-        if ($playerState->isPlayerLocked($player->id)) {
+        if ($playerManager->isPlayerLocked($player->id)) {
             return [
                 'success' => false,
                 'message' => 'Ya respondiste esta pregunta',
@@ -197,7 +218,7 @@ class TriviaEngine extends BaseGameEngine
         $isCorrect = ($answerIndex === $currentQuestion['correct_answer']);
 
         // 5. Registrar la acción del jugador
-        $playerState->setPlayerAction($player->id, [
+        $playerManager->setPlayerAction($player->id, [
             'type' => 'answer',
             'answer_index' => $answerIndex,
             'is_correct' => $isCorrect,
@@ -216,17 +237,13 @@ class TriviaEngine extends BaseGameEngine
                 'question_id' => $currentQuestion['id']
             ]);
 
-            // Obtener configuración de scoring y timer
-            $gameConfig = $this->getGameConfig();
-            $scoringConfig = $gameConfig['scoring'] ?? [];
-            $calculator = new TriviaScoreCalculator($scoringConfig);
-
             // Preparar context con dificultad y timing (para speed bonus)
             $context = [
                 'difficulty' => $currentQuestion['difficulty'] ?? 'medium',
             ];
 
             // Si hay timer de ronda, calcular elapsed time para speed bonus
+            $gameConfig = $this->getGameConfig();
             $timerDuration = $gameConfig['modules']['timer_system']['round_duration'] ?? null;
             if ($timerDuration) {
                 try {
@@ -244,9 +261,8 @@ class TriviaEngine extends BaseGameEngine
                 }
             }
 
-            // Calcular puntos con speed bonus incluido
-            $totalPoints = $calculator->calculate('correct_answer', $context);
-            $this->awardPoints($match, $player->id, 'correct_answer', $context, $calculator);
+            // Sumar puntos (PlayerManager emite evento automáticamente)
+            $totalPoints = $playerManager->awardPoints($player->id, 'correct_answer', $context, $match);
 
             $resultData = [
                 'is_correct' => true,
@@ -281,15 +297,26 @@ class TriviaEngine extends BaseGameEngine
         }
 
         // 7. Bloquear jugador (en ambos casos)
-        // El PlayerStateManager emite evento Y nos dice si todos están bloqueados
-        $lockResult = $playerState->lockPlayer($player->id, $match, $player, $resultData);
-        $this->savePlayerStateManager($match, $playerState);
+        $lockResult = $playerManager->lockPlayer($player->id, $match, $player, $resultData);
+        $this->savePlayerManager($match, $playerManager);
 
         // 8. Si la respuesta fue incorrecta, verificar si todos ya respondieron
-        if (!$isCorrect && $lockResult['all_players_locked']) {
-            // REGLA DE TRIVIA: Todos respondieron incorrectamente → termina la ronda
-            $forceEnd = true;
-            $endReason = 'all_players_answered_incorrectly';
+        if (!$isCorrect) {
+            // Verificar si todos los jugadores están bloqueados
+            $lockedPlayers = $playerManager->getLockedPlayers();
+            $totalPlayers = count($match->players);
+
+            if (count($lockedPlayers) === $totalPlayers) {
+                // REGLA DE TRIVIA: Todos respondieron incorrectamente → termina la ronda
+                $forceEnd = true;
+                $endReason = 'all_players_answered_incorrectly';
+
+                Log::info("[Trivia] All players answered incorrectly - ending round", [
+                    'match_id' => $match->id,
+                    'total_players' => $totalPlayers,
+                    'locked_players' => count($lockedPlayers),
+                ]);
+            }
         }
 
         // 9. Retornar resultado
@@ -327,11 +354,13 @@ class TriviaEngine extends BaseGameEngine
     {
         Log::info("[Trivia] Starting new round", ['match_id' => $match->id]);
 
-        // 1. Desbloquear jugadores (via PlayerStateManager)
+        // 1. Desbloquear jugadores (via PlayerManager)
         // El reset emitirá automáticamente PlayersUnlockedEvent
-        $playerState = $this->getPlayerStateManager($match);
-        $playerState->reset($match);  // ← Resetea locks, actions, states, etc. y emite evento
-        $this->savePlayerStateManager($match, $playerState);
+        $playerManager = $this->getPlayerManager($match, $this->scoreCalculator);
+        $playerManager->reset($match);  // ← Resetea locks, actions, states, etc. y emite evento
+
+        // IMPORTANTE: Guardar el reset antes de continuar
+        $this->savePlayerManager($match, $playerManager);
 
         // 2. Cargar siguiente pregunta
         $question = $this->loadNextQuestion($match);
@@ -492,14 +521,14 @@ class TriviaEngine extends BaseGameEngine
      */
     protected function checkRoundState(GameMatch $match): array
     {
-        $playerState = $this->getPlayerStateManager($match);
-        $allActions = $playerState->getAllActions();
+        $playerManager =$this->getPlayerManager($match, $this->scoreCalculator);
+        $allActions = $playerManager->getAllActions();
         
         Log::info("[Trivia] Checking round state", [
             'match_id' => $match->id,
             'total_actions' => count($allActions),
-            'total_players' => $playerState->getTotalPlayers(),
-            'locked_players' => count($playerState->getLockedPlayers())
+            'total_players' => $playerManager->getTotalPlayers(),
+            'locked_players' => count($playerManager->getLockedPlayers())
         ]);
         
         // REGLA 1: Verificar si alguien acertó
@@ -518,7 +547,7 @@ class TriviaEngine extends BaseGameEngine
         }
         
         // REGLA 2: Verificar si todos respondieron incorrectamente
-        $allLocked = $playerState->areAllPlayersLocked();
+        $allLocked = $playerManager->areAllPlayersLocked();
         
         Log::info("[Trivia] Round state check - lock status", [
             'match_id' => $match->id,
@@ -555,8 +584,8 @@ class TriviaEngine extends BaseGameEngine
      */
     protected function getAllPlayerResults(GameMatch $match): array
     {
-        $playerState = $this->getPlayerStateManager($match);
-        $allActions = $playerState->getAllActions();
+        $playerManager =$this->getPlayerManager($match, $this->scoreCalculator);
+        $allActions = $playerManager->getAllActions();
         $currentQuestion = $this->getCurrentQuestion($match);
 
         $playerResults = [];
@@ -648,15 +677,10 @@ class TriviaEngine extends BaseGameEngine
     {
         Log::info("[Trivia] Calculating final scores", ['match_id' => $match->id]);
 
-        // Obtener configuración de scoring específica de Trivia
-        $gameConfig = $this->getGameConfig();
-        $scoringConfig = $gameConfig['scoring'] ?? [];
+        // Usar PlayerManager (unificado: scores + state)
+        $playerManager = $this->getPlayerManager($match, $this->scoreCalculator);
 
-        // Usar TriviaScoreCalculator para calcular scores
-        $calculator = new TriviaScoreCalculator($scoringConfig);
-        $scoreManager = $this->getScoreManager($match, $calculator);
-
-        return $scoreManager->getScores();
+        return $playerManager->getScores();
     }
 
     /**
