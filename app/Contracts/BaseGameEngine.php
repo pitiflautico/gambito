@@ -1754,15 +1754,29 @@ abstract class BaseGameEngine implements GameEngineInterface
     }
 
     /**
-     * Obtener configuración del juego.
+     * Obtener configuración del juego desde config.json.
      *
-     * Los Engines deben implementar este método si usan rotación automática.
+     * Implementación por defecto que carga automáticamente config.json
+     * basándose en el slug del juego. Los Engines pueden sobrescribir
+     * este método si necesitan lógica adicional.
+     *
+     * Caching: Usa caché estática para evitar lecturas múltiples del archivo.
      *
      * @return array
      */
     protected function getGameConfig(): array
     {
-        return [];
+        static $configs = [];
+        $slug = $this->getGameSlug();
+
+        if (!isset($configs[$slug])) {
+            $configPath = base_path("games/{$slug}/config.json");
+            $configs[$slug] = file_exists($configPath)
+                ? json_decode(file_get_contents($configPath), true)
+                : [];
+        }
+
+        return $configs[$slug];
     }
 
     // ========================================================================
@@ -2004,14 +2018,25 @@ abstract class BaseGameEngine implements GameEngineInterface
     }
 
     /**
-     * Obtener scores finales (método abstracto).
+     * Obtener scores finales.
      *
-     * Cada juego debe implementar este método para calcular sus scores finales
-     * usando su propio ScoreCalculator y lógica específica.
+     * Implementación por defecto que funciona para todos los juegos que usan PlayerManager.
+     * Los juegos pueden sobrescribir este método si necesitan lógica de scoring personalizada.
      *
      * @param GameMatch $match
      * @return array Array asociativo [player_id => score]
      */
-    abstract protected function getFinalScores(GameMatch $match): array;
+    protected function getFinalScores(GameMatch $match): array
+    {
+        Log::info("[{$this->getGameSlug()}] Calculating final scores", ['match_id' => $match->id]);
+
+        // Obtener scoreCalculator si está disponible como propiedad del juego
+        $calculator = $this->scoreCalculator ?? null;
+
+        // Usar PlayerManager para obtener los scores
+        $playerManager = $this->getPlayerManager($match, $calculator);
+
+        return $playerManager->getScores();
+    }
 
 }

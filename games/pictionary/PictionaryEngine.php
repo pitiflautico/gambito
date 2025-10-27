@@ -772,21 +772,6 @@ class PictionaryEngine extends BaseGameEngine
     }
 
     /**
-     * Hook cuando el timer expira - Pasar al siguiente turno.
-     */
-    protected function beforeTimerExpiredAdvance(GameMatch $match, string $timerName = 'round'): void
-    {
-        Log::info("[Pictionary] Timer expired - no one guessed", [
-            'match_id' => $match->id,
-            'timer_name' => $timerName,
-            'current_word' => $match->game_state['current_word']['word'] ?? null
-        ]);
-
-        // TODO: Registrar estadística de "palabras no adivinadas"
-        // El drawer no gana puntos si nadie adivina
-    }
-
-    /**
      * Finalizar ronda actual.
      */
     public function endCurrentRound(GameMatch $match): void
@@ -1250,34 +1235,6 @@ class PictionaryEngine extends BaseGameEngine
         ]);
     }
 
-    /**
-     * Obtener scores finales (implementación específica de Pictionary).
-     */
-    protected function getFinalScores(GameMatch $match): array
-    {
-        Log::info("[Pictionary] Calculating final scores", ['match_id' => $match->id]);
-
-        $playerManager = $this->getPlayerManager($match, $this->scoreCalculator);
-
-        return $playerManager->getScores();
-    }
-
-    /**
-     * Obtener configuración del juego desde config.json
-     */
-    protected function getGameConfig(): array
-    {
-        static $config = null;
-
-        if ($config === null) {
-            $configPath = base_path('games/pictionary/config.json');
-            if (file_exists($configPath)) {
-                $config = json_decode(file_get_contents($configPath), true);
-            } else {
-                $config = [];
-            }
-        }
-
-        return $config;
-    }
+    // getGameConfig() y getFinalScores() ahora se heredan de BaseGameEngine
+    // (implementación común para todos los juegos)
 }

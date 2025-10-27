@@ -378,37 +378,6 @@ class TriviaEngine extends BaseGameEngine
         // event(new QuestionStartedEvent($match, $question));
     }
 
-    /**
-     * Hook opcional: Lógica ANTES de avanzar por timer expiration.
-     *
-     * En Trivia, el comportamiento por defecto de BaseGameEngine es correcto
-     * (timer expira → completar ronda → siguiente pregunta), así que usamos
-     * este hook solo para logging o estadísticas específicas de Trivia.
-     *
-     * Si Trivia necesitara comportamiento diferente (ej: penalizar puntos),
-     * podría sobrescribir completamente onRoundTimerExpired().
-     *
-     * @param GameMatch $match
-     * @param string $timerName
-     * @return void
-     */
-    protected function beforeTimerExpiredAdvance(GameMatch $match, string $timerName = 'round'): void
-    {
-        Log::info("[Trivia] Preparing to advance round due to timer expiration", [
-            'match_id' => $match->id,
-            'timer_name' => $timerName,
-            'current_question' => $match->game_state['current_question']['id'] ?? null
-        ]);
-
-        // Aquí podríamos:
-        // - Registrar estadística de "preguntas sin respuesta"
-        // - Penalizar puntos de todos los jugadores
-        // - Emitir evento custom de Trivia
-        // - Etc.
-
-        // Por ahora, solo logging - el comportamiento por defecto nos sirve
-    }
-
     // ========================================================================
     // GESTIÓN DE PREGUNTAS
     // ========================================================================
@@ -478,6 +447,28 @@ class TriviaEngine extends BaseGameEngine
         return $match->game_state['current_question'] ?? null;
     }
 
+    /**
+     * Filtrar game_state para remover información sensible antes de broadcast.
+     *
+     * En Trivia, la respuesta correcta (`correct_answer`) NO debe enviarse a todos
+     * los jugadores en eventos como RoundStartedEvent. Solo se debe mostrar después
+     * de que termine la ronda.
+     *
+     * @param array $gameState
+     * @param \App\Models\GameMatch $match
+     * @return array
+     */
+    protected function filterGameStateForBroadcast(array $gameState, \App\Models\GameMatch $match): array
+    {
+        $filtered = $gameState;
+
+        // Remover la respuesta correcta de la pregunta actual
+        if (isset($filtered['current_question']['correct_answer'])) {
+            unset($filtered['current_question']['correct_answer']);
+        }
+
+        return $filtered;
+    }
 
     /**
      * Finalizar ronda actual.
@@ -664,43 +655,6 @@ class TriviaEngine extends BaseGameEngine
         ]);
     }
 
-    /**
-     * Obtener scores finales (implementación específica de Trivia).
-     *
-     * Este método es llamado por BaseGameEngine::finalize() (Template Method).
-     * Implementa la lógica específica de cómo Trivia calcula los scores finales.
-     *
-     * @param GameMatch $match
-     * @return array Array asociativo [player_id => score]
-     */
-    protected function getFinalScores(GameMatch $match): array
-    {
-        Log::info("[Trivia] Calculating final scores", ['match_id' => $match->id]);
-
-        // Usar PlayerManager (unificado: scores + state)
-        $playerManager = $this->getPlayerManager($match, $this->scoreCalculator);
-
-        return $playerManager->getScores();
-    }
-
-    /**
-     * Obtener configuración del juego desde config.json
-     *
-     * @return array
-     */
-    protected function getGameConfig(): array
-    {
-        static $config = null;
-        
-        if ($config === null) {
-            $configPath = base_path('games/trivia/config.json');
-            if (file_exists($configPath)) {
-                $config = json_decode(file_get_contents($configPath), true);
-            } else {
-                $config = [];
-            }
-        }
-        
-        return $config;
-    }
+    // getGameConfig() y getFinalScores() ahora se heredan de BaseGameEngine
+    // (implementación común para todos los juegos)
 }
