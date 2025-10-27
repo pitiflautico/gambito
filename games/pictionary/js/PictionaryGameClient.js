@@ -33,6 +33,9 @@ export class PictionaryGameClient extends BaseGameClient {
         // TODO: Inicializar canvas
         this.initializeCanvas();
         this.initializeControls();
+
+        // NOTA: No renderizamos la lista aquí porque this.players está vacío
+        // Se renderiza después de cargar el estado inicial en game.blade.php
     }
 
     /**
@@ -53,6 +56,40 @@ export class PictionaryGameClient extends BaseGameClient {
 
         // Llamar al método padre con los handlers personalizados
         super.setupEventManager(customHandlers);
+
+        // IMPORTANTE: WordRevealedEvent se envía por un canal privado del usuario
+        // Necesitamos escuchar también el canal privado además del canal de la sala
+        this.setupPrivateUserChannel();
+    }
+
+    /**
+     * Configurar listener para el canal privado del usuario
+     * Este canal recibe eventos como WordRevealedEvent que solo deben verlos ciertos jugadores
+     */
+    setupPrivateUserChannel() {
+        if (!window.Echo) {
+            console.error('[Pictionary] window.Echo is not available');
+            return;
+        }
+
+        // Escuchar canal privado del usuario actual
+        const userId = this.userId;
+        if (!userId) {
+            console.warn('[Pictionary] User ID not available, cannot listen to private channel');
+            console.warn('[Pictionary] Config:', { userId: this.userId, playerId: this.playerId });
+            return;
+        }
+
+        console.log(`[Pictionary] Setting up private channel: user.${userId}`);
+
+        const channel = window.Echo.private(`user.${userId}`);
+
+        channel.listen('.pictionary.word-revealed', (event) => {
+            console.log('[Pictionary] ✅ WordRevealed received on private channel:', event);
+            this.handleWordRevealed(event);
+        });
+
+        console.log(`[Pictionary] ✅ Subscribed to private channel: user.${userId}`);
     }
 
     /**
@@ -137,6 +174,9 @@ export class PictionaryGameClient extends BaseGameClient {
     handleRoundStarted(event) {
         console.log('[Pictionary] Round started:', event);
 
+        // IMPORTANTE: Llamar al handler base primero para procesar timing
+        super.handleRoundStarted(event);
+
         const { current_round, total_rounds, game_state } = event;
 
         // Obtener drawer_id y word desde game_state
@@ -168,15 +208,9 @@ export class PictionaryGameClient extends BaseGameClient {
 
         if (this.isDrawer) {
             // SOY EL DRAWER
-            this.currentWord = word;
-
-            // Mostrar palabra
-            const wordDisplay = document.getElementById('word-display');
-            const wordText = document.getElementById('word-text');
-            if (wordDisplay && wordText && word) {
-                wordText.textContent = word;
-                wordDisplay.classList.remove('hidden');
-            }
+            // NOTA: La palabra NO viene en este evento (RoundStartedEvent).
+            // La palabra llegará por WordRevealedEvent en el canal privado del usuario.
+            // Aquí solo configuramos la UI para el drawer.
 
             // Mostrar herramientas de canvas
             this.showElement('canvas-tools');
@@ -187,7 +221,7 @@ export class PictionaryGameClient extends BaseGameClient {
             // Ocultar sección de guess
             this.hideElement('guess-section');
 
-            console.log('[Pictionary] You are the DRAWER! Word:', word);
+            console.log('[Pictionary] You are the DRAWER! Waiting for word via WordRevealedEvent...');
         } else {
             // SOY GUESSER
 
@@ -788,6 +822,14 @@ export class PictionaryGameClient extends BaseGameClient {
     }
 
     /**
+     * Implementar getTimerElement para que el TimingModule sepa dónde mostrar el timer de ronda
+     */
+    getTimerElement() {
+        // El timer de ronda se muestra durante el juego (playing-state)
+        return document.getElementById('timer');
+    }
+
+    /**
      * Implementar getCountdownElement para que el TimingModule sepa dónde mostrar el countdown
      */
     getCountdownElement() {
@@ -817,6 +859,45 @@ export class PictionaryGameClient extends BaseGameClient {
         // usando los datos que ya tiene en this.players y this.scores
         console.log('[Pictionary] Final ranking:', ranking);
         console.log('[Pictionary] Winner:', winner);
+    }
+
+    /**
+     * Renderizar lista de jugadores con sus scores.
+     */
+    renderPlayersList() {
+        const container = document.getElementById('players-scores-list');
+        if (!container) return;
+
+        container.innerHTML = '';
+
+        this.players.forEach(player => {
+            const score = this.scores[player.id] || 0;
+            const playerDiv = document.createElement('div');
+            playerDiv.className = 'flex justify-between items-center p-2 bg-gray-50 rounded';
+
+            playerDiv.innerHTML = `
+                <span class="text-sm font-medium text-gray-700">${player.name}</span>
+                <span id="player-score-${player.id}" class="text-lg font-bold text-blue-600 transition-all duration-300">
+                    ${score} pts
+                </span>
+            `;
+
+            container.appendChild(playerDiv);
+        });
+    }
+
+    /**
+     * Override: Actualizar score de jugador y refrescar UI.
+     */
+    handlePlayerScoreUpdated(event) {
+        // Llamar al handler base primero
+        super.handlePlayerScoreUpdated(event);
+
+        // Actualizar el texto del score (BaseGameClient ya agregó la animación)
+        const scoreElement = document.getElementById(`player-score-${event.player_id}`);
+        if (scoreElement) {
+            scoreElement.textContent = `${event.new_score} pts`;
+        }
     }
 }
 

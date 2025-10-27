@@ -1056,11 +1056,21 @@ class RoomController extends Controller
 
         $match = $room->match;
 
+        // Cargar jugadores con sus datos
+        $players = $match->players->map(function ($player) {
+            return [
+                'id' => $player->id,
+                'name' => $player->name,
+                'user_id' => $player->user_id,
+            ];
+        });
+
         return response()->json([
             'success' => true,
             'room_code' => $code,
             'status' => $room->status,
             'game_state' => $match->game_state,
+            'players' => $players,
         ]);
     }
 

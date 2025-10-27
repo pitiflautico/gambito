@@ -19,6 +19,7 @@ export class BaseGameClient {
         // Configuración básica
         this.roomCode = config.roomCode;
         this.playerId = config.playerId;
+        this.userId = config.userId; // Necesario para canales privados
         this.matchId = config.matchId;
         this.gameSlug = config.gameSlug;
 
@@ -64,6 +65,7 @@ export class BaseGameClient {
             handleGameFinished: (event) => this.handleGameFinished(event),
             handlePlayerDisconnected: (event) => this.handlePlayerDisconnected(event),
             handlePlayerReconnected: (event) => this.handlePlayerReconnected(event),
+            handlePlayerScoreUpdated: (event) => this.handlePlayerScoreUpdated(event),
         };
 
         // Combinar handlers por defecto con handlers custom del juego
@@ -258,6 +260,38 @@ export class BaseGameClient {
         // handleRoundStarted() será llamado cuando llegue RoundStartedEvent
 
         // Los juegos específicos pueden sobrescribir este método para lógica custom
+    }
+
+    /**
+     * Handler genérico: Score de jugador actualizado
+     *
+     * Se ejecuta cuando un jugador gana o pierde puntos.
+     * Actualiza automáticamente this.scores y la UI si existe.
+     */
+    handlePlayerScoreUpdated(event) {
+        console.log('[BaseGameClient] Player score updated:', event);
+
+        const { player_id, new_score, points_earned } = event;
+
+        // Actualizar scores en memoria
+        this.scores[player_id] = new_score;
+
+        // Actualizar UI si existe un elemento con id player-score-{playerId}
+        const scoreElement = document.getElementById(`player-score-${player_id}`);
+        if (scoreElement) {
+            scoreElement.textContent = new_score;
+
+            // Agregar animación si ganó puntos
+            if (points_earned > 0) {
+                scoreElement.classList.add('score-increase');
+                setTimeout(() => {
+                    scoreElement.classList.remove('score-increase');
+                }, 500);
+            }
+        }
+
+        // Los juegos específicos pueden sobrescribir este método para lógica custom
+        // (ej: mostrar notificación, actualizar ranking, etc.)
     }
 
     // ========================================================================

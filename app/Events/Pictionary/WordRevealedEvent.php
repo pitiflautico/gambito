@@ -22,6 +22,7 @@ class WordRevealedEvent implements ShouldBroadcast
 
     public string $roomCode;
     public int $drawerId;
+    public int $drawerUserId; // ID del usuario (no del player)
     public string $word;
     public string $difficulty;
     public int $roundNumber;
@@ -44,6 +45,7 @@ class WordRevealedEvent implements ShouldBroadcast
     ) {
         $this->roomCode = $match->room->code;
         $this->drawerId = $drawer->id;
+        $this->drawerUserId = $drawer->user_id; // IMPORTANTE: user_id, no player id
         $this->word = $word;
         $this->difficulty = $difficulty;
         $this->roundNumber = $roundNumber;
@@ -53,11 +55,12 @@ class WordRevealedEvent implements ShouldBroadcast
      * Get the channels the event should broadcast on.
      *
      * Usa un canal privado del usuario para que solo el drawer reciba la palabra.
+     * IMPORTANTE: Usa user_id, NO player_id
      */
     public function broadcastOn(): PrivateChannel
     {
-        // Canal privado del drawer: "private-user.{drawerId}"
-        return new PrivateChannel("user.{$this->drawerId}");
+        // Canal privado del drawer: "private-user.{user_id}"
+        return new PrivateChannel("user.{$this->drawerUserId}");
     }
 
     /**

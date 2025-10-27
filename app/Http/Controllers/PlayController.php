@@ -131,6 +131,7 @@ class PlayController extends Controller
                 'room' => $room,
                 'match' => $room->match,
                 'playerId' => $playerId,
+                'userId' => $player->user_id, // Necesario para canal privado de eventos
                 'role' => $role,
                 'eventConfig' => $eventConfig,
             ]);

@@ -498,9 +498,16 @@ abstract class BaseGameEngine implements GameEngineInterface
         // 5. Obtener timing metadata del config del juego (si existe)
         $timing = $this->getRoundStartTiming($match);
 
-        // 6. Emitir evento genérico RoundStartedEvent
+        // 6. Filtrar game_state para remover información sensible
+        $filteredGameState = $this->filterGameStateForBroadcast($match->game_state, $match);
+
+        // 7. Crear copia temporal del match con game_state filtrado para el evento
+        $matchForEvent = clone $match;
+        $matchForEvent->game_state = $filteredGameState;
+
+        // 8. Emitir evento genérico RoundStartedEvent
         event(new \App\Events\Game\RoundStartedEvent(
-            match: $match,
+            match: $matchForEvent,
             currentRound: $currentRound,
             totalRounds: $totalRounds,
             phase: $match->game_state['phase'] ?? 'playing',
@@ -580,6 +587,25 @@ abstract class BaseGameEngine implements GameEngineInterface
         }
 
         return $timing;
+    }
+
+    /**
+     * Filtrar game_state antes de enviarlo en eventos broadcast.
+     *
+     * Algunos juegos necesitan ocultar información sensible en el game_state
+     * antes de enviarlo a todos los jugadores (ej: palabras secretas, respuestas correctas).
+     * Los juegos pueden sobrescribir este método para remover información sensible.
+     *
+     * Por defecto, retorna el game_state sin cambios.
+     *
+     * @param array $gameState El game_state completo
+     * @param GameMatch $match El match actual
+     * @return array El game_state filtrado
+     */
+    protected function filterGameStateForBroadcast(array $gameState, GameMatch $match): array
+    {
+        // Por defecto, no filtrar nada
+        return $gameState;
     }
 
     // ========================================================================
@@ -1383,6 +1409,71 @@ abstract class BaseGameEngine implements GameEngineInterface
         );
         $match->save();
     }
+
+    // ========================================================================
+    // HELPERS: PlayerManager (Unified scores + state)
+    // ========================================================================
+
+    /**
+     * Obtener PlayerManager del game_state.
+     *
+     * PlayerManager unifica ScoreManager + PlayerStateManager en un solo gestor.
+     * Todos los juegos deberían migrar a usar PlayerManager en el futuro.
+     *
+     * @param GameMatch $match
+     * @param object|null $scoreCalculator ScoreCalculator del juego (opcional)
+     * @return \App\Services\Modules\PlayerSystem\PlayerManager
+     */
+    protected function getPlayerManager(GameMatch $match, ?object $scoreCalculator = null): \App\Services\Modules\PlayerSystem\PlayerManager
+    {
+        // Si ya existe en game_state, restaurar
+        if (isset($match->game_state['player_system'])) {
+            return \App\Services\Modules\PlayerSystem\PlayerManager::fromArray(
+                $match->game_state,
+                $scoreCalculator
+            );
+        }
+
+        // Si no existe, crear nuevo con los jugadores del match
+        $playerIds = $match->players->pluck('id')->toArray();
+
+        $playerManager = new \App\Services\Modules\PlayerSystem\PlayerManager(
+            $playerIds,
+            $scoreCalculator,
+            [
+                'available_roles' => $match->game_state['_config']['modules']['roles_system']['roles'] ?? [],
+                'allow_multiple_persistent_roles' => false,
+                'track_score_history' => false,
+            ]
+        );
+
+        // Guardar estado inicial
+        $this->savePlayerManager($match, $playerManager);
+
+        Log::info("[{$this->getGameSlug()}] PlayerManager initialized", [
+            'match_id' => $match->id,
+            'player_count' => count($playerIds)
+        ]);
+
+        return $playerManager;
+    }
+
+    /**
+     * Guardar PlayerManager de vuelta al game_state.
+     *
+     * @param GameMatch $match
+     * @param \App\Services\Modules\PlayerSystem\PlayerManager $playerManager
+     * @return void
+     */
+    protected function savePlayerManager(GameMatch $match, \App\Services\Modules\PlayerSystem\PlayerManager $playerManager): void
+    {
+        $match->game_state = array_merge(
+            $match->game_state,
+            $playerManager->toArray()
+        );
+        $match->save();
+    }
+
     // ========================================================================
     // HELPERS: TimerService
     // ========================================================================

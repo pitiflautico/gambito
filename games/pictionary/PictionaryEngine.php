@@ -16,6 +16,21 @@ use Illuminate\Support\Facades\Log;
 class PictionaryEngine extends BaseGameEngine
 {
     /**
+     * Score calculator instance (reutilizado para evitar instanciación repetida)
+     */
+    protected PictionaryScoreCalculator $scoreCalculator;
+
+    public function __construct()
+    {
+        // Cargar configuración del juego
+        $gameConfig = $this->getGameConfig();
+        $scoringConfig = $gameConfig['scoring'] ?? [];
+
+        // Inicializar calculator con la configuración
+        $this->scoreCalculator = new PictionaryScoreCalculator($scoringConfig);
+    }
+
+    /**
      * Inicializar el juego - FASE 1 (LOBBY)
      *
      * Carga el banco de palabras y configura la rotación de drawers.
@@ -79,7 +94,7 @@ class PictionaryEngine extends BaseGameEngine
         // Inicializar módulos automáticamente desde config.json
         $this->initializeModules($match, [
             'scoring_system' => [
-                'calculator' => new PictionaryScoreCalculator($gameConfig['scoring'] ?? [])
+                'calculator' => $this->scoreCalculator
             ],
             'round_system' => [
                 'total_rounds' => count($selectedWords)
@@ -258,9 +273,6 @@ class PictionaryEngine extends BaseGameEngine
             ]);
 
             // Calcular puntos con speed bonus
-            $gameConfig = $this->getGameConfig();
-            $calculator = new PictionaryScoreCalculator($gameConfig['scoring'] ?? []);
-
             $context = [
                 'difficulty' => $currentWord['difficulty'] ?? 'medium',
             ];
@@ -369,12 +381,20 @@ class PictionaryEngine extends BaseGameEngine
             'player_id' => $player->id,
         ]);
 
-        $playerState = $this->getPlayerStateManager($match);
+        $playerManager = $this->getPlayerManager($match, $this->scoreCalculator);
 
         // 1. Verificar que el jugador sea guesser
-        $guessers = $playerState->getPlayersWithRoundRole('guesser');
-        $drawers = $playerState->getPlayersWithRoundRole('drawer');
-        $allRoundRoles = $playerState->toArray()['player_state_system']['round_roles'] ?? [];
+        $guessers = $playerManager->getPlayersWithRoundRole('guesser');
+        $drawers = $playerManager->getPlayersWithRoundRole('drawer');
+
+        // Extraer round roles
+        $playerData = $playerManager->toArray()['player_system']['players'] ?? [];
+        $allRoundRoles = [];
+        foreach ($playerData as $playerId => $data) {
+            if (isset($data['round_role'])) {
+                $allRoundRoles[$playerId] = $data['round_role'];
+            }
+        }
 
         Log::info("[Pictionary] Role validation for claim", [
             'player_id' => $player->id,
@@ -392,7 +412,7 @@ class PictionaryEngine extends BaseGameEngine
         }
 
         // 2. Verificar que no esté bloqueado
-        if ($playerState->isPlayerLocked($player->id)) {
+        if ($playerManager->isPlayerLocked($player->id)) {
             return [
                 'success' => false,
                 'message' => 'Ya has sido validado en esta ronda',
@@ -400,12 +420,12 @@ class PictionaryEngine extends BaseGameEngine
         }
 
         // 3. Marcar al jugador como "claiming" (opcional, para tracking)
-        $playerState->setPlayerAction($player->id, [
+        $playerManager->setPlayerAction($player->id, [
             'type' => 'claim',
             'timestamp' => now()->toDateTimeString(),
         ]);
 
-        $this->savePlayerStateManager($match, $playerState);
+        $this->savePlayerManager($match, $playerManager);
 
         // 4. Emitir evento AnswerClaimedEvent
         event(new \App\Events\Pictionary\AnswerClaimedEvent($match, $player));
@@ -474,7 +494,9 @@ class PictionaryEngine extends BaseGameEngine
             ];
         }
 
-        $playerState = $this->getPlayerStateManager($match);
+        // Usar PlayerManager (unifica scores + state)
+        $playerManager = $this->getPlayerManager($match, $this->scoreCalculator);
+
         $forceEnd = false;
         $endReason = null;
         $points = 0;
@@ -486,8 +508,6 @@ class PictionaryEngine extends BaseGameEngine
                 'player_id' => $playerId,
             ]);
 
-            // Calcular puntos
-            $calculator = new \Games\Pictionary\PictionaryScoreCalculator();
             $currentWord = $match->game_state['current_word'] ?? [];
 
             $context = [
@@ -503,18 +523,16 @@ class PictionaryEngine extends BaseGameEngine
                 $context['time_limit'] = $timerData['duration'] ?? 60;
             }
 
-            // Sumar puntos al guesser
-            $guessPoints = $calculator->calculate('correct_guess', $context);
-            $this->awardPoints($match, $playerId, 'correct_guess', $context, $calculator);
+            // Sumar puntos al guesser (PlayerManager emite evento automáticamente)
+            $guessPoints = $playerManager->awardPoints($playerId, 'correct_guess', $context, $match);
 
             // Sumar puntos al drawer
-            $drawerPoints = $calculator->calculate('drawer_success', $context);
-            $this->awardPoints($match, $drawer->id, 'drawer_success', $context, $calculator);
+            $drawerPoints = $playerManager->awardPoints($drawer->id, 'drawer_success', $context, $match);
 
             $points = $guessPoints;
 
             // Registrar acción de guess correcto (para getAllPlayerResults)
-            $playerState->setPlayerAction($playerId, [
+            $playerManager->setPlayerAction($playerId, [
                 'type' => 'guess',
                 'is_correct' => true,
                 'guess' => $currentWord['word'] ?? 'unknown',
@@ -522,12 +540,12 @@ class PictionaryEngine extends BaseGameEngine
             ]);
 
             // Bloquear jugador
-            $lockResult = $playerState->lockPlayer($playerId, $match, $player, [
+            $lockResult = $playerManager->lockPlayer($playerId, $match, $player, [
                 'is_correct' => true,
                 'points' => $guessPoints,
             ]);
 
-            $this->savePlayerStateManager($match, $playerState);
+            $this->savePlayerManager($match, $playerManager);
 
             // Terminar ronda inmediatamente cuando alguien adivina correctamente
             $forceEnd = true;
@@ -545,8 +563,32 @@ class PictionaryEngine extends BaseGameEngine
                 'player_id' => $playerId,
             ]);
 
-            // No se suman puntos, el jugador puede volver a intentar
-            // (No se bloquea por respuesta incorrecta)
+            // Bloquear al jugador (solo tiene 1 intento)
+            $playerManager->lockPlayer($playerId, $match, $player, [
+                'is_correct' => false,
+                'reason' => 'incorrect_guess',
+            ]);
+
+            // Registrar acción de guess incorrecto
+            $playerManager->setPlayerAction($playerId, [
+                'type' => 'guess',
+                'is_correct' => false,
+                'timestamp' => now()->toDateTimeString(),
+            ]);
+
+            $this->savePlayerManager($match, $playerManager);
+
+            // Verificar si todos los guessers ya intentaron y ninguno acertó
+            if ($playerManager->haveAllRolePlayersFailedAttempt('guesser')) {
+                $forceEnd = true;
+                $endReason = 'all_guessers_failed';
+
+                $guessers = $playerManager->getPlayersWithRoundRole('guesser');
+                Log::info("[Pictionary] All guessers failed - ending round", [
+                    'match_id' => $match->id,
+                    'total_guessers' => count($guessers),
+                ]);
+            }
         }
 
         // 5. Emitir evento AnswerValidatedEvent
@@ -674,8 +716,8 @@ class PictionaryEngine extends BaseGameEngine
         Log::info("[Pictionary] Starting new round", ['match_id' => $match->id]);
 
         // 1. Desbloquear jugadores (reset ya NO borra roundRoles desde nuestro fix)
-        $playerState = $this->getPlayerStateManager($match);
-        $playerState->reset($match);
+        $playerManager = $this->getPlayerManager($match, $this->scoreCalculator);
+        $playerManager->reset($match);
 
         // 2. Rotar drawer
         $this->rotateDrawer($match);
@@ -693,9 +735,16 @@ class PictionaryEngine extends BaseGameEngine
         $this->assignRoles($match);
 
         // 6. Verificar que los roles se guardaron correctamente
-        $playerStateAfter = $this->getPlayerStateManager($match);
+        $playerManagerAfter = $this->getPlayerManager($match, $this->scoreCalculator);
+        $playerData = $playerManagerAfter->toArray()['player_system']['players'] ?? [];
+        $roundRoles = [];
+        foreach ($playerData as $playerId => $data) {
+            if (isset($data['round_role'])) {
+                $roundRoles[$playerId] = $data['round_role'];
+            }
+        }
         Log::info("[Pictionary] Roles verification after assignRoles", [
-            'round_roles' => $playerStateAfter->toArray()['player_state_system']['round_roles'] ?? []
+            'round_roles' => $roundRoles
         ]);
 
         Log::info("[Pictionary] New round started", [
@@ -758,8 +807,8 @@ class PictionaryEngine extends BaseGameEngine
      */
     protected function getAllPlayerResults(GameMatch $match): array
     {
-        $playerState = $this->getPlayerStateManager($match);
-        $allActions = $playerState->getAllActions();
+        $playerManager = $this->getPlayerManager($match, $this->scoreCalculator);
+        $allActions = $playerManager->getAllActions();
         $currentWord = $this->getCurrentWord($match);
         $currentDrawerId = $this->getCurrentDrawerId($match);
 
@@ -937,6 +986,23 @@ class PictionaryEngine extends BaseGameEngine
         return $match->game_state['current_word'] ?? null;
     }
 
+    /**
+     * Filtrar game_state para remover información sensible antes de broadcast.
+     *
+     * En Pictionary, la palabra actual (`current_word`) NO debe enviarse a todos los jugadores
+     * en eventos como RoundStartedEvent. Solo el drawer recibe la palabra vía WordRevealedEvent
+     * en su canal privado.
+     */
+    protected function filterGameStateForBroadcast(array $gameState, \App\Models\GameMatch $match): array
+    {
+        $filtered = $gameState;
+
+        // Remover la palabra actual para que no llegue a los guessers
+        unset($filtered['current_word']);
+
+        return $filtered;
+    }
+
     // ========================================================================
     // GESTIÓN DE DRAWERS
     // ========================================================================
@@ -986,7 +1052,7 @@ class PictionaryEngine extends BaseGameEngine
      */
     private function assignRoles(GameMatch $match): void
     {
-        $playerState = $this->getPlayerStateManager($match);
+        $playerManager = $this->getPlayerManager($match, $this->scoreCalculator);
         $roundManager = $this->getRoundManager($match);
         $currentRound = $roundManager->getCurrentRound();
 
@@ -1007,21 +1073,21 @@ class PictionaryEngine extends BaseGameEngine
 
         // Limpiar roles anteriores
         foreach ($drawerRotation as $playerId) {
-            $playerState->removeRoundRole($playerId);
+            $playerManager->removeRoundRole($playerId);
         }
 
         // Asignar drawer actual
-        $playerState->assignRoundRole($currentDrawerId, 'drawer');
+        $playerManager->assignRoundRole($currentDrawerId, 'drawer');
 
         // Asignar guessers (todos los demás)
         foreach ($drawerRotation as $playerId) {
             if ($playerId !== $currentDrawerId) {
-                $playerState->assignRoundRole($playerId, 'guesser');
+                $playerManager->assignRoundRole($playerId, 'guesser');
             }
         }
 
-        // Guardar PlayerStateManager actualizado
-        $this->savePlayerStateManager($match, $playerState);
+        // Guardar PlayerManager actualizado
+        $this->savePlayerManager($match, $playerManager);
 
         Log::info("[Pictionary] Roles assigned", [
             'round' => $currentRound,
@@ -1188,11 +1254,9 @@ class PictionaryEngine extends BaseGameEngine
     {
         Log::info("[Pictionary] Calculating final scores", ['match_id' => $match->id]);
 
-        $gameConfig = $this->getGameConfig();
-        $calculator = new PictionaryScoreCalculator($gameConfig['scoring'] ?? []);
-        $scoreManager = $this->getScoreManager($match, $calculator);
+        $playerManager = $this->getPlayerManager($match, $this->scoreCalculator);
 
-        return $scoreManager->getScores();
+        return $playerManager->getScores();
     }
 
     /**

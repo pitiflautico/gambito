@@ -14,8 +14,13 @@ use Illuminate\Support\Facades\Broadcast;
 |
 */
 
-// Canal de usuario (autenticado)
+// Canal de usuario (autenticado) - Formato Laravel estándar
 Broadcast::channel('App.Models.User.{id}', function ($user, $id) {
+    return (int) $user->id === (int) $id;
+});
+
+// Canal privado de usuario - Para eventos específicos del juego (WordRevealedEvent, etc.)
+Broadcast::channel('user.{id}', function ($user, $id) {
     return (int) $user->id === (int) $id;
 });
 

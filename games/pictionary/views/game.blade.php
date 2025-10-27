@@ -118,6 +118,14 @@
 
                             <!-- Sidebar (1/3) -->
                             <div class="lg:col-span-1">
+                                <!-- Players & Scores -->
+                                <div class="mb-6 p-4 bg-white rounded-lg border-2 border-gray-200">
+                                    <h3 class="text-lg font-bold text-gray-900 mb-3">Jugadores</h3>
+                                    <div id="players-scores-list" class="space-y-2">
+                                        <!-- Players with scores will be inserted here -->
+                                    </div>
+                                </div>
+
                                 <!-- Validation Panel (only for drawer) -->
                                 <div id="validation-panel" class="hidden mb-6">
                                     <div class="p-4 bg-purple-50 rounded-lg border-2 border-purple-300">
@@ -243,6 +251,7 @@
             roomCode: '{{ $code }}',
             matchId: {{ $match->id }},
             playerId: {{ $playerId }},
+            userId: {{ $userId }}, // Necesario para canal privado
             gameSlug: 'pictionary',
             players: [],  // Se cargará dinámicamente
             scores: {},
@@ -271,21 +280,42 @@
                     pictionaryClient.players = data.players || [];
                     pictionaryClient.gameState = gameState;
 
+                    // Cargar scores desde player_system
+                    const playerSystem = gameState.player_system?.players || {};
+                    pictionaryClient.scores = {};
+                    Object.keys(playerSystem).forEach(playerId => {
+                        pictionaryClient.scores[playerId] = playerSystem[playerId].score || 0;
+                    });
+                    console.log('[Pictionary] Initial scores loaded:', pictionaryClient.scores);
+
+                    // Renderizar lista de jugadores con scores actualizados
+                    pictionaryClient.renderPlayersList();
+
                     // Si el juego ya empezó, simular evento de ronda iniciada
                     if (gameState?.phase === 'playing') {
                         const eventData = {
-                            round_number: gameState.round_system?.current_round || 1,
+                            current_round: gameState.round_system?.current_round || 1,
                             total_rounds: gameState.round_system?.total_rounds || 10,
                             drawer_id: gameState.drawer_rotation?.[gameState.current_drawer_index || 0],
                             word: null, // Solo el drawer lo verá
                             game_state: gameState
                         };
 
-                        // Si soy el drawer, agregar la palabra
+                        // Si soy el drawer, obtener la palabra actual
                         const currentDrawerId = gameState.drawer_rotation?.[gameState.current_drawer_index || 0];
                         if (currentDrawerId === config.playerId) {
-                            const currentWord = gameState.words?.[gameState.round_system?.current_round - 1];
-                            eventData.word = currentWord?.word;
+                            // La palabra actual está en current_word (si no fue filtrada)
+                            const currentWord = gameState.current_word;
+                            if (currentWord) {
+                                // Simular evento WordRevealedEvent para mostrar la palabra
+                                const wordEvent = {
+                                    word: currentWord.word,
+                                    difficulty: currentWord.difficulty || 'medium',
+                                    round_number: gameState.round_system?.current_round || 1
+                                };
+                                pictionaryClient.handleWordRevealed(wordEvent);
+                                console.log('[Pictionary] Word restored from state on reconnect:', currentWord.word);
+                            }
                         }
 
                         // Agregar timing metadata si hay un timer activo

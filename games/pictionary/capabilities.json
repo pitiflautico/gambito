@@ -25,6 +25,16 @@
   "event_config": {
     "channel": "room.{roomCode}",
     "events": {
+      "RoundStartedEvent": {
+        "name": "game.round.started",
+        "description": "Sistema: Nueva ronda iniciada",
+        "handler": "handleRoundStarted"
+      },
+      "RoundEndedEvent": {
+        "name": "game.round.ended",
+        "description": "Sistema: Ronda finalizada",
+        "handler": "handleRoundEnded"
+      },
       "DrawStrokeEvent": {
         "name": "pictionary.draw-stroke",
         "description": "Broadcast canvas stroke to all players",
@@ -59,6 +69,11 @@
         "name": "game.players.unlocked",
         "description": "Broadcast when all players are unlocked (new round)",
         "handler": "handlePlayersUnlocked"
+      },
+      "PlayerScoreUpdatedEvent": {
+        "name": "player.score.updated",
+        "description": "Broadcast when a player's score changes",
+        "handler": "handlePlayerScoreUpdated"
       }
     }
   }
