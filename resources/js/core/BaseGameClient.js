@@ -217,6 +217,12 @@ export class BaseGameClient {
      * Se ejecuta cuando el juego finaliza
      */
     handleGameFinished(event) {
+        // Detener PresenceMonitor (ya no necesitamos monitorear desconexiones)
+        if (this.presenceMonitor) {
+            this.presenceMonitor.stop();
+            console.log('[BaseGameClient] Game finished - PresenceMonitor stopped');
+        }
+
         // Los juegos específicos sobrescriben este método para mostrar pantalla de resultados finales
     }
 

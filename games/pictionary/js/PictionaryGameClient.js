@@ -843,6 +843,9 @@ export class PictionaryGameClient extends BaseGameClient {
     handleGameFinished(event) {
         console.log('[Pictionary] Game finished:', event);
 
+        // IMPORTANTE: Llamar al base primero (detiene PresenceMonitor)
+        super.handleGameFinished(event);
+
         const { winner, ranking, scores } = event;
 
         // Ocultar estado de juego
@@ -855,8 +858,9 @@ export class PictionaryGameClient extends BaseGameClient {
         // Mostrar pantalla de resultados
         this.showElement('finished-state');
 
-        // El componente <x-game.results-screen> se encargará de renderizar el podio
-        // usando los datos que ya tiene en this.players y this.scores
+        // Renderizar podio de resultados finales
+        this.renderPodium(ranking, scores, 'podium');
+
         console.log('[Pictionary] Final ranking:', ranking);
         console.log('[Pictionary] Winner:', winner);
     }

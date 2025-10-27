@@ -383,6 +383,7 @@ Al crear un nuevo juego, asegúrate de implementar:
 - [ ] **handleRoundStarted()**: Llamar a `super.handleRoundStarted()` + lógica específica
 - [ ] **handleRoundEnded()**: Llamar a `super.handleRoundEnded()` + mostrar resultados
 - [ ] **handlePlayersUnlocked()**: Resetear locks y UI
+- [ ] **handleGameFinished()**: Llamar a `super.handleGameFinished()` + `renderPodium()`
 - [ ] **getTimerElement()**: Retornar elemento HTML donde mostrar timer
 - [ ] **getCountdownElement()**: Retornar elemento para countdown entre rondas
 - [ ] **Restauración de estado 'playing'**: Lógica en game.blade.php para reconexión durante partida
