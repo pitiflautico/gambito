@@ -291,7 +291,7 @@
                     // Renderizar lista de jugadores con scores actualizados
                     pictionaryClient.renderPlayersList();
 
-                    // Si el juego ya empezó, simular evento de ronda iniciada
+                    // Si el juego ya empezó, restaurar estado según la fase
                     if (gameState?.phase === 'playing') {
                         const eventData = {
                             current_round: gameState.round_system?.current_round || 1,
@@ -347,6 +347,20 @@
                         canvasData.forEach(stroke => {
                             pictionaryClient.renderStroke(stroke);
                         });
+                    } else if (gameState?.phase === 'finished') {
+                        // Juego terminado - Restaurar pantalla de resultados finales
+                        console.log('[Pictionary] Restoring finished state on reconnect');
+
+                        // Simular evento GameFinishedEvent
+                        const finishedEvent = {
+                            winner: gameState.winner || null,
+                            ranking: gameState.ranking || [],
+                            scores: pictionaryClient.scores,
+                            game_state: gameState
+                        };
+
+                        pictionaryClient.handleGameFinished(finishedEvent);
+                        console.log('[Pictionary] Finished state restored');
                     }
                 } else {
                     console.warn('⚠️ [Pictionary] Could not load initial state');

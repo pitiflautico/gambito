@@ -349,6 +349,18 @@ if (game_state?.phase === 'playing') {
         gameClient.renderStroke(stroke);
     });
 }
+
+// 4. Si el juego está finished, simular evento de juego terminado
+if (game_state?.phase === 'finished') {
+    const finishedEvent = {
+        winner: game_state.winner,
+        ranking: game_state.ranking,
+        scores: gameClient.scores,
+        game_state: game_state
+    };
+
+    gameClient.handleGameFinished(finishedEvent);
+}
 ```
 
 ---
@@ -373,7 +385,8 @@ Al crear un nuevo juego, asegúrate de implementar:
 - [ ] **handlePlayersUnlocked()**: Resetear locks y UI
 - [ ] **getTimerElement()**: Retornar elemento HTML donde mostrar timer
 - [ ] **getCountdownElement()**: Retornar elemento para countdown entre rondas
-- [ ] **Restauración de estado**: Lógica en game.blade.php para reconexión
+- [ ] **Restauración de estado 'playing'**: Lógica en game.blade.php para reconexión durante partida
+- [ ] **Restauración de estado 'finished'**: Lógica en game.blade.php para reconexión tras finalizar
 - [ ] **Registrar eventos**: Agregar todos los handlers en capabilities.json
 
 ---
