@@ -719,6 +719,9 @@ class PictionaryEngine extends BaseGameEngine
         $playerManager = $this->getPlayerManager($match, $this->scoreCalculator);
         $playerManager->reset($match);
 
+        // IMPORTANTE: Guardar el reset antes de continuar
+        $this->savePlayerManager($match, $playerManager);
+
         // 2. Rotar drawer
         $this->rotateDrawer($match);
 

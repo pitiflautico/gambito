@@ -56,6 +56,10 @@ protected function startNewRound(GameMatch $match): void
     $playerManager = $this->getPlayerManager($match);
     $playerManager->reset($match); // Emite PlayersUnlockedEvent automáticamente
 
+    // ⚠️ CRÍTICO: Guardar el estado INMEDIATAMENTE después del reset
+    // Si no se guarda, las llamadas posteriores cargarán el estado viejo
+    $this->savePlayerManager($match, $playerManager);
+
     // 2. Lógica específica del juego
     $this->rotateDrawer($match);
     $word = $this->loadNextWord($match);
@@ -356,6 +360,7 @@ Al crear un nuevo juego, asegúrate de implementar:
 ### Backend (Engine)
 
 - [ ] **startNewRound()**: Lógica de inicio de ronda específica
+- [ ] **⚠️ CRÍTICO: savePlayerManager()**: Guardar INMEDIATAMENTE después de reset()
 - [ ] **endCurrentRound()**: Obtener resultados y llamar completeRound()
 - [ ] **filterGameStateForBroadcast()**: Filtrar información sensible (si aplica)
 - [ ] **Emitir eventos privados**: Si hay información que solo ciertos jugadores deben ver
@@ -407,6 +412,7 @@ Al crear un nuevo juego, asegúrate de implementar:
 ### "Los bloqueos no se resetean"
 ✅ Implementar `handlePlayersUnlocked()` en tu GameClient
 ✅ Llamar a `playerManager->reset($match)` en startNewRound()
+✅ **CRÍTICO**: Llamar a `$this->savePlayerManager($match, $playerManager)` INMEDIATAMENTE después del reset
 
 ### "La información privada desaparece al refrescar"
 ✅ Restaurar información desde `game_state` en game.blade.php
