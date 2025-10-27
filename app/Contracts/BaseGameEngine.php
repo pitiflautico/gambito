@@ -1383,7 +1383,6 @@ abstract class BaseGameEngine implements GameEngineInterface
         );
         $match->save();
     }
-
     // ========================================================================
     // HELPERS: TimerService
     // ========================================================================
@@ -1393,9 +1392,17 @@ abstract class BaseGameEngine implements GameEngineInterface
      *
      * @param GameMatch $match
      * @return TimerService
+     * @throws \RuntimeException Si el timer_system no está configurado
      */
     protected function getTimerService(GameMatch $match): TimerService
     {
+        if (!isset($match->game_state['timer_system'])) {
+            throw new \RuntimeException(
+                "Timer system not configured for this game. " .
+                "Enable 'timer_system' in game capabilities or check module requirements."
+            );
+        }
+
         return TimerService::fromArray($match->game_state);
     }
 

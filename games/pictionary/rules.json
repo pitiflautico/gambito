@@ -1,0 +1,53 @@
+{
+  "title": "Reglas de Pictionary",
+  "version": "1.0",
+  "rules": [
+    {
+      "title": "Objetivo del juego",
+      "description": "Adivinar la palabra que el dibujante está intentando representar antes de que expire el tiempo."
+    },
+    {
+      "title": "Rol del dibujante",
+      "description": "Un jugador es seleccionado como dibujante en cada ronda. Su objetivo es dibujar la palabra asignada sin usar letras, números o símbolos."
+    },
+    {
+      "title": "Rol de los adivinadores",
+      "description": "Los demás jugadores intentan adivinar la palabra escribiendo sus respuestas. El primero en adivinar gana más puntos."
+    },
+    {
+      "title": "Tiempo límite",
+      "description": "Cada ronda tiene 30 segundos (configurable). Si nadie adivina antes de que expire el tiempo, se pasa a la siguiente ronda sin puntos."
+    },
+    {
+      "title": "Puntuación - Adivinadores",
+      "description": "10 puntos base por adivinar correctamente + hasta 5 puntos de bonus por velocidad (más rápido = más puntos)."
+    },
+    {
+      "title": "Puntuación - Dibujante",
+      "description": "El dibujante gana 5 puntos cada vez que alguien adivina su dibujo correctamente."
+    },
+    {
+      "title": "Rotación de roles",
+      "description": "Al final de cada ronda, el siguiente jugador se convierte en dibujante. Todos los jugadores tendrán la oportunidad de dibujar."
+    },
+    {
+      "title": "Modo equipos",
+      "description": "En modo equipos, los puntos se acumulan por equipo. Puedes configurar si solo el equipo contrario puede adivinar o si todos pueden."
+    },
+    {
+      "title": "Restricciones de dibujo",
+      "description": "El dibujante NO puede usar letras, números, símbolos o gestos para comunicarse. Solo puede dibujar."
+    },
+    {
+      "title": "Ganador",
+      "description": "Al final de todas las rondas, el jugador (o equipo) con más puntos gana la partida."
+    }
+  ],
+  "tips": [
+    "Dibuja rápido pero claro - la velocidad suma puntos",
+    "Si juegas en equipo, coordina estrategias antes de empezar",
+    "No te rindas si fallas - todos tendrán turnos para dibujar",
+    "Las palabras difíciles valen la pena - usa el contexto",
+    "Practica con el canvas antes de que empiece el juego"
+  ]
+}

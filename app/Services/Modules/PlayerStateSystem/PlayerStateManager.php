@@ -811,7 +811,6 @@ class PlayerStateManager
      * Resetear estado temporal (al iniciar nueva ronda).
      *
      * Limpia:
-     * - Roles de ronda
      * - Bloqueos
      * - Acciones
      * - Estados
@@ -819,6 +818,7 @@ class PlayerStateManager
      *
      * NO limpia:
      * - Roles persistentes (se mantienen todo el juego)
+     * - Roles de ronda (se actualizan explícitamente por el juego)
      *
      * @param \App\Models\GameMatch|null $match Para emitir evento de desbloqueo (opcional)
      * @param array $additionalData Datos adicionales para el evento
@@ -830,13 +830,14 @@ class PlayerStateManager
     ): void
     {
         $hadLockedPlayers = !empty($this->locks);
-        
-        $this->roundRoles = [];
+
+        // NO limpiar roundRoles - se actualizan explícitamente por assignRoles()
+        // Esto evita race condition donde PlayersUnlockedEvent se emite antes de que roles sean asignados
         $this->locks = [];
         $this->actions = [];
         $this->states = [];
         $this->attempts = [];
-        
+
         // Emitir evento de desbloqueo si había jugadores bloqueados
         if ($hadLockedPlayers && $match) {
             event(new \App\Events\Game\PlayersUnlockedEvent(

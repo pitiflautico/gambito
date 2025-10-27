@@ -1,0 +1,65 @@
+{
+  "slug": "pictionary",
+  "version": "1.0",
+  "requires": {
+    "websockets": true,
+    "turns": true,
+    "phases": true,
+    "roles": true,
+    "timers": true,
+    "scoring": true
+  },
+  "provides": {
+    "events": [
+      "DrawStrokeEvent",
+      "WordRevealedEvent",
+      "CanvasClearedEvent",
+      "AnswerClaimedEvent",
+      "AnswerValidatedEvent"
+    ],
+    "routes": [],
+    "views": [
+      "games/pictionary/game"
+    ]
+  },
+  "event_config": {
+    "channel": "room.{roomCode}",
+    "events": {
+      "DrawStrokeEvent": {
+        "name": "pictionary.draw-stroke",
+        "description": "Broadcast canvas stroke to all players",
+        "handler": "handleDrawStroke"
+      },
+      "WordRevealedEvent": {
+        "name": "pictionary.word-revealed",
+        "description": "Reveal word to drawer only (private)",
+        "handler": "handleWordRevealed"
+      },
+      "CorrectGuessEvent": {
+        "name": "pictionary.correct-guess",
+        "description": "Broadcast when player guesses correctly",
+        "handler": "handleCorrectGuess"
+      },
+      "CanvasClearedEvent": {
+        "name": "pictionary.canvas-cleared",
+        "description": "Broadcast when drawer clears canvas",
+        "handler": "handleCanvasCleared"
+      },
+      "AnswerClaimedEvent": {
+        "name": "pictionary.answer-claimed",
+        "description": "Broadcast when guesser claims they know the answer",
+        "handler": "handleAnswerClaimed"
+      },
+      "AnswerValidatedEvent": {
+        "name": "pictionary.answer-validated",
+        "description": "Broadcast when drawer validates a claim",
+        "handler": "handleAnswerValidated"
+      },
+      "PlayersUnlockedEvent": {
+        "name": "game.players.unlocked",
+        "description": "Broadcast when all players are unlocked (new round)",
+        "handler": "handlePlayersUnlocked"
+      }
+    }
+  }
+}

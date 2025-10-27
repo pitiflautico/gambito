@@ -1,0 +1,113 @@
+{
+  "id": "pictionary",
+  "name": "Pictionary",
+  "slug": "pictionary",
+  "description": "Juego clásico de dibujo y adivinanzas donde un jugador dibuja mientras los demás intentan adivinar",
+  "version": "1.0.0",
+  "minPlayers": 2,
+  "maxPlayers": 10,
+  "estimatedDuration": "15-20 minutos",
+  "type": "drawing",
+  "isPremium": false,
+  "tags": ["drawing", "guessing", "creative", "social"],
+  "supports_teams": true,
+
+  "modules": {
+    "guest_system": {
+      "enabled": true
+    },
+    "turn_system": {
+      "enabled": true,
+      "mode": "sequential"
+    },
+    "round_system": {
+      "enabled": true
+    },
+    "scoring_system": {
+      "enabled": true
+    },
+    "timer_system": {
+      "enabled": true,
+      "round_duration": 30
+    },
+    "teams_system": {
+      "enabled": true,
+      "min_teams": 2,
+      "max_teams": 4,
+      "allow_self_selection": true,
+      "allow_toggle": true
+    },
+    "player_state_system": {
+      "enabled": true,
+      "uses_locks": true
+    },
+    "roles_system": {
+      "enabled": true,
+      "roles": ["drawer", "guesser", "viewer"]
+    }
+  },
+
+  "timing": {
+    "round_start": {
+      "duration": 30,
+      "countdown_visible": true,
+      "warning_threshold": 5
+    },
+    "round_ended": {
+      "auto_next": true,
+      "delay": 5,
+      "message": "Siguiente ronda"
+    }
+  },
+
+  "customizableSettings": {
+    "rounds": {
+      "type": "number",
+      "default": 10,
+      "min": 3,
+      "max": 30,
+      "step": 1,
+      "label": "Número de rondas",
+      "description": "Cantidad de palabras que se dibujarán en total"
+    },
+    "round_duration": {
+      "type": "number",
+      "default": 30,
+      "min": 15,
+      "max": 120,
+      "step": 5,
+      "label": "Segundos por turno",
+      "description": "Tiempo que tiene cada jugador para dibujar"
+    },
+    "difficulty": {
+      "type": "radio",
+      "default": "medium",
+      "options": [
+        {"value": "easy", "label": "Fácil", "description": "Palabras simples (casa, perro, sol)"},
+        {"value": "medium", "label": "Medio", "description": "Palabras moderadas (elefante, guitarra)"},
+        {"value": "hard", "label": "Difícil", "description": "Conceptos abstractos (nostalgia, democracia)"},
+        {"value": "mixed", "label": "Mezclado", "description": "Combina todas las dificultades"}
+      ],
+      "label": "Dificultad de palabras"
+    }
+  },
+
+  "scoring": {
+    "correct_guess_base": 10,
+    "drawer_success": 5,
+    "speed_bonus_max": 5,
+    "speed_thresholds": {
+      "fast": 10,
+      "medium": 20,
+      "slow": 30
+    }
+  },
+
+  "canvas": {
+    "width": 800,
+    "height": 600,
+    "colors": ["#000000", "#FF0000", "#00FF00", "#0000FF", "#FFFF00", "#FF00FF", "#00FFFF", "#FFFFFF"],
+    "brush_sizes": [2, 4, 8, 12],
+    "tools": ["pencil", "eraser", "clear"]
+  }
+}
