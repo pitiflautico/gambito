@@ -166,29 +166,34 @@ class MentirosoEngine extends BaseGameEngine
     }
 
     /**
-     * Iniciar nueva ronda - Asignar orador, cargar frase, iniciar preparación
+     * Hook OPCIONAL: Preparar datos específicos para la nueva ronda.
+     *
+     * BaseGameEngine ya ejecutó:
+     * - PlayerManager::reset() (desbloquea jugadores, emite PlayersUnlockedEvent)
+     * - RoundManager::advanceToNextRound() (incrementa contador)
+     *
+     * Aquí SOLO ejecutamos lógica específica de Mentiroso:
+     * - Rotar orador
+     * - Cargar siguiente frase
+     * - Asignar roles (orador/votantes)
+     * - Iniciar PhaseManager (sistema de fases múltiples)
+     * - Emitir StatementRevealedEvent (solo al orador)
+     * - Iniciar timer de primera fase
      */
-    protected function startNewRound(GameMatch $match): void
+    protected function onRoundStarting(GameMatch $match): void
     {
-        Log::info("[Mentiroso] Starting new round", ['match_id' => $match->id]);
+        Log::info("[Mentiroso] Preparing round data", ['match_id' => $match->id]);
 
-        // 1. Resetear locks y acciones (emite PlayersUnlockedEvent automáticamente)
-        $playerManager = $this->getPlayerManager($match, $this->scoreCalculator);
-        $playerManager->reset($match);
-
-        // IMPORTANTE: Guardar el reset antes de continuar
-        $this->savePlayerManager($match, $playerManager);
-
-        // 2. Rotar orador
+        // 1. Rotar orador
         $this->rotateOrador($match);
 
-        // 3. Cargar siguiente frase
+        // 2. Cargar siguiente frase
         $statement = $this->loadNextStatement($match);
 
-        // 4. Asignar roles (orador/votantes)
+        // 3. Asignar roles (orador/votantes)
         $this->assignRoles($match);
 
-        // 5. Iniciar PhaseManager y fase de preparación
+        // 4. Iniciar PhaseManager y fase de preparación
         $phaseManager = $this->createPhaseManager($match);
         $this->savePhaseManager($match, $phaseManager);
 
@@ -369,7 +374,7 @@ class MentirosoEngine extends BaseGameEngine
                 // Dejar que endCurrentRound() lo maneje con su propio lock
                 return [
                     'success' => true,
-                    'should_end_turn' => true,
+                    'force_end' => true,  // BaseGameEngine espera este flag
                     'end_reason' => 'all_players_voted',
                 ];
             }
@@ -382,10 +387,22 @@ class MentirosoEngine extends BaseGameEngine
     }
 
     /**
-     * Finalizar ronda actual - Calcular puntos
+     * Override: Finalizar ronda actual con lógica específica de Mentiroso.
      *
-     * Protegido con Cache::lock() para prevenir ejecuciones concurrentes
-     * cuando múltiples jugadores notifican timer expired simultáneamente
+     * Mentiroso NECESITA sobrescribir este método porque:
+     * 1. Requiere lock de concurrencia (múltiples notificaciones de timer simultáneas)
+     * 2. Usa flag `_completing_round` para prevenir ejecuciones duplicadas
+     * 3. Necesita refresh del match para obtener votos más recientes de BD
+     *
+     * NOTA: PhaseManager ahora se autogestion mediante listener
+     * (CancelPhaseManagerTimersOnRoundEnd) que escucha RoundEndedEvent
+     * y cancela sus timers automáticamente.
+     *
+     * Finalmente llama a completeRound() heredado que maneja el flujo estándar:
+     * - Llamar getRoundResults() para obtener datos específicos del juego
+     * - Emitir RoundEndedEvent (que triggerea el listener de PhaseManager)
+     * - Verificar si hay más rondas
+     * - Llamar handleNewRound() o finalize()
      */
     public function endCurrentRound(GameMatch $match): void
     {
@@ -410,23 +427,12 @@ class MentirosoEngine extends BaseGameEngine
 
             Log::info("[Mentiroso] Ending current round", ['match_id' => $match->id]);
 
-            // IMPORTANTE: PhaseManager cancela sus propios timers cuando la ronda termina
-            $phaseManager = $this->getPhaseManager($match);
-            if ($phaseManager) {
-                $phaseManager->cancelAllTimers();
-                $this->savePhaseManager($match, $phaseManager);
-
-                Log::info("[Mentiroso] PhaseManager notified of round end", [
-                    'match_id' => $match->id
-                ]);
-            }
-
             // CRÍTICO: Refrescar match para obtener los votos más recientes
             // Los votos se guardaron en processVote() pero necesitamos la última versión
             $match->refresh();
 
             // Obtener resultados de todos los jugadores
-            $results = $this->getAllPlayerResults($match);
+            $results = $this->getRoundResults($match);
 
             // Llamar a completeRound() que maneja el flow completo
             $this->completeRound($match, $results);
@@ -439,9 +445,24 @@ class MentirosoEngine extends BaseGameEngine
     }
 
     /**
-     * Obtener resultados de todos los jugadores en la ronda actual
+     * Obtener resultados de la ronda actual (Método abstracto de BaseGameEngine).
+     *
+     * Formatea los datos específicos de Mentiroso:
+     * - Frase actual (text + veracidad)
+     * - ID del orador
+     * - Lista de votos (player_id, vote, is_correct)
+     * - Estadísticas de votos (correctos/incorrectos)
+     * - Si el orador engañó a la mayoría
+     *
+     * IMPORTANTE: Este método también calcula y otorga puntos:
+     * - Votantes: puntos por voto correcto/incorrecto
+     * - Orador: puntos por engañar a mayoría/todos
+     *
+     * BaseGameEngine usa este método para:
+     * - Emitir RoundEndedEvent con los resultados
+     * - Guardar historial de rondas
      */
-    protected function getAllPlayerResults(GameMatch $match): array
+    protected function getRoundResults(GameMatch $match): array
     {
         $playerManager = $this->getPlayerManager($match, $this->scoreCalculator);
         $allActions = $playerManager->getAllActions();
@@ -854,6 +875,70 @@ class MentirosoEngine extends BaseGameEngine
             'round' => $currentRound,
             'orador_id' => $currentOradorId,
             'votante_ids' => array_filter($oradorRotation, fn($id) => $id !== $currentOradorId),
+        ]);
+    }
+
+    // ========================================================================
+    // HOOKS DE DESCONEXIÓN/RECONEXIÓN
+    // ========================================================================
+
+    /**
+     * Hook: Ejecutado ANTES de pausar el juego por desconexión de jugador.
+     *
+     * Mentiroso necesita:
+     * - Cancelar timers de PhaseManager (ahora lo hace el listener automáticamente)
+     * - Marcar jugadores como bloqueados (lo hace BaseGameEngine automáticamente)
+     */
+    protected function beforePlayerDisconnectedPause(GameMatch $match, Player $player): void
+    {
+        Log::info("[Mentiroso] Player disconnected - game will pause", [
+            'match_id' => $match->id,
+            'player_id' => $player->id,
+            'current_phase' => $match->game_state['current_phase'] ?? 'unknown'
+        ]);
+
+        // PhaseManager timers se cancelarán automáticamente por GamePausedEvent listener
+        // PlayerManager bloqueará jugadores automáticamente
+    }
+
+    /**
+     * Hook: Ejecutado DESPUÉS de que un jugador se reconecta.
+     *
+     * Política de Mentiroso: RESETEAR la ronda actual porque es mejor volver a empezar.
+     * - Descartar votos de la ronda actual
+     * - Resetear PhaseManager (volver a preparation)
+     * - Reiniciar ronda desde el principio
+     */
+    protected function afterPlayerReconnected(GameMatch $match, Player $player): void
+    {
+        Log::info("[Mentiroso] Player reconnected - resetting current round", [
+            'match_id' => $match->id,
+            'player_id' => $player->id
+        ]);
+
+        // 1. Limpiar votos y acciones de la ronda actual
+        $playerManager = $this->getPlayerManager($match, $this->scoreCalculator);
+        $playerManager->reset($match); // Desbloquea y limpia acciones
+        $this->savePlayerManager($match, $playerManager);
+
+        // 2. Cancelar PhaseManager existente
+        $phaseManager = $this->getPhaseManager($match);
+        if ($phaseManager) {
+            $phaseManager->cancelAllTimers();
+        }
+
+        // 3. Limpiar flag de completado de ronda
+        $gameState = $match->game_state;
+        unset($gameState['_completing_round']);
+        $match->game_state = $gameState;
+        $match->save();
+
+        // 4. Reiniciar la ronda actual (sin avanzar contador)
+        // handleNewRound con advanceRound=false mantiene la ronda actual pero reinicia todo
+        $this->handleNewRound($match, advanceRound: false);
+
+        Log::info("[Mentiroso] Round reset after reconnection", [
+            'match_id' => $match->id
         ]);
     }
 

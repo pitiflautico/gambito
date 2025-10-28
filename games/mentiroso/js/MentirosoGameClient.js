@@ -149,22 +149,9 @@ export class MentirosoGameClient extends BaseGameClient {
         // Update phase
         this.updatePhase(currentPhase);
 
-        // Iniciar timer de la fase inicial (preparation) si hay timing metadata
-        if (event.timing && event.timing.server_time && event.timing.duration) {
-            const timerElement = this.getTimerElement();
-
-            if (timerElement) {
-                const durationMs = event.timing.duration * 1000;
-
-                this.timing.startServerSyncedCountdown(
-                    event.timing.server_time,
-                    durationMs,
-                    timerElement,
-                    () => this.onTimerExpired(currentPhase),
-                    `${currentPhase}_timer`
-                );
-            }
-        }
+        // NOTA: NO iniciamos timer aquí porque Mentiroso usa PhaseChangedEvent para timers
+        // RoundStartedEvent se emite primero (sin timing), luego PhaseChangedEvent con timing
+        console.log('[Mentiroso] RoundStarted processed, waiting for PhaseChangedEvent for timer');
     }
 
     /**

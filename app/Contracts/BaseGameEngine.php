@@ -74,12 +74,22 @@ abstract class BaseGameEngine implements GameEngineInterface
     abstract protected function processRoundAction(GameMatch $match, Player $player, array $data): array;
 
     /**
-     * Iniciar una nueva ronda del juego.
+     * Hook: Preparar datos específicos de la nueva ronda.
+     *
+     * Este método OPCIONAL permite a los juegos cargar datos específicos
+     * para la nueva ronda (ej: siguiente pregunta en Trivia, palabra en Pictionary).
+     *
+     * BaseGameEngine ya ha hecho todo lo común (resetear PlayerManager, timers, etc.)
+     * ANTES de llamar a este hook.
      *
      * @param GameMatch $match
      * @return void
      */
-    abstract protected function startNewRound(GameMatch $match): void;
+    protected function onRoundStarting(GameMatch $match): void
+    {
+        // Implementación vacía por defecto
+        // Los juegos pueden sobrescribir para cargar datos específicos
+    }
 
     /**
      * Verificar el estado actual de la ronda según las reglas del juego.
@@ -98,16 +108,6 @@ abstract class BaseGameEngine implements GameEngineInterface
         // Implementación por defecto: no hace nada
         return ['should_end' => false, 'reason' => null];
     }
-
-    /**
-     * Obtener todos los resultados de jugadores en la ronda actual.
-     *
-     * Formato: [player_id => ['success' => bool, 'data' => mixed], ...]
-     *
-     * @param GameMatch $match
-     * @return array
-     */
-    abstract protected function getAllPlayerResults(GameMatch $match): array;
 
     /**
      * Hook específico del juego para iniciar el juego.
@@ -476,7 +476,7 @@ abstract class BaseGameEngine implements GameEngineInterface
         }
 
         // 2.1. LÓGICA BASE: Resetear PlayerManager (desbloquear jugadores, limpiar acciones)
-        // Esto debe hacerse ANTES de startNewRound() para que los juegos ya tengan
+        // Esto debe hacerse ANTES de onRoundStarting() para que los juegos ya tengan
         // los jugadores listos para la nueva ronda
         if ($this->isModuleEnabled($match, 'player_system')) {
             $playerManager = $this->getPlayerManager($match, $this->scoreCalculator ?? null);
@@ -488,8 +488,9 @@ abstract class BaseGameEngine implements GameEngineInterface
             ]);
         }
 
-        // 3. Llamar a la lógica específica del juego
-        $this->startNewRound($match);
+        // 3. HOOK: Permitir al juego preparar datos específicos (ej: cargar pregunta)
+        // Este es un hook OPCIONAL, no todos los juegos necesitan usarlo
+        $this->onRoundStarting($match);
 
         // 3.1. Iniciar timer de ronda automáticamente (si está configurado)
         // DELEGADO A ROUNDMANAGER: Los módulos gestionan sus propios timers

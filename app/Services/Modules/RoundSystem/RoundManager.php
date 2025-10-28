@@ -374,21 +374,11 @@ class RoundManager
             // 3. NO avanzar la ronda aquí - eso lo hará handleNewRound() cuando se llame
             // El frontend esperará el countdown y luego llamará a /next-round
             // que ejecutará handleNewRound() que avanzará la ronda y emitirá RoundStartedEvent
-            
+
             \Log::info('[RoundManager] Round NOT advanced yet - waiting for countdown/frontend to call next-round', [
                 'current_round' => $this->currentRound
             ]);
 
-            // 4. BACKUP DESHABILITADO TEMPORALMENTE
-            // El backup automático requiere un queue asíncrono (redis/database)
-            // Con queue=sync, el Job se ejecuta inmediatamente ignorando el delay
-            // Por ahora, solo el frontend maneja el countdown y llama a /next-round
-            // TODO: Configurar queue asíncrono y re-habilitar backup
-            
-            \Log::info('[RoundManager] Frontend countdown will trigger next round', [
-                'timing_config' => $timingConfig
-            ]);
-            
             \Log::info('[RoundManager] completeRound() FINISHED');
         } catch (\Exception $e) {
             \Log::error('[RoundManager] ERROR in completeRound()', [
@@ -550,11 +540,12 @@ class RoundManager
         ]);
 
         // Configurar timer para emitir RoundTimerExpiredEvent cuando expire
+        // IMPORTANTE: Solo pasar match_id, NO el match completo (evita payload gigante)
         $timerService->startTimer(
             timerName: $timerName,
             durationSeconds: $duration,
             eventToEmit: \App\Events\Game\RoundTimerExpiredEvent::class,
-            eventData: [$match, $this->currentRound, $timerName],
+            eventData: [$match->id, $this->currentRound, $timerName],
             restart: true
         );
 

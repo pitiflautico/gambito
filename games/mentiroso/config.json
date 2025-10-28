@@ -27,13 +27,14 @@
       "enabled": true
     },
     "turn_system": {
-      "enabled": true,
+      "enabled": false,
       "mode": "sequential",
       "round_per_turn": true
     },
     "round_system": {
       "enabled": true,
-      "total_rounds": 10
+      "total_rounds": 10,
+      "inter_round_delay": 10
     },
     "scoring_system": {
       "enabled": true,

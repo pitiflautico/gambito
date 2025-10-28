@@ -345,22 +345,22 @@ class TriviaEngine extends BaseGameEngine
     }
 
     /**
-     * Iniciar nueva ronda - Cargar siguiente pregunta.
+     * Hook: Preparar datos para la nueva ronda (cargar pregunta).
      *
-     * Este método se llama desde BaseGameEngine::handleNewRound()
-     * DESPUÉS de que RoundManager haya avanzado la ronda.
+     * BaseGameEngine ya resetó PlayerManager y está listo para la nueva ronda.
+     * Aquí solo cargamos la pregunta específica de Trivia.
      *
-     * IMPORTANTE: PlayerManager ya fue reseteado por BaseGameEngine,
-     * aquí solo cargamos la lógica específica de Trivia (la pregunta).
+     * @param GameMatch $match
+     * @return void
      */
-    protected function startNewRound(GameMatch $match): void
+    protected function onRoundStarting(GameMatch $match): void
     {
-        Log::info("[Trivia] Starting new round - loading question", ['match_id' => $match->id]);
+        Log::info("[Trivia] Preparing round data - loading question", ['match_id' => $match->id]);
 
-        // Solo lógica específica de Trivia: cargar pregunta
+        // Solo lógica específica de Trivia: cargar siguiente pregunta
         $question = $this->loadNextQuestion($match);
 
-        Log::info("[Trivia] Question loaded", [
+        Log::info("[Trivia] Question loaded for new round", [
             'match_id' => $match->id,
             'question_id' => $question['id'],
             'question' => $question['question']
@@ -439,9 +439,10 @@ class TriviaEngine extends BaseGameEngine
     /**
      * Filtrar game_state para remover información sensible antes de broadcast.
      *
-     * En Trivia, la respuesta correcta (`correct_answer`) NO debe enviarse a todos
-     * los jugadores en eventos como RoundStartedEvent. Solo se debe mostrar después
-     * de que termine la ronda.
+     * En Trivia necesitamos:
+     * 1. Remover TODAS las preguntas (solo enviar la actual)
+     * 2. Remover la respuesta correcta de la pregunta actual
+     * 3. Mantener solo la info necesaria para el frontend
      *
      * @param array $gameState
      * @param \App\Models\GameMatch $match
@@ -451,9 +452,18 @@ class TriviaEngine extends BaseGameEngine
     {
         $filtered = $gameState;
 
-        // Remover la respuesta correcta de la pregunta actual
+        // 1. REMOVER TODAS LAS PREGUNTAS (payload muy grande para WebSocket)
+        // El frontend no necesita ver todas las preguntas, solo la actual
+        unset($filtered['questions']);
+
+        // 2. Remover la respuesta correcta de la pregunta actual
         if (isset($filtered['current_question']['correct_answer'])) {
             unset($filtered['current_question']['correct_answer']);
+        }
+
+        // 3. Remover otros datos grandes innecesarios
+        if (isset($filtered['_config']['categories'])) {
+            unset($filtered['_config']['categories']);
         }
 
         return $filtered;
@@ -528,28 +538,13 @@ class TriviaEngine extends BaseGameEngine
         ];
     }
 
-    /**
-     * Manejar desconexión de jugador.
-     */
-    public function handlePlayerDisconnect(GameMatch $match, Player $player): void
-    {
-        Log::info("[Trivia] Player disconnected", [
-            'match_id' => $match->id,
-            'player_id' => $player->id
-        ]);
-    }
-
-    /**
-     * Manejar reconexión de jugador.
-     */
-    public function handlePlayerReconnect(GameMatch $match, Player $player): void
-    {
-        Log::info("[Trivia] Player reconnected", [
-            'match_id' => $match->id,
-            'player_id' => $player->id
-        ]);
-    }
+    // ========================================================================
+    // MÉTODOS HEREDADOS
+    // ========================================================================
 
     // getGameConfig() y getFinalScores() ahora se heredan de BaseGameEngine
     // (implementación común para todos los juegos)
+
+    // handlePlayerDisconnect() y handlePlayerReconnect() también se heredan
+    // de BaseGameEngine (comportamiento por defecto: pausar/reanudar juego)
 }

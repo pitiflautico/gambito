@@ -28,10 +28,14 @@ class RoundTimerExpiredEvent implements ShouldBroadcast
     public string $timerName;
 
     public function __construct(
-        GameMatch $match,
+        int $matchId,
         int $roundNumber,
         string $timerName = 'round'
     ) {
+        // Cargar match desde BD para obtener room_code
+        // Esto evita serializar el match completo en el timer
+        $match = GameMatch::with('room:id,code')->findOrFail($matchId);
+
         $this->roomCode = $match->room->code;
         $this->roundNumber = $roundNumber;
         $this->timerName = $timerName;

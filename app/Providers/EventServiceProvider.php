@@ -12,7 +12,9 @@ class EventServiceProvider extends ServiceProvider
      * @var array
      */
     protected $listen = [
-        // Los eventos se registran aquí cuando sea necesario
+        \App\Events\Game\RoundEndedEvent::class => [
+            \App\Listeners\CancelPhaseManagerTimersOnRoundEnd::class,
+        ],
     ];
 
     /**
