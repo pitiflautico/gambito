@@ -1235,7 +1235,7 @@ class PictionaryEngine extends BaseGameEngine
 
             // Terminar ronda actual usando método heredado de BaseGameEngine
             $roundManager = $this->getRoundManager($match);
-            if ($roundManager->hasRoundsRemaining()) {
+            if (!$roundManager->isGameComplete()) {
                 // Llamar al método heredado de BaseGameEngine que maneja el flujo completo
                 parent::endCurrentRound($match);
             }
