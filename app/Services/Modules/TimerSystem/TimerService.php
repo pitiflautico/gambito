@@ -98,6 +98,21 @@ class TimerService
     }
 
     /**
+     * Pausar TODOS los timers activos.
+     * Usado cuando un jugador se desconecta.
+     *
+     * @return void
+     */
+    public function pauseAllTimers(): void
+    {
+        foreach ($this->timers as $timer) {
+            if (!$timer->isPaused()) {
+                $timer->pause();
+            }
+        }
+    }
+
+    /**
      * Reanudar un timer pausado.
      *
      * @param string $timerName Nombre del timer

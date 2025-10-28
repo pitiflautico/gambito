@@ -5,6 +5,7 @@ namespace Games\Trivia;
 use App\Contracts\BaseGameEngine;
 use App\Models\GameMatch;
 use App\Models\Player;
+use App\Events\Game\PhaseChangedEvent;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -536,6 +537,63 @@ class TriviaEngine extends BaseGameEngine
             'phase' => $match->game_state['phase'] ?? 'unknown',
             'message' => 'El juego ha empezado',
         ];
+    }
+
+    // ========================================================================
+    // PHASE MANAGEMENT (usando RoundManager->getTurnManager())
+    // ========================================================================
+
+    /**
+     * Override: No timing en RoundStartedEvent porque usamos PhaseManager.
+     *
+     * Trivia usa PhaseManager (vía RoundManager) con una única fase 'main' por ronda.
+     * La fase tiene su propio timer emitido via PhaseChangedEvent.
+     * RoundStartedEvent no debe incluir timing para evitar conflictos.
+     */
+    protected function getRoundStartTiming(GameMatch $match): ?array
+    {
+        return null;  // No timing en RoundStartedEvent - usamos PhaseChangedEvent
+    }
+
+    /**
+     * Hook: Ejecutado DESPUÉS de emitir RoundStartedEvent.
+     *
+     * Emitimos PhaseChangedEvent para la fase única (main) con timing.
+     * Esto permite que el frontend primero procese RoundStartedEvent (actualizar UI, pregunta)
+     * y LUEGO reciba PhaseChangedEvent para iniciar el timer.
+     */
+    protected function onRoundStarted(GameMatch $match, int $currentRound, int $totalRounds): void
+    {
+        $roundManager = $this->getRoundManager($match);
+        $phaseManager = $roundManager->getTurnManager(); // PhaseManager es el TurnManager
+
+        if (!$phaseManager) {
+            Log::error("[Trivia] PhaseManager NOT FOUND in RoundManager", [
+                'match_id' => $match->id
+            ]);
+            return;
+        }
+
+        $currentPhase = $phaseManager->getCurrentPhaseName();
+        $timingInfo = $phaseManager->getTimingInfo();
+
+        $timing = [
+            'server_time' => now()->timestamp,
+            'duration' => $timingInfo['delay'] ?? 0
+        ];
+
+        Log::info("[Trivia] Emitting PhaseChangedEvent after RoundStarted", [
+            'match_id' => $match->id,
+            'phase' => $currentPhase,
+            'duration' => $timing['duration']
+        ]);
+
+        event(new PhaseChangedEvent(
+            match: $match,
+            newPhase: $currentPhase,
+            previousPhase: '',  // Primera fase, no hay anterior
+            additionalData: $timing
+        ));
     }
 
     // ========================================================================

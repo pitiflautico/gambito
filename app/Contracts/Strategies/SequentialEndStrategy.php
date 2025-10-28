@@ -52,8 +52,8 @@ class SequentialEndStrategy implements EndRoundStrategy
         callable $getAllPlayerResults
     ): array {
         // En modo secuencial, el JUEGO decide cuándo terminar
-        // Lee el flag 'should_end_turn' del resultado
-        $shouldEnd = $actionResult['should_end_turn'] ?? false;
+        // Lee el flag 'force_end' o 'should_end_turn' (legacy) del resultado
+        $shouldEnd = $actionResult['force_end'] ?? $actionResult['should_end_turn'] ?? false;
 
         // El juego puede especificar un delay custom
         $delaySeconds = $actionResult['delay_seconds'] ?? $this->config['delay_seconds'];

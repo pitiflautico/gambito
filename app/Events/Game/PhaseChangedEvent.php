@@ -33,6 +33,15 @@ class PhaseChangedEvent implements ShouldBroadcastNow
         $this->newPhase = $newPhase;
         $this->previousPhase = $previousPhase;
         $this->additionalData = $additionalData;
+
+        \Log::debug("[PhaseChangedEvent] Broadcasting", [
+            'room' => $this->roomCode,
+            'new_phase' => $this->newPhase,
+            'previous_phase' => $this->previousPhase,
+            'additional_data' => $this->additionalData,
+            'channel' => "presence-room.{$this->roomCode}",
+            'event_name' => 'game.phase.changed'
+        ]);
     }
 
     public function broadcastOn(): PresenceChannel

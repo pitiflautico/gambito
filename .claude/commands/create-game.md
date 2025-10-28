@@ -1163,6 +1163,381 @@ El juego está listo para probar:
 
 ---
 
+## 🔧 Sistema Unificado de Fases y Timers (CRÍTICO)
+
+### 📖 Contexto: Problema Detectado
+
+Después de implementar varios juegos, detectamos inconsistencias en cómo se manejaban los timers:
+- Algunos usaban `RoundManager` directamente
+- Otros usaban `PhaseManager`
+- El código de deserialización no detectaba correctamente qué manager reconstruir
+- Los timers no se sincronizaban correctamente al refrescar la página
+
+### ✅ Solución: Sistema Unificado de Fases
+
+**DECISIÓN ARQUITECTÓNICA: TODOS los juegos SIEMPRE usan fases (mínimo 1)**
+
+#### Jerarquía de Módulos
+```
+RoundManager
+└── TurnManager
+    └── PhaseManager (extiende TurnManager)
+```
+
+#### Tipos de Juegos
+
+**Juegos Single-Fase** (Trivia, Pictionary):
+- Una única fase `main` por ronda
+- Timer de fase = timer de ronda
+- Ejemplo: 30 segundos para responder pregunta
+
+**Juegos Multi-Fase** (Mentiroso, futuro Werewolf):
+- Múltiples fases secuenciales por ronda
+- Cada fase tiene su propio timer
+- Ejemplo: `preparation` (10s) → `persuasion` (30s) → `voting` (15s)
+
+### 🏗️ Implementación en Backend
+
+#### 1. Factory Method en RoundManager
+
+```php
+// app/Services/Modules/RoundSystem/RoundManager.php
+
+public static function createFromConfig(array $config, array $playerIds, int $totalRounds): self
+{
+    $phases = self::extractPhasesFromConfig($config);
+    $phaseManager = new PhaseManager($phases);
+
+    return new self(
+        turnManager: $phaseManager,
+        totalRounds: $totalRounds,
+        currentRound: 1
+    );
+}
+
+protected static function extractPhasesFromConfig(array $config): array
+{
+    $timing = $config['timing'] ?? [];
+    $phases = [];
+
+    // Buscar fases explícitas en timing (multi-fase)
+    foreach ($timing as $key => $phaseConfig) {
+        if (!in_array($key, ['game_start', 'round_start', 'round_ended', 'results', 'countdown_warning_threshold'])) {
+            if (isset($phaseConfig['duration'])) {
+                $phases[] = ['name' => $key, 'duration' => $phaseConfig['duration']];
+            }
+        }
+    }
+
+    // Si no hay fases explícitas, crear fase única "main" (single-fase)
+    if (count($phases) === 0) {
+        $duration = $config['modules']['timer_system']['round_duration']
+            ?? $config['modules']['turn_system']['time_limit']
+            ?? 30;
+
+        return [['name' => 'main', 'duration' => $duration]];
+    }
+
+    return $phases;
+}
+```
+
+#### 2. Deserialización Correcta
+
+```php
+// RoundManager::fromArray() - Detectar PhaseManager vs TurnManager
+
+if (isset($data['turn_system'])) {
+    // Detectar por presencia de 'phases' key
+    if (isset($data['turn_system']['phases'])) {
+        $turnManager = PhaseManager::fromArray($data['turn_system']);
+    } else {
+        $turnManager = TurnManager::fromArray($data['turn_system']);
+    }
+
+    // ✅ CRÍTICO: Conectar TimerService al manager
+    if (isset($data['timer_system'])) {
+        $timerService = \App\Services\Modules\TimerSystem\TimerService::fromArray($data);
+        $turnManager->setTimerService($timerService);
+    }
+}
+```
+
+#### 3. Emitir PhaseChangedEvent (NO RoundStartedEvent con timing)
+
+```php
+// games/{slug}/{GameName}Engine.php
+
+use App\Events\Game\PhaseChangedEvent;
+
+protected function getRoundStartTiming(GameMatch $match): ?array
+{
+    return null;  // ✅ NO emitir timing en RoundStartedEvent
+}
+
+protected function onRoundStarted(GameMatch $match, int $currentRound, int $totalRounds): void
+{
+    $roundManager = $this->getRoundManager($match);
+    $phaseManager = $roundManager->getTurnManager(); // Es PhaseManager
+
+    $currentPhase = $phaseManager->getCurrentPhaseName();
+    $timingInfo = $phaseManager->getTimingInfo();
+
+    $timing = [
+        'server_time' => now()->timestamp,
+        'duration' => $timingInfo['delay'] ?? 0
+    ];
+
+    // ✅ Emitir PhaseChangedEvent DESPUÉS de RoundStartedEvent
+    event(new PhaseChangedEvent(
+        match: $match,
+        newPhase: $currentPhase,
+        previousPhase: '',
+        additionalData: $timing
+    ));
+}
+```
+
+### 🎨 Implementación en Frontend
+
+#### 1. BaseGameClient maneja PhaseChangedEvent
+
+```javascript
+// resources/js/core/BaseGameClient.js
+
+handleRoundStarted(event) {
+    // ✅ YA NO inicia timer aquí
+    this.currentRound = event.current_round;
+    this.totalRounds = event.total_rounds;
+
+    // Timer se iniciará cuando llegue PhaseChangedEvent
+}
+
+handlePhaseChanged(event) {
+    console.log('🎯 [BaseGameClient] handlePhaseChanged', event);
+
+    // Iniciar timer de fase si viene timing metadata
+    if (event.additional_data?.server_time && event.additional_data?.duration) {
+        const timerElement = this.getTimerElement();
+
+        if (timerElement) {
+            const durationMs = event.additional_data.duration * 1000;
+            const timerName = `phase_${event.new_phase}`;
+
+            this.timing.startServerSyncedCountdown(
+                event.additional_data.server_time,
+                durationMs,
+                timerElement,
+                () => this.onPhaseTimerExpired(event.new_phase),
+                timerName
+            );
+        }
+    }
+}
+
+async onPhaseTimerExpired(phaseName) {
+    console.log(`⏰ [BaseGameClient] Phase timer expired: ${phaseName}`);
+
+    const timerElement = this.getTimerElement();
+    if (timerElement) {
+        timerElement.textContent = '¡Tiempo agotado!';
+        timerElement.classList.add('timer-expired');
+    }
+
+    // Notificar al backend para avanzar ronda
+    await fetch(`/api/rooms/${this.roomCode}/check-timer`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content
+        },
+        body: JSON.stringify({
+            phase: phaseName,
+            timestamp: Date.now()
+        })
+    });
+}
+```
+
+#### 2. Estrategia de Refresh/Reconexión
+
+**Problema:** WebSocket se desconecta/reconecta durante F5, perdiendo eventos.
+
+**Solución:** Fetch estado inicial ANTES de conectar WebSockets.
+
+```javascript
+// games/{slug}/views/game.blade.php
+
+(async () => {
+    try {
+        const response = await fetch(`/api/rooms/{{ $code }}/state`);
+        if (response.ok) {
+            const data = await response.json();
+            const gameState = data.game_state;
+
+            // 1️⃣ Prioridad: Si el juego terminó
+            if (gameState?.phase === 'finished') {
+                triviaClient.showElement('finished-state');
+                triviaClient.renderPodium(gameState.ranking, gameState.final_scores);
+                return;
+            }
+
+            // 2️⃣ Si hay una pregunta activa, mostrarla
+            if (gameState?.current_question) {
+                triviaClient.handleRoundStarted({
+                    current_round: gameState.round_system?.current_round || 1,
+                    total_rounds: gameState.round_system?.total_rounds || 10,
+                    game_state: gameState
+                });
+
+                // 3️⃣ Reconstruir y reiniciar timer si existe
+                const timerData = gameState.timer_system?.timers?.round;
+                if (timerData) {
+                    const startedAt = new Date(timerData.started_at).getTime() / 1000;
+                    const duration = timerData.duration;
+
+                    const phaseEvent = {
+                        new_phase: 'main',
+                        previous_phase: '',
+                        additional_data: {
+                            server_time: startedAt,
+                            duration: duration
+                        }
+                    };
+
+                    setTimeout(() => {
+                        triviaClient.handlePhaseChanged(phaseEvent);
+                    }, 100);
+                }
+
+                // 4️⃣ Restaurar locks
+                const locks = gameState.player_state_system?.locks || {};
+                if (locks[config.playerId] === true) {
+                    triviaClient.hasAnswered = true;
+                    triviaClient.showElement('locked-overlay');
+                }
+            }
+        }
+    } catch (error) {
+        console.error('❌ Error loading initial state:', error);
+    }
+
+    // Configurar Event Manager DESPUÉS de cargar el estado
+    triviaClient.setupEventManager();
+})();
+```
+
+### 📋 Checklist para Juegos Nuevos
+
+#### Backend:
+```
+☐ initializeModules() usa RoundManager::createFromConfig()
+☐ getRoundStartTiming() retorna null
+☐ onRoundStarted() emite PhaseChangedEvent con timing
+☐ Si multi-fase: config timing tiene múltiples fases
+☐ Si single-fase: config timing tiene solo round_duration
+☐ PhaseManager conectado con TimerService en deserialization
+```
+
+#### Frontend:
+```
+☐ handleRoundStarted() NO inicia timer
+☐ handlePhaseChanged() implementado para iniciar timer
+☐ onPhaseTimerExpired() notifica backend
+☐ game.blade.php fetch estado inicial antes de setupEventManager()
+☐ Reconstruye timer desde timerData del backend
+☐ capabilities.json incluye PhaseChangedEvent
+```
+
+#### Config:
+```json
+// Juego SINGLE-FASE (Trivia, Pictionary)
+{
+  "modules": {
+    "timer_system": {
+      "enabled": true,
+      "round_duration": 30  // ← Timer de fase única
+    }
+  }
+}
+
+// Juego MULTI-FASE (Mentiroso)
+{
+  "timing": {
+    "preparation": {
+      "duration": 10,
+      "description": "Preparar respuesta"
+    },
+    "persuasion": {
+      "duration": 30,
+      "description": "Convencer a otros"
+    },
+    "voting": {
+      "duration": 15,
+      "description": "Votar"
+    }
+  }
+}
+```
+
+### 🎯 Flujo Completo
+
+**Backend:**
+```
+1. RoundManager::createFromConfig()
+   → Detecta fases desde config
+   → Crea PhaseManager (siempre)
+
+2. RoundStartedEvent emitido (sin timing)
+
+3. onRoundStarted() hook
+   → PhaseManager.getCurrentPhaseName()
+   → PhaseManager.getTimingInfo()
+   → PhaseChangedEvent emitido (con timing)
+```
+
+**Frontend:**
+```
+1. EventManager recibe RoundStartedEvent
+   → handleRoundStarted() actualiza UI
+   → NO inicia timer
+
+2. EventManager recibe PhaseChangedEvent
+   → handlePhaseChanged() inicia timer
+   → TimingModule countdown sincronizado con servidor
+
+3. Timer llega a 0
+   → onPhaseTimerExpired() POST /check-timer
+   → Backend valida y avanza ronda/fase
+```
+
+### 🐛 Errores Comunes EVITADOS
+
+❌ **Error 1**: Iniciar timer en `handleRoundStarted()`
+✅ **Correcto**: Iniciar timer en `handlePhaseChanged()`
+
+❌ **Error 2**: Emitir timing en `RoundStartedEvent`
+✅ **Correcto**: Emitir timing en `PhaseChangedEvent`
+
+❌ **Error 3**: `fromArray()` siempre crea `TurnManager`
+✅ **Correcto**: Detectar `phases` key para crear `PhaseManager`
+
+❌ **Error 4**: No conectar `TimerService` al deserializar
+✅ **Correcto**: Siempre llamar `setTimerService()` después de `fromArray()`
+
+❌ **Error 5**: No restaurar timer en refresh
+✅ **Correcto**: Fetch estado y simular `PhaseChangedEvent`
+
+### 📚 Referencias
+
+- **Trivia**: Ejemplo de juego single-fase
+- **Mentiroso**: Ejemplo de juego multi-fase
+- `RoundManager.php:65-153` - Factory y extracción de fases
+- `BaseGameClient.js:185-236` - Handler de PhaseChangedEvent
+- `game.blade.php:186-213` - Restauración de timer
+
+---
+
 ## 🔄 Modo Interactivo (Backward Compatibility)
 
 Si el usuario ejecuta `/create-game` sin argumentos, usar el flujo original de 12 preguntas interactivas (mantener compatibilidad).

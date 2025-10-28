@@ -35,6 +35,11 @@
         "description": "Sistema: Ronda finalizada",
         "handler": "handleRoundEnded"
       },
+      "PhaseChangedEvent": {
+        "name": "game.phase.changed",
+        "description": "Sistema: Cambio de fase con timing para timer",
+        "handler": "handlePhaseChanged"
+      },
       "DrawStrokeEvent": {
         "name": "pictionary.draw-stroke",
         "description": "Broadcast canvas stroke to all players",

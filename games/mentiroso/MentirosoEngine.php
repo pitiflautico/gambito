@@ -166,6 +166,51 @@ class MentirosoEngine extends BaseGameEngine
     }
 
     /**
+     * Hook: Ejecutado DESPUÉS de emitir RoundStartedEvent.
+     *
+     * Aquí emitimos PhaseChangedEvent para la fase inicial (preparation) con timing.
+     * Esto permite que el frontend primero procese RoundStartedEvent (actualizar UI, round info)
+     * y LUEGO reciba PhaseChangedEvent para iniciar el timer de la fase.
+     */
+    protected function onRoundStarted(GameMatch $match, int $currentRound, int $totalRounds): void
+    {
+        $phaseManager = $this->getPhaseManager($match);
+
+        if (!$phaseManager) {
+            Log::error("[Mentiroso] PhaseManager NOT FOUND in onRoundStarted", [
+                'match_id' => $match->id
+            ]);
+            return;
+        }
+
+        $currentPhase = $phaseManager->getCurrentPhaseName();
+        $timingInfo = $phaseManager->getTimingInfo();
+
+        $timing = [
+            'server_time' => now()->timestamp,
+            'duration' => $timingInfo['delay'] ?? 0
+        ];
+
+        Log::info("[Mentiroso] Emitting PhaseChangedEvent after RoundStarted", [
+            'match_id' => $match->id,
+            'current_round' => $currentRound,
+            'phase' => $currentPhase,
+            'duration' => $timing['duration']
+        ]);
+
+        event(new \App\Events\Game\PhaseChangedEvent(
+            $match,
+            $currentPhase,
+            '',  // No previous phase (nueva ronda)
+            [
+                'phase' => $currentPhase,
+                'game_state' => $this->filterGameStateForBroadcast($match->game_state, $match),
+                'timing' => $timing
+            ]
+        ));
+    }
+
+    /**
      * Hook OPCIONAL: Preparar datos específicos para la nueva ronda.
      *
      * BaseGameEngine ya ejecutó:
@@ -229,32 +274,9 @@ class MentirosoEngine extends BaseGameEngine
         $phaseManager->startTurnTimer();
         $this->savePhaseManager($match, $phaseManager);
 
-        // Emitir evento de cambio de fase para notificar al frontend
-        $timingInfo = $phaseManager->getTimingInfo();
-        $timing = [
-            'server_time' => now()->timestamp,
-            'duration' => $timingInfo['delay'] ?? 0
-        ];
-
-        $event = new PhaseChangedEvent(
-            $match,
-            'preparation',
-            '',  // No previous phase (nueva ronda)
-            [
-                'phase' => 'preparation',
-                'game_state' => $this->filterGameStateForBroadcast($match->game_state, $match),
-                'timing' => $timing
-            ]
-        );
-
-        Log::info("[Mentiroso] Emitting PhaseChangedEvent for new round", [
-            'match_id' => $match->id,
-            'room_code' => $match->room->code,
-            'phase' => 'preparation',
-            'timing' => $timing
-        ]);
-
-        event($event);
+        // NOTA: NO emitimos PhaseChangedEvent aquí porque onRoundStarting() se ejecuta
+        // ANTES de que RoundStartedEvent sea emitido. En su lugar, usamos onRoundStarted()
+        // que se ejecuta DESPUÉS de RoundStartedEvent.
     }
 
     /**
@@ -381,7 +403,7 @@ class MentirosoEngine extends BaseGameEngine
 
             return [
                 'success' => true,
-                'should_end_turn' => false,
+                'force_end' => false,
             ];
         });
     }
@@ -613,23 +635,8 @@ class MentirosoEngine extends BaseGameEngine
      */
     private function createPhaseManager(GameMatch $match): PhaseManager
     {
-        $gameConfig = $this->getGameConfig();
-        $timing = $gameConfig['timing'] ?? [];
-
-        $phases = [
-            [
-                'name' => 'preparation',
-                'duration' => $timing['preparation']['duration'] ?? 15
-            ],
-            [
-                'name' => 'persuasion',
-                'duration' => $timing['persuasion']['duration'] ?? 30
-            ],
-            [
-                'name' => 'voting',
-                'duration' => $timing['voting']['duration'] ?? 10
-            ],
-        ];
+        // Usar getPhaseConfig() para normalizar configuración
+        $phases = $this->getPhaseConfig();
 
         $phaseManager = new PhaseManager($phases);
 

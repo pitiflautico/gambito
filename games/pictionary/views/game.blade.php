@@ -318,22 +318,31 @@
                             }
                         }
 
-                        // Agregar timing metadata si hay un timer activo
+                        // Mostrar la pregunta primero (sin timing)
+                        pictionaryClient.handleRoundStarted(eventData);
+
+                        // ✅ SISTEMA UNIFICADO DE FASES: Reconstruir y reiniciar timer con PhaseChangedEvent
                         const timerData = gameState.timer_system?.timers?.round;
                         if (timerData) {
-                            const startedAt = new Date(timerData.started_at).getTime() / 1000;
-                            const pausedAt = timerData.paused_at ? new Date(timerData.paused_at).getTime() / 1000 : null;
+                            const startedAt = new Date(timerData.started_at).getTime() / 1000; // a segundos UNIX
                             const duration = timerData.duration;
 
-                            eventData.timing = {
-                                duration: duration,
-                                server_time: startedAt,
-                                countdown_visible: true,
-                                warning_threshold: 5
+                            // Simular PhaseChangedEvent para que BaseGameClient reinicie el timer
+                            const phaseEvent = {
+                                new_phase: 'main',
+                                previous_phase: '',
+                                additional_data: {
+                                    server_time: startedAt,
+                                    duration: duration
+                                }
                             };
-                        }
 
-                        pictionaryClient.handleRoundStarted(eventData);
+                            // Después de mostrar la ronda, emitir el evento de fase
+                            // para que BaseGameClient.handlePhaseChanged() reinicie el timer
+                            setTimeout(() => {
+                                pictionaryClient.handlePhaseChanged(phaseEvent);
+                            }, 100);
+                        }
 
                         // Si ya dibujamos o adivinamos, mostrar overlay de bloqueado
                         const locks = gameState.player_state_system?.locks || {};

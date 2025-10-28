@@ -27,7 +27,7 @@
       "enabled": true
     },
     "turn_system": {
-      "enabled": false,
+      "enabled": true,
       "mode": "sequential",
       "round_per_turn": true
     },

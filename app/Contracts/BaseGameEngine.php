@@ -215,24 +215,17 @@ abstract class BaseGameEngine implements GameEngineInterface
         // 2. Obtener game_state como array para modificarlo
         $gameState = $match->game_state;
 
-        // 3. Pausar timer si existe
-        if (isset($gameState['timer_system'])) {
-            $timerService = \App\Services\Modules\TimerSystem\TimerService::fromArray($gameState);
-            $timerService->pauseTimer('round');
-            $gameState['timer_system'] = $timerService->toArray()['timer_system'];
-        }
-
-        // 4. Marcar juego como pausado
+        // 3. Marcar juego como pausado
         $gameState['paused'] = true;
         $gameState['paused_reason'] = 'player_disconnected';
         $gameState['disconnected_player_id'] = $player->id;
         $gameState['paused_at'] = now()->toDateTimeString();
 
-        // 5. Asignar de vuelta y guardar
+        // 4. Guardar estado
         $match->game_state = $gameState;
         $match->save();
 
-        // 4. Emitir evento (broadcast a todos los clientes)
+        // 5. Emitir evento de desconexión (el frontend pausará los timers visuales automáticamente)
         event(new \App\Events\Game\PlayerDisconnectedEvent($match, $player));
 
         Log::info("[{$this->getGameSlug()}] Game paused due to disconnection", [
@@ -917,42 +910,30 @@ abstract class BaseGameEngine implements GameEngineInterface
         }
 
         // ========================================================================
-        // MÓDULO: Turn System
-        // ========================================================================
-        if ($modules['turn_system']['enabled'] ?? false) {
-            $turnConfig = $modules['turn_system'];
-            $mode = $moduleOverrides['turn_system']['mode'] ?? $turnConfig['mode'] ?? 'sequential';
-            $timeLimit = $moduleOverrides['turn_system']['time_limit'] ?? $turnConfig['time_limit'] ?? null;
-
-            $turnManager = new \App\Services\Modules\TurnSystem\TurnManager(
-                playerIds: $playerIds,
-                mode: $mode,
-                timeLimit: $timeLimit
-            );
-
-            // Conectar TimerService si existe (necesario para timing automático)
-            if (isset($timerService)) {
-                $turnManager->setTimerService($timerService);
-            }
-
-            Log::debug("Turn system initialized", ['mode' => $mode, 'time_limit' => $timeLimit]);
-        }
-
-        // ========================================================================
-        // MÓDULO: Round System
+        // MÓDULO: Round System (incluye Turn System y Phase System internamente)
         // ========================================================================
         if ($modules['round_system']['enabled'] ?? false) {
             $roundConfig = $modules['round_system'];
             $totalRounds = $moduleOverrides['round_system']['total_rounds'] ?? $roundConfig['total_rounds'] ?? 10;
 
-            $roundManager = new RoundManager(
-                turnManager: $turnManager ?? null,
-                totalRounds: $totalRounds,
-                currentRound: 1
+            // RoundManager se auto-inicializa con configuración completa
+            // Internamente crea PhaseManager con las fases del config
+            $roundManager = RoundManager::createFromConfig(
+                config: $gameConfig,
+                playerIds: $playerIds,
+                totalRounds: $totalRounds
             );
 
+            // Conectar TimerService al PhaseManager interno si existe
+            if (isset($timerService) && $roundManager->getTurnManager()) {
+                $roundManager->getTurnManager()->setTimerService($timerService);
+            }
+
             $gameState = array_merge($gameState, $roundManager->toArray());
-            Log::debug("Round system initialized", ['total_rounds' => $totalRounds]);
+            Log::debug("Round system initialized with phases", [
+                'total_rounds' => $totalRounds,
+                'has_turn_manager' => $roundManager->getTurnManager() !== null
+            ]);
         }
 
         // ========================================================================
@@ -1908,6 +1889,60 @@ abstract class BaseGameEngine implements GameEngineInterface
         }
 
         return $configs[$slug];
+    }
+
+    /**
+     * Normalizar configuración de fases para PhaseManager.
+     *
+     * LÓGICA:
+     * - Si hay timing.{phase_name} configurados → juego multi-fase (ej: Mentiroso)
+     * - Si NO hay → juego single-fase, usar timer_system.round_duration o modules.turn_system.time_limit
+     *
+     * @return array Array de fases [{name, duration}, ...]
+     */
+    protected function getPhaseConfig(): array
+    {
+        $config = $this->getGameConfig();
+        $timing = $config['timing'] ?? [];
+        $timerSystem = $config['modules']['timer_system'] ?? [];
+        $turnSystem = $config['modules']['turn_system'] ?? [];
+
+        // 1. MULTI-FASE: Si hay configuración explícita de fases en timing
+        $phases = [];
+        $hasExplicitPhases = false;
+
+        foreach ($timing as $key => $phaseConfig) {
+            // Saltar configuraciones especiales que no son fases
+            if (in_array($key, ['game_start', 'round_start', 'round_ended', 'results', 'countdown_warning_threshold'])) {
+                continue;
+            }
+
+            // Si tiene duration, es una fase
+            if (isset($phaseConfig['duration'])) {
+                $phases[] = [
+                    'name' => $key,
+                    'duration' => $phaseConfig['duration']
+                ];
+                $hasExplicitPhases = true;
+            }
+        }
+
+        if ($hasExplicitPhases && count($phases) > 0) {
+            return $phases;
+        }
+
+        // 2. SINGLE-FASE: Crear fase única con nombre genérico
+        // Prioridad: timer_system.round_duration > turn_system.time_limit > 30 (default)
+        $duration = $timerSystem['round_duration']
+            ?? $turnSystem['time_limit']
+            ?? 30;
+
+        return [
+            [
+                'name' => 'main',  // Nombre genérico para fase única
+                'duration' => $duration
+            ]
+        ];
     }
 
     // ========================================================================

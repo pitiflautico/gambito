@@ -23,6 +23,140 @@ class TimingModule {
             countdownWarningThreshold: 3, // Segundos para cambiar a warning
             debug: false                   // Logging detallado (desactivado por defecto)
         };
+
+        // Auto-suscribirse a eventos del juego para cancelar timers automáticamente
+        this.subscribeToGameEvents();
+    }
+
+    /**
+     * Suscribirse a eventos del juego para gestión automática de timers
+     */
+    subscribeToGameEvents() {
+        console.log('🎯 [TimingModule] Subscribing to game events...');
+
+        // ROUND ENDED: Cancelar timers de fase/juego (NO el countdown de siguiente ronda)
+        window.addEventListener('game:round:ended', (e) => {
+            console.log('🏁 [TimingModule] Event received: game:round:ended', e.detail);
+            this.log('Round ended - cancelling game/phase timers');
+            this.cancelGameTimers();
+        });
+
+        // PLAYER DISCONNECTED: Pausar TODOS los timers (para poder reanudar después)
+        window.addEventListener('game:player:disconnected', (e) => {
+            console.log('🔌 [TimingModule] Event received: game:player:disconnected', e.detail);
+            console.log('🔌 [TimingModule] Active countdowns:', Array.from(this.activeCountdowns.keys()));
+            this.log('Player disconnected - pausing all timers');
+            this.pauseAllTimers();
+        });
+
+        // PLAYER RECONNECTED: Reanudar timers pausados
+        window.addEventListener('game:player:reconnected', (e) => {
+            console.log('🔄 [TimingModule] Event received: game:player:reconnected', e.detail);
+            this.log('Player reconnected - resuming timers');
+            this.resumeAllTimers();
+        });
+
+        // GAME FINISHED: Cancelar TODO definitivamente
+        window.addEventListener('game:finished', (e) => {
+            console.log('🏆 [TimingModule] Event received: game:finished', e.detail);
+            this.log('Game finished - cancelling all timers');
+            this.cancelAllTimers();
+        });
+
+        console.log('✅ [TimingModule] Event subscriptions complete');
+    }
+
+    /**
+     * Cancelar solo timers de juego/fase (NO countdowns de transición)
+     * Usado cuando termina una ronda para limpiar timers de votación, turnos, etc.
+     */
+    cancelGameTimers() {
+        const timerNames = Array.from(this.activeCountdowns.keys());
+        timerNames.forEach(name => {
+            // Cancelar timers de juego: preparation_timer, voting_timer, turn_timer, etc.
+            // NO cancelar: countdown (usado para transiciones entre rondas)
+            if (!name.includes('countdown') && !name.includes('transition')) {
+                this.cancelCountdown(name);
+            }
+        });
+    }
+
+    /**
+     * Pausar todos los timers activos
+     * Usado cuando un jugador se desconecta para poder reanudar después
+     */
+    pauseAllTimers() {
+        console.log('⏸️  [TimingModule] pauseAllTimers() called');
+        console.log('⏸️  [TimingModule] Active timers count:', this.activeCountdowns.size);
+
+        if (this.activeCountdowns.size === 0) {
+            console.log('⚠️  [TimingModule] No active timers to pause');
+            return;
+        }
+
+        this.activeCountdowns.forEach((countdown, name) => {
+            console.log(`⏸️  [TimingModule] Pausing timer: ${name}`, {
+                hasAnimationFrame: !!countdown.animationFrameId,
+                animationFrameId: countdown.animationFrameId,
+                hasElement: !!countdown.element
+            });
+
+            // Guardar el animationFrameId ANTES de cancelar
+            const frameId = countdown.animationFrameId;
+
+            // Cancelar el animationFrame pero guardar el estado
+            if (frameId) {
+                cancelAnimationFrame(frameId);
+                console.log(`✅ [TimingModule] Animation frame ${frameId} cancelled for ${name}`);
+                // Verificar que realmente se canceló
+                countdown.animationFrameId = null;
+            } else {
+                console.warn(`⚠️  [TimingModule] No animation frame to cancel for ${name}`);
+            }
+
+            // Marcar como pausado y guardar tiempo restante
+            const now = Date.now() - countdown.drift;
+            countdown.paused = true;
+            countdown.pausedAt = now;
+            countdown.remainingMs = countdown.endTime - now;
+
+            const remainingSeconds = Math.ceil(countdown.remainingMs / 1000);
+
+            // Actualizar el elemento visualmente y añadir clase de pausa
+            if (countdown.element) {
+                // Congelar el valor actual
+                countdown.element.textContent = remainingSeconds + ' ⏸️';
+                countdown.element.classList.add('timer-paused');
+                countdown.element.style.opacity = '0.6';
+                console.log(`🎨 [TimingModule] Timer ${name} frozen at ${remainingSeconds}s with pause indicator`);
+            }
+
+            this.log(`Timer ${name} paused with ${remainingSeconds}s remaining`);
+        });
+
+        console.log('✅ [TimingModule] All timers paused');
+    }
+
+    /**
+     * Reanudar todos los timers pausados
+     * Usado cuando un jugador se reconecta
+     */
+    resumeAllTimers() {
+        // TODO: Implementar lógica de reanudación
+        // Por ahora, cuando alguien se reconecta, el backend resetea la ronda
+        // por lo que no necesitamos reanudar timers (se crearán nuevos)
+        this.log('Timer resumption not implemented - backend resets round on reconnection');
+    }
+
+    /**
+     * Cancelar TODOS los timers (incluidos countdowns de transición)
+     * Usado cuando el juego termina completamente
+     */
+    cancelAllTimers() {
+        const timerNames = Array.from(this.activeCountdowns.keys());
+        timerNames.forEach(name => {
+            this.cancelCountdown(name);
+        });
     }
 
     /**
@@ -69,6 +203,16 @@ class TimingModule {
 
         let animationFrameId;
 
+        // Crear objeto de countdown que se actualizará
+        const countdownData = {
+            name,
+            animationFrameId: null,
+            element,
+            startTime,
+            endTime,
+            drift
+        };
+
         const update = () => {
             // Tiempo actual compensado por drift
             const now = Date.now() - drift;
@@ -107,22 +251,17 @@ class TimingModule {
 
             // Siguiente frame
             animationFrameId = requestAnimationFrame(update);
+            // Actualizar el objeto countdownData con el nuevo frame ID
+            countdownData.animationFrameId = animationFrameId;
         };
 
-        // Guardar countdown activo
-        const countdownData = {
-            name,
-            animationFrameId,
-            element,
-            startTime,
-            endTime,
-            drift
-        };
+        // Guardar countdown activo ANTES de iniciar animación
         this.activeCountdowns.set(name, countdownData);
 
-        // Iniciar animación
+        // Iniciar animación y guardar el primer frame ID
         this.lastLoggedSecond = null;
         animationFrameId = requestAnimationFrame(update);
+        countdownData.animationFrameId = animationFrameId;
 
         // Retornar cleanup function
         return () => {

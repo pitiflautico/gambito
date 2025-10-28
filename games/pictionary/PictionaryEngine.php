@@ -3,9 +3,11 @@
 namespace Games\Pictionary;
 
 use App\Contracts\BaseGameEngine;
+use App\Events\Game\PhaseChangedEvent;
 use App\Events\Pictionary\WordRevealedEvent;
 use App\Models\GameMatch;
 use App\Models\Player;
+use App\Services\Modules\RoundSystem\RoundManager;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -154,6 +156,54 @@ class PictionaryEngine extends BaseGameEngine
             'room_code' => $match->room->code,
             'drawer_rotation' => $playerIds
         ]);
+    }
+
+    /**
+     * ✅ SISTEMA UNIFICADO DE FASES: NO emitir timing en RoundStartedEvent
+     *
+     * El timing ahora se emite via PhaseChangedEvent en onRoundStarted()
+     */
+    protected function getRoundStartTiming(GameMatch $match): ?array
+    {
+        return null; // NO timing en RoundStartedEvent
+    }
+
+    /**
+     * ✅ SISTEMA UNIFICADO DE FASES: Emitir PhaseChangedEvent con timing
+     *
+     * Este hook se ejecuta DESPUÉS de RoundStartedEvent.
+     * Aquí obtenemos el PhaseManager y emitimos el evento con timing metadata.
+     */
+    protected function onRoundStarted(GameMatch $match, int $currentRound, int $totalRounds): void
+    {
+        $roundManager = $this->getRoundManager($match);
+        $phaseManager = $roundManager->getTurnManager(); // Es PhaseManager
+
+        if (!$phaseManager) {
+            Log::error("[Pictionary] PhaseManager NOT FOUND in RoundManager", ['match_id' => $match->id]);
+            return;
+        }
+
+        $currentPhase = $phaseManager->getCurrentPhaseName();
+        $timingInfo = $phaseManager->getTimingInfo();
+
+        $timing = [
+            'server_time' => now()->timestamp,
+            'duration' => $timingInfo['delay'] ?? 0
+        ];
+
+        Log::info("[Pictionary] Emitting PhaseChangedEvent after RoundStarted", [
+            'match_id' => $match->id,
+            'phase' => $currentPhase,
+            'duration' => $timing['duration']
+        ]);
+
+        event(new PhaseChangedEvent(
+            match: $match,
+            newPhase: $currentPhase,
+            previousPhase: '',  // Primera fase, no hay anterior
+            additionalData: $timing
+        ));
     }
 
     /**

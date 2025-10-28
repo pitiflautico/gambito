@@ -244,14 +244,7 @@ export class MentirosoGameClient extends BaseGameClient {
     async handleRoundEnded(event) {
         console.log('🏁 [FRONTEND] RoundEndedEvent RECIBIDO - Round:', event.round_number);
 
-        // IMPORTANTE: Cancelar TODOS los timers de fase antes de procesar resultados
-        // Si la ronda terminó porque todos votaron, el timer de "voting" sigue corriendo
-        // y necesitamos cancelarlo para que no interfiera con el countdown de resultados
-        this.timing.cancelCountdown('preparation_timer');
-        this.timing.cancelCountdown('persuasion_timer');
-        this.timing.cancelCountdown('voting_timer');
-
-        // Call parent handler first to update scores
+        // Call parent handler first (emite evento para TimingModule que cancela timers automáticamente)
         await super.handleRoundEnded(event);
 
         // Show results (gets data from event.results)
@@ -607,6 +600,43 @@ export class MentirosoGameClient extends BaseGameClient {
 
             // Update phase UI
             this.updatePhase(subPhase);
+
+            // IMPORTANTE: Iniciar timer si hay PhaseManager activo
+            // Esto maneja el caso donde el jugador entra JUSTO cuando empieza la partida
+            // y se pierde el PhaseChangedEvent inicial
+            if (gameState.phase_manager && subPhase) {
+                console.log('🔄 [Mentiroso] Restoring timer for phase:', subPhase);
+
+                // Obtener timing del PhaseManager
+                const phaseManager = gameState.phase_manager;
+                const phases = phaseManager.phases || [];
+                const currentPhaseIndex = phaseManager.current_turn_index || 0;
+                const currentPhaseConfig = phases[currentPhaseIndex];
+
+                if (currentPhaseConfig && currentPhaseConfig.duration) {
+                    const timerElement = this.getTimerElement();
+
+                    if (timerElement) {
+                        // Calcular tiempo restante desde server_time
+                        const serverTime = Math.floor(Date.now() / 1000);
+                        const durationMs = currentPhaseConfig.duration * 1000;
+
+                        console.log('⏰ [Mentiroso] Starting restored timer:', {
+                            phase: currentPhaseConfig.name,
+                            duration: currentPhaseConfig.duration,
+                            durationMs
+                        });
+
+                        this.timing.startServerSyncedCountdown(
+                            serverTime,
+                            durationMs,
+                            timerElement,
+                            () => this.onTimerExpired(subPhase),
+                            `${subPhase}_timer`
+                        );
+                    }
+                }
+            }
 
         } else if (gameState.phase === 'finished') {
             // Game is finished

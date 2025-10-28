@@ -123,23 +123,9 @@ export class BaseGameClient {
             this.presenceMonitor.setPhase('playing');
         }
 
-        // Mostrar timer si existe timing metadata
-        if (event.timing && event.timing.server_time && event.timing.duration) {
-            const timerElement = this.getTimerElement();
-
-            if (timerElement) {
-                // Convertir duración de segundos a milisegundos
-                const durationMs = event.timing.duration * 1000;
-
-                this.timing.startServerSyncedCountdown(
-                    event.timing.server_time,
-                    durationMs,
-                    timerElement,
-                    () => this.onTimerExpired(this.currentRound),
-                    'round_timer'
-                );
-            }
-        }
+        // NOTA: El timer ya NO se inicia aquí, se inicia en handlePhaseChanged()
+        // cuando llega PhaseChangedEvent después de RoundStartedEvent.
+        // Esto es porque ahora SIEMPRE hay fases (mínimo 1), y el timer es de fase, no de ronda.
 
         // Los juegos específicos sobrescriben este método para renderizar su contenido
     }
@@ -151,6 +137,11 @@ export class BaseGameClient {
      * y procesa timing metadata para auto-avanzar a la siguiente ronda.
      */
     async handleRoundEnded(event) {
+        // Emitir evento para que los módulos se encarguen (ej: TimingModule cancela sus timers)
+        window.dispatchEvent(new CustomEvent('game:round:ended', {
+            detail: event
+        }));
+
         // Actualizar scores (común para todos los juegos)
         if (event.scores) {
             this.scores = event.scores;
@@ -192,9 +183,53 @@ export class BaseGameClient {
      * Se ejecuta cuando el juego cambia de fase (ej: lobby -> playing -> finished)
      */
     handlePhaseChanged(event) {
+        console.log('🎯 [BaseGameClient] handlePhaseChanged called', event);
+
         // Actualizar fase en PresenceMonitor
-        if (this.presenceMonitor && event.phase) {
-            this.presenceMonitor.setPhase(event.phase);
+        if (this.presenceMonitor && event.new_phase) {
+            this.presenceMonitor.setPhase(event.new_phase);
+        }
+
+        // Iniciar timer de fase si viene timing metadata en additional_data
+        console.log('🔍 [BaseGameClient] Checking timer data:', {
+            has_additional_data: !!event.additional_data,
+            has_server_time: !!event.additional_data?.server_time,
+            has_duration: !!event.additional_data?.duration,
+            additional_data: event.additional_data
+        });
+
+        if (event.additional_data?.server_time && event.additional_data?.duration) {
+            const timerElement = this.getTimerElement();
+            console.log('🔍 [BaseGameClient] Timer element found:', !!timerElement, timerElement);
+
+            if (timerElement) {
+                // Convertir duración de segundos a milisegundos
+                const durationMs = event.additional_data.duration * 1000;
+
+                // Usar nombre de fase para el timer (o 'phase' por defecto)
+                const timerName = event.new_phase ? `phase_${event.new_phase}` : 'phase';
+
+                console.log('⏰ [BaseGameClient] Starting timer:', {
+                    timerName,
+                    server_time: event.additional_data.server_time,
+                    durationMs,
+                    duration_sec: event.additional_data.duration
+                });
+
+                this.timing.startServerSyncedCountdown(
+                    event.additional_data.server_time,
+                    durationMs,
+                    timerElement,
+                    () => this.onPhaseTimerExpired(event.new_phase), // Callback cuando expira
+                    timerName
+                );
+
+                console.log(`⏰ [BaseGameClient] Phase timer started: ${timerName} (${event.additional_data.duration}s)`);
+            } else {
+                console.warn('⚠️ [BaseGameClient] Timer element not found (id="timer")');
+            }
+        } else {
+            console.warn('⚠️ [BaseGameClient] No timing data in event');
         }
 
         // Los juegos específicos sobrescriben este método para manejar transiciones de fase
@@ -231,12 +266,8 @@ export class BaseGameClient {
      */
     handlePlayerDisconnected(event) {
 
-        // Pausar timer si está activo
-        if (this.timing && this.timing.activeTimers && this.timing.activeTimers.has('round_timer')) {
-            this.timing.clearTimer('round_timer');
-        }
-
-        // Dispatch custom event para que el Blade component muestre el popup
+        // Emitir evento para que los módulos se encarguen (ej: TimingModule cancela sus timers)
+        // También usado por el Blade component para mostrar el popup de desconexión
         window.dispatchEvent(new CustomEvent('game:player:disconnected', {
             detail: event
         }));
@@ -655,6 +686,42 @@ export class BaseGameClient {
     getTimerElement() {
         // Por defecto busca un elemento con id="timer"
         return document.getElementById('timer');
+    }
+
+    /**
+     * Callback cuando el timer de fase expira.
+     *
+     * Este método se ejecuta en el frontend cuando el countdown de fase llega a 0.
+     * Notifica al backend para que ejecute checkTimerAndAutoAdvance().
+     */
+    async onPhaseTimerExpired(phaseName) {
+        console.log(`⏰ [BaseGameClient] Phase timer expired: ${phaseName}`);
+
+        const timerElement = this.getTimerElement();
+        if (timerElement) {
+            timerElement.textContent = '¡Tiempo agotado!';
+            timerElement.classList.add('timer-expired');
+        }
+
+        try {
+            const response = await fetch(`/api/rooms/${this.roomCode}/check-timer`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content
+                },
+                body: JSON.stringify({
+                    phase: phaseName,
+                    timestamp: Date.now()
+                })
+            });
+
+            if (!response.ok) {
+                console.error('❌ [BaseGameClient] Error checking timer:', response.statusText);
+            }
+        } catch (error) {
+            console.error('❌ [BaseGameClient] Failed to notify backend about timer expiration:', error);
+        }
     }
 
     /**

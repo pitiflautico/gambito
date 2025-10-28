@@ -183,7 +183,11 @@
                             game_state: gameState
                         };
 
+                        // Mostrar la pregunta primero
+                        triviaClient.handleRoundStarted(eventData);
+
                         // Agregar timing metadata si hay un timer activo
+                        // NOTA: El timer ahora está en el PhaseManager, no en round
                         const timerData = gameState.timer_system?.timers?.round;
                         if (timerData) {
                             // Reconstruir timing metadata desde el timer del backend
@@ -191,15 +195,22 @@
                             const pausedAt = timerData.paused_at ? new Date(timerData.paused_at).getTime() / 1000 : null;
                             const duration = timerData.duration;
 
-                            eventData.timing = {
-                                duration: duration,
-                                server_time: startedAt,
-                                countdown_visible: true,
-                                warning_threshold: 3
+                            // Simular PhaseChangedEvent para que BaseGameClient reinicie el timer
+                            const phaseEvent = {
+                                new_phase: 'main',
+                                previous_phase: '',
+                                additional_data: {
+                                    server_time: startedAt,
+                                    duration: duration
+                                }
                             };
-                        }
 
-                        triviaClient.handleRoundStarted(eventData);
+                            // Después de mostrar la pregunta, emitir el evento de fase
+                            // para que BaseGameClient.handlePhaseChanged() reinicie el timer
+                            setTimeout(() => {
+                                triviaClient.handlePhaseChanged(phaseEvent);
+                            }, 100);
+                        }
 
                         // Si ya respondimos, mostrar overlay de bloqueado
                         // Los locks se guardan en player_state_system.locks como objeto {playerId: true/false}

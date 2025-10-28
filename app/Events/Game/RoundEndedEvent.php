@@ -23,6 +23,7 @@ class RoundEndedEvent implements ShouldBroadcast
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
+    public GameMatch $match;
     public string $roomCode;
     public int $roundNumber;
     public array $results;
@@ -36,6 +37,7 @@ class RoundEndedEvent implements ShouldBroadcast
         array $scores = [],
         ?array $timing = null
     ) {
+        $this->match = $match;
         $this->roomCode = $match->room->code;
         $this->roundNumber = $roundNumber;
         $this->results = $results;

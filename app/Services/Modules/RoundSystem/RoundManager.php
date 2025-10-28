@@ -3,6 +3,7 @@
 namespace App\Services\Modules\RoundSystem;
 
 use App\Services\Modules\TurnSystem\TurnManager;
+use App\Services\Modules\TurnSystem\PhaseManager;
 
 /**
  * Servicio genérico para gestionar rondas en juegos.
@@ -59,6 +60,96 @@ class RoundManager
         $this->turnManager = $turnManager;
         $this->totalRounds = $totalRounds;
         $this->currentRound = $currentRound;
+    }
+
+    /**
+     * Factory method: Crear RoundManager desde configuración del juego.
+     *
+     * Este método centraliza la inicialización completa del sistema de rondas:
+     * - Lee la configuración de fases
+     * - Crea PhaseManager con las fases configuradas
+     * - Inicializa RoundManager con el PhaseManager
+     *
+     * @param array $config Configuración del juego (timing, modules, etc.)
+     * @param array $playerIds IDs de jugadores para TurnManager
+     * @param int $totalRounds Total de rondas
+     * @return self RoundManager inicializado
+     */
+    public static function createFromConfig(array $config, array $playerIds, int $totalRounds): self
+    {
+        $modules = $config['modules'] ?? [];
+        $timing = $config['timing'] ?? [];
+
+        // Extraer configuración de turnos
+        $turnConfig = $modules['turn_system'] ?? [];
+        $mode = $turnConfig['mode'] ?? 'sequential';
+
+        // Obtener configuración de fases
+        $phases = self::extractPhasesFromConfig($config);
+
+        // Crear PhaseManager (siempre, mínimo 1 fase)
+        $phaseManager = new PhaseManager($phases);
+
+        // Crear RoundManager con el PhaseManager
+        return new self(
+            turnManager: $phaseManager,
+            totalRounds: $totalRounds,
+            currentRound: 1
+        );
+    }
+
+    /**
+     * Extraer configuración de fases desde config del juego.
+     *
+     * Lógica:
+     * - Si hay timing.{phase_name} configurados → juego multi-fase
+     * - Si NO hay → juego single-fase, usar timer_system.round_duration
+     *
+     * @param array $config Configuración del juego
+     * @return array Array de fases [{name, duration}, ...]
+     */
+    protected static function extractPhasesFromConfig(array $config): array
+    {
+        $timing = $config['timing'] ?? [];
+        $timerSystem = $config['modules']['timer_system'] ?? [];
+        $turnSystem = $config['modules']['turn_system'] ?? [];
+
+        // 1. MULTI-FASE: Si hay configuración explícita de fases en timing
+        $phases = [];
+        $hasExplicitPhases = false;
+
+        foreach ($timing as $key => $phaseConfig) {
+            // Saltar configuraciones especiales que no son fases
+            if (in_array($key, ['game_start', 'round_start', 'round_ended', 'results', 'countdown_warning_threshold'])) {
+                continue;
+            }
+
+            // Si tiene duration, es una fase
+            if (isset($phaseConfig['duration'])) {
+                $phases[] = [
+                    'name' => $key,
+                    'duration' => $phaseConfig['duration']
+                ];
+                $hasExplicitPhases = true;
+            }
+        }
+
+        if ($hasExplicitPhases && count($phases) > 0) {
+            return $phases;
+        }
+
+        // 2. SINGLE-FASE: Crear fase única con nombre genérico
+        // Prioridad: timer_system.round_duration > turn_system.time_limit > 30 (default)
+        $duration = $timerSystem['round_duration']
+            ?? $turnSystem['time_limit']
+            ?? 30;
+
+        return [
+            [
+                'name' => 'main',  // Nombre genérico para fase única
+                'duration' => $duration
+            ]
+        ];
     }
 
     /**
@@ -294,10 +385,15 @@ class RoundManager
         // Soporte para ambos formatos: nuevo (round_system) y legacy (claves directas)
         $roundData = $data['round_system'] ?? $data;
 
-        // Restaurar TurnManager solo si existe en el state
+        // Restaurar TurnManager/PhaseManager solo si existe en el state
         $turnManager = null;
         if (isset($data['turn_system'])) {
-            $turnManager = TurnManager::fromArray($data['turn_system']);
+            // Detectar si es PhaseManager (tiene 'phases' key) o TurnManager básico
+            if (isset($data['turn_system']['phases'])) {
+                $turnManager = PhaseManager::fromArray($data['turn_system']);
+            } else {
+                $turnManager = TurnManager::fromArray($data['turn_system']);
+            }
 
             // Si existe TimerService en el state, conectarlo automáticamente al TurnManager
             if (isset($data['timer_system'])) {
