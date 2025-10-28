@@ -268,12 +268,12 @@ class PlayController extends Controller
     }
 
     /**
-     * API: Verificar si el timer expiró y completar ronda si es necesario.
+     * API: Verificar si el timer expiró y ejecutar acción correspondiente.
      *
-     * Este endpoint se llama desde el frontend cuando el timer de ronda expira.
-     * Ejecuta checkTimerAndAutoAdvance() que verifica si el timer realmente expiró
-     * y si es así, llama a completeRound() para seguir el flujo correcto:
-     * completeRound() → RoundEndedEvent → advance → RoundStartedEvent
+     * Legacy mode (sin timer_type): checkTimerAndAutoAdvance() → completa ronda
+     * New mode (con timer_type): onTimerExpired() → maneja timers específicos
+     *
+     * Backward compatible con juegos existentes.
      */
     public function apiCheckTimer(Request $request, string $code)
     {
@@ -300,8 +300,21 @@ class PlayController extends Controller
             // Obtener el engine del juego
             $engine = $match->getEngine();
 
-            // Verificar si el timer expiró y auto-advance si es necesario
-            // Este método llama internamente a completeRound() si el timer expiró
+            // Obtener tipo de timer (opcional, para backward compatibility)
+            $timerType = $request->input('timer_type');
+
+            // Si se especifica timer_type y el engine soporta onTimerExpired
+            if ($timerType && method_exists($engine, 'onTimerExpired')) {
+                $result = $engine->onTimerExpired($match, $timerType);
+
+                return response()->json([
+                    'success' => true,
+                    'message' => "Timer '{$timerType}' handled",
+                    'result' => $result,
+                ], 200);
+            }
+
+            // Fallback: comportamiento legacy (timer de ronda)
             $wasCompleted = $engine->checkTimerAndAutoAdvance($match);
 
             if ($wasCompleted) {

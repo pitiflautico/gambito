@@ -1,6 +1,6 @@
 <?php
 
-use App\Http\Controllers\GameController;
+// use App\Http\Controllers\GameController;
 use App\Http\Controllers\PlayController;
 use App\Http\Controllers\RoomController;
 use App\Http\Controllers\TeamController;
@@ -18,10 +18,10 @@ use Illuminate\Support\Facades\Route;
 */
 
 // API de Juegos
-Route::prefix('games')->name('api.games.')->group(function () {
-    Route::get('/', [GameController::class, 'apiIndex'])->name('index');
-    Route::get('/{slug}', [GameController::class, 'apiShow'])->name('show');
-});
+// Route::prefix('games')->name('api.games.')->group(function () {
+//     Route::get('/', [GameController::class, 'apiIndex'])->name('index');
+//     Route::get('/{slug}', [GameController::class, 'apiShow'])->name('show');
+// });
 
 // API de Salas
 Route::prefix('rooms')->name('api.rooms.')->group(function () {

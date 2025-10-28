@@ -3,9 +3,9 @@
 namespace App\Events\Game;
 
 use App\Models\GameMatch;
-use Illuminate\Broadcasting\Channel;
+use Illuminate\Broadcasting\PresenceChannel;
 use Illuminate\Broadcasting\InteractsWithSockets;
-use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
@@ -14,7 +14,7 @@ use Illuminate\Queue\SerializesModels;
  *
  * Fases comunes: waiting, playing, scoring, results, finished
  */
-class PhaseChangedEvent implements ShouldBroadcast
+class PhaseChangedEvent implements ShouldBroadcastNow
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
@@ -35,9 +35,9 @@ class PhaseChangedEvent implements ShouldBroadcast
         $this->additionalData = $additionalData;
     }
 
-    public function broadcastOn(): Channel
+    public function broadcastOn(): PresenceChannel
     {
-        return new Channel("room.{$this->roomCode}");
+        return new PresenceChannel("room.{$this->roomCode}");
     }
 
     public function broadcastAs(): string

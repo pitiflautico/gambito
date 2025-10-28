@@ -1,0 +1,85 @@
+{
+  "slug": "mentiroso",
+  "version": "1.0",
+  "requires": {
+    "websockets": true,
+    "turns": true,
+    "phases": true,
+    "roles": true,
+    "timers": true,
+    "scoring": true
+  },
+  "provides": {
+    "events": [
+      "StatementRevealedEvent"
+    ],
+    "routes": [
+      "POST /api/rooms/{roomCode}/game/mentiroso/vote"
+    ],
+    "views": [
+      "games/mentiroso/game"
+    ]
+  },
+  "event_config": {
+    "channel": "room.{roomCode}",
+    "events": {
+      "GameStartedEvent": {
+        "name": "game.started",
+        "description": "Sistema: Juego iniciado",
+        "handler": "handleGameStarted"
+      },
+      "RoundStartedEvent": {
+        "name": "game.round.started",
+        "description": "Sistema: Nueva ronda iniciada con orador y frase",
+        "handler": "handleRoundStarted"
+      },
+      "RoundEndedEvent": {
+        "name": "game.round.ended",
+        "description": "Sistema: Ronda finalizada con resultados",
+        "handler": "handleRoundEnded"
+      },
+      "PhaseChangedEvent": {
+        "name": "game.phase.changed",
+        "description": "Sistema: Cambio de fase dentro de una ronda (preparation → persuasion → voting)",
+        "handler": "handlePhaseChanged"
+      },
+      "StatementRevealedEvent": {
+        "name": "statement.revealed",
+        "description": "Revela la frase y su veracidad SOLO al orador (canal privado)",
+        "handler": "handleStatementRevealed",
+        "channel": "private",
+        "channel_name": "player.{oradorId}"
+      },
+      "GameStateUpdatedEvent": {
+        "name": "game.state.updated",
+        "description": "Broadcast cambios de estado del juego",
+        "handler": "handleGameStateUpdated"
+      },
+      "PlayersUnlockedEvent": {
+        "name": "game.players.unlocked",
+        "description": "Broadcast cuando todos los jugadores son desbloqueados (nueva ronda)",
+        "handler": "handlePlayersUnlocked"
+      },
+      "PlayerScoreUpdatedEvent": {
+        "name": "player.score.updated",
+        "description": "Broadcast cuando cambia la puntuación de un jugador",
+        "handler": "handlePlayerScoreUpdated"
+      },
+      "TimerUpdatedEvent": {
+        "name": "timer.updated",
+        "description": "Actualización del temporizador cada segundo",
+        "handler": "handleTimerUpdate"
+      },
+      "PlayerDisconnectedEvent": {
+        "name": "game.player.disconnected",
+        "description": "Sistema: Jugador desconectado",
+        "handler": "handlePlayerDisconnected"
+      },
+      "PlayerReconnectedEvent": {
+        "name": "game.player.reconnected",
+        "description": "Sistema: Jugador reconectado",
+        "handler": "handlePlayerReconnected"
+      }
+    }
+  }
+}

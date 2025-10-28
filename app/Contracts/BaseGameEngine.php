@@ -82,14 +82,6 @@ abstract class BaseGameEngine implements GameEngineInterface
     abstract protected function startNewRound(GameMatch $match): void;
 
     /**
-     * Finalizar la ronda actual y calcular resultados.
-     *
-     * @param GameMatch $match
-     * @return void
-     */
-    abstract public function endCurrentRound(GameMatch $match): void;
-    
-    /**
      * Verificar el estado actual de la ronda según las reglas del juego.
      * 
      * Este método OPCIONAL permite al juego analizar si la ronda debe terminar
@@ -483,42 +475,109 @@ abstract class BaseGameEngine implements GameEngineInterface
             ]);
         }
 
+        // 2.1. LÓGICA BASE: Resetear PlayerManager (desbloquear jugadores, limpiar acciones)
+        // Esto debe hacerse ANTES de startNewRound() para que los juegos ya tengan
+        // los jugadores listos para la nueva ronda
+        if ($this->isModuleEnabled($match, 'player_system')) {
+            $playerManager = $this->getPlayerManager($match, $this->scoreCalculator ?? null);
+            $playerManager->reset($match);  // Emite PlayersUnlockedEvent automáticamente
+            $this->savePlayerManager($match, $playerManager);
+
+            Log::info("[{$this->getGameSlug()}] PlayerManager reset - players unlocked", [
+                'match_id' => $match->id
+            ]);
+        }
+
         // 3. Llamar a la lógica específica del juego
         $this->startNewRound($match);
 
         // 3.1. Iniciar timer de ronda automáticamente (si está configurado)
-        // Esto hace que todos los juegos tengan timers disponibles sin código duplicado
-        $this->startRoundTimer($match);
+        // DELEGADO A ROUNDMANAGER: Los módulos gestionan sus propios timers
+        if ($this->isModuleEnabled($match, 'round_system') && $this->isModuleEnabled($match, 'timer_system')) {
+            $roundManager = $this->getRoundManager($match);
+            $timerService = $this->getTimerService($match);
+            $config = $match->game_state['_config'] ?? [];
 
-        // 4. Obtener metadata de la ronda del estado del juego
-        $roundData = $match->game_state['round_system'] ?? [];
-        $currentRound = $roundData['current_round'] ?? 1;
-        $totalRounds = $roundData['total_rounds'] ?? 0;
+            if ($roundManager->startRoundTimer($match, $timerService, $config)) {
+                // Timer iniciado, guardar en game_state
+                $this->saveTimerService($match, $timerService);
+                Log::info("[{$this->getGameSlug()}] Round timer started by RoundManager");
+            }
+        }
 
-        // 5. Obtener timing metadata del config del juego (si existe)
-        $timing = $this->getRoundStartTiming($match);
-
-        // 6. Filtrar game_state para remover información sensible
+        // 4. Filtrar game_state para remover información sensible
         $filteredGameState = $this->filterGameStateForBroadcast($match->game_state, $match);
 
-        // 7. Crear copia temporal del match con game_state filtrado para el evento
+        // 5. Crear copia temporal del match con game_state filtrado para el evento
         $matchForEvent = clone $match;
         $matchForEvent->game_state = $filteredGameState;
 
-        // 8. Emitir evento genérico RoundStartedEvent
-        event(new \App\Events\Game\RoundStartedEvent(
-            match: $matchForEvent,
-            currentRound: $currentRound,
-            totalRounds: $totalRounds,
-            phase: $match->game_state['phase'] ?? 'playing',
-            timing: $timing
-        ));
+        // 6. Obtener timing metadata del config del juego (si existe)
+        $timing = $this->getRoundStartTiming($match);
 
-        Log::info("[{$this->getGameSlug()}] RoundStartedEvent emitted", [
-            'match_id' => $match->id,
-            'current_round' => $currentRound,
-            'total_rounds' => $totalRounds
-        ]);
+        // 7. Obtener RoundManager
+        $roundManager = $this->getRoundManager($match);
+
+        // 8. Delegar emisión del evento a RoundManager
+        // RoundManager conoce TODA la información necesaria:
+        // - current_round, total_rounds (propias)
+        // - phase (desde TurnManager/PhaseManager o game_state)
+        // Solo necesitamos pasarle el timing personalizado del juego
+        $roundManager->emitRoundStartedEvent(
+            match: $matchForEvent,
+            timing: $timing
+        );
+
+        // 9. Llamar al hook para que el juego ejecute lógica custom después del evento
+        $currentRound = $roundManager->getCurrentRound();
+        $totalRounds = $roundManager->getTotalRounds();
+        $this->onRoundStarted($match, $currentRound, $totalRounds);
+    }
+
+    /**
+     * Hook: Ejecutado DESPUÉS de emitir RoundStartedEvent.
+     *
+     * Los juegos pueden sobrescribir este método para ejecutar lógica custom
+     * después de que la ronda haya empezado y el evento haya sido emitido.
+     *
+     * Ejemplos de uso:
+     * - Iniciar timers específicos del juego
+     * - Enviar notificaciones privadas a jugadores
+     * - Ejecutar lógica de negocio específica del juego
+     *
+     * @param GameMatch $match
+     * @param int $currentRound
+     * @param int $totalRounds
+     * @return void
+     */
+    protected function onRoundStarted(GameMatch $match, int $currentRound, int $totalRounds): void
+    {
+        // Implementación vacía por defecto
+        // Los juegos específicos pueden sobrescribir este método
+    }
+
+    /**
+     * Hook: Ejecutado DESPUÉS de emitir RoundEndedEvent.
+     *
+     * Los juegos pueden sobrescribir este método para ejecutar lógica custom
+     * después de que la ronda haya terminado y el evento haya sido emitido.
+     *
+     * Ejemplos de uso:
+     * - Cancelar timers específicos del juego
+     * - Calcular estadísticas de la ronda
+     * - Preparar datos para la siguiente ronda
+     * - Ejecutar lógica de negocio específica del juego
+     *
+     * @param GameMatch $match
+     * @param int $roundNumber Número de la ronda que terminó
+     * @param array $results Resultados de la ronda
+     * @param array $scores Puntuaciones actuales
+     * @return void
+     */
+    protected function onRoundEnded(GameMatch $match, int $roundNumber, array $results, array $scores): void
+    {
+        // Implementación vacía por defecto
+        // Los juegos específicos pueden sobrescribir este método
     }
 
     /**
@@ -709,9 +768,51 @@ abstract class BaseGameEngine implements GameEngineInterface
 
 
     /**
+     * Finalizar ronda actual (GENÉRICO para todos los juegos).
+     *
+     * Este método implementa el flujo completo de finalización:
+     * 1. Obtiene resultados via getRoundResults() (implementado por cada juego)
+     * 2. Llama a completeRound() que maneja todo el resto
+     *
+     * Los juegos NO necesitan implementar endCurrentRound(), solo getRoundResults().
+     *
+     * @param GameMatch $match
+     * @return void
+     */
+    public function endCurrentRound(GameMatch $match): void
+    {
+        Log::info("[{$this->getGameSlug()}] Ending current round", ['match_id' => $match->id]);
+
+        // 1. Obtener resultados del juego (cada juego implementa su propia lógica)
+        $results = $this->getRoundResults($match);
+
+        // 2. Completar ronda (emitir eventos, avanzar, etc.)
+        $this->completeRound($match, $results);
+
+        Log::info("[{$this->getGameSlug()}] Round ended", [
+            'match_id' => $match->id,
+            'winner_id' => $results['winner_id'] ?? null
+        ]);
+    }
+
+    /**
+     * Obtener resultados de la ronda actual.
+     *
+     * Cada juego implementa su propia lógica para recopilar resultados:
+     * - Quién respondió/jugó
+     * - Quién ganó/acertó
+     * - Puntos obtenidos
+     * - Datos específicos del juego
+     *
+     * @param GameMatch $match
+     * @return array Resultados de la ronda
+     */
+    abstract protected function getRoundResults(GameMatch $match): array;
+
+    /**
      * Completar la ronda actual y avanzar a la siguiente.
      *
-     * ESTE ES EL MÉTODO QUE DEBES LLAMAR desde endCurrentRound().
+     * MÉTODO INTERNO - Los juegos deben usar endCurrentRound() en su lugar.
      * Coordina todo el flujo de finalización y avance de rondas:
      *
      * 1. Emite RoundEndedEvent (con resultados del juego específico)
@@ -748,13 +849,17 @@ abstract class BaseGameEngine implements GameEngineInterface
         // 2. Delegar a RoundManager para completar la ronda
         // RoundManager maneja: emitir evento, avanzar, programar backup, etc.
         $roundManager->completeRound($match, $results, $scores);
-        
+
         Log::info("[{$this->getGameSlug()}] roundManager->completeRound() finished");
 
-        // 3. Guardar estado actualizado
+        // 3. Llamar al hook para que el juego ejecute lógica custom después del evento
+        $currentRound = $roundManager->getCurrentRound();
+        $this->onRoundEnded($match, $currentRound, $results, $scores);
+
+        // 4. Guardar estado actualizado
         $this->saveRoundManager($match, $roundManager);
 
-        // 4. Verificar si el juego terminó
+        // 5. Verificar si el juego terminó
         if ($roundManager->isGameComplete()) {
             Log::info("[{$this->getGameSlug()}] Game complete, finalizing", [
                 'match_id' => $match->id,
@@ -1522,24 +1627,40 @@ abstract class BaseGameEngine implements GameEngineInterface
      * @param bool $restart Si true, reinicia el timer si ya existe
      * @return void
      */
-    protected function createTimer(GameMatch $match, string $name, int $seconds, bool $restart = false): void
-    {
+    /**
+     * Crear timer con evento configurado.
+     *
+     * @param GameMatch $match
+     * @param string $name Nombre del timer
+     * @param int $seconds Duración en segundos
+     * @param string|null $eventToEmit Clase del evento a emitir cuando expire
+     * @param array $eventData Datos a pasar al evento
+     * @param bool $restart Si true, reinicia el timer si ya existe
+     * @return void
+     */
+    protected function createTimer(
+        GameMatch $match,
+        string $name,
+        int $seconds,
+        ?string $eventToEmit = null,
+        array $eventData = [],
+        bool $restart = false
+    ): void {
         $timerService = $this->getTimerService($match);
-        $timerService->startTimer($name, $seconds, null, $restart);
+        $timerService->startTimer($name, $seconds, $eventToEmit, $eventData, null, $restart);
         $this->saveTimerService($match, $timerService);
     }
 
     /**
      * Iniciar timer de ronda automáticamente si está configurado.
      *
-     * Este helper simplifica el inicio de timers en startNewRound():
-     * - Lee la configuración del juego para obtener duración del timer
-     * - Inicia un timer llamado "round" con la duración configurada
-     * - Guarda el timer en game_state automáticamente
-     * - Si el timer ya existe, lo reinicia automáticamente
+     * @deprecated Este método está DEPRECADO. Usa RoundManager::startRoundTimer() en su lugar.
      *
-     * Uso típico en startNewRound():
-     *   $this->startRoundTimer($match);
+     * RAZÓN: Los módulos deben gestionar sus propios timers y eventos.
+     * RoundManager es responsable de los timers de ronda, no BaseGameEngine.
+     *
+     * Este método se mantiene por compatibilidad pero ya no se usa internamente.
+     * handleNewRound() ahora delega a RoundManager::startRoundTimer().
      *
      * @param GameMatch $match
      * @param string $timerName Nombre del timer (default: 'round')
@@ -1562,8 +1683,16 @@ abstract class BaseGameEngine implements GameEngineInterface
             'duration' => $duration
         ]);
 
-        // Usar restart=true para que el TimerService maneje la lógica
-        $this->createTimer($match, $timerName, $duration, $restart = true);
+        // Configurar timer para emitir RoundTimerExpiredEvent cuando expire
+        $currentRound = $match->game_state['round_system']['current_round'] ?? 1;
+        $this->createTimer(
+            match: $match,
+            name: $timerName,
+            seconds: $duration,
+            eventToEmit: \App\Events\Game\RoundTimerExpiredEvent::class,
+            eventData: [$match, $currentRound, $timerName],
+            restart: true
+        );
 
         return true;
     }
@@ -1641,13 +1770,14 @@ abstract class BaseGameEngine implements GameEngineInterface
 
         $currentRound = $gameState['round_system']['current_round'] ?? null;
 
-        Log::info("[{$this->getGameSlug()}] Round timer expired - emitting event", [
+        Log::info("[{$this->getGameSlug()}] Round timer expired", [
             'match_id' => $match->id,
             'current_round' => $currentRound
         ]);
 
-        // Emitir evento genérico para que el frontend sepa que el timer expiró
-        event(new \App\Events\Game\RoundTimerExpiredEvent($match, $currentRound, 'round'));
+        // Obtener TimerService y delegar emisión del evento
+        $timerService = $this->getTimerService($match);
+        $timerService->emitTimerExpiredEvent($match, 'round', $currentRound);
 
         // Delegar al juego específico para que decida qué hacer
         // Trivia: completará la ronda

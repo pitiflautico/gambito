@@ -1,0 +1,192 @@
+{
+  "statements": [
+    {
+      "id": 1,
+      "text": "Los gatos no pueden saborear lo dulce",
+      "is_true": true,
+      "category": "animales"
+    },
+    {
+      "id": 2,
+      "text": "Las jirafas tienen las mismas vértebras en el cuello que los humanos",
+      "is_true": true,
+      "category": "animales"
+    },
+    {
+      "id": 3,
+      "text": "Los tiburones son inmunes al cáncer",
+      "is_true": false,
+      "category": "animales"
+    },
+    {
+      "id": 4,
+      "text": "El pulpo tiene tres corazones",
+      "is_true": true,
+      "category": "animales"
+    },
+    {
+      "id": 5,
+      "text": "Las abejas pueden reconocer rostros humanos",
+      "is_true": true,
+      "category": "animales"
+    },
+    {
+      "id": 6,
+      "text": "La miel nunca se echa a perder",
+      "is_true": true,
+      "category": "comida"
+    },
+    {
+      "id": 7,
+      "text": "Los plátanos son bayas pero las fresas no lo son",
+      "is_true": true,
+      "category": "comida"
+    },
+    {
+      "id": 8,
+      "text": "El chocolate era moneda en la civilización azteca",
+      "is_true": true,
+      "category": "comida"
+    },
+    {
+      "id": 9,
+      "text": "Las zanahorias siempre han sido naranjas",
+      "is_true": false,
+      "category": "comida"
+    },
+    {
+      "id": 10,
+      "text": "El café es la segunda mercancía más comercializada del mundo después del petróleo",
+      "is_true": false,
+      "category": "comida"
+    },
+    {
+      "id": 11,
+      "text": "La Torre Eiffel puede crecer 15 cm en verano",
+      "is_true": true,
+      "category": "ciencia"
+    },
+    {
+      "id": 12,
+      "text": "Un día en Venus es más largo que un año en Venus",
+      "is_true": true,
+      "category": "ciencia"
+    },
+    {
+      "id": 13,
+      "text": "El agua caliente se congela más rápido que el agua fría",
+      "is_true": true,
+      "category": "ciencia"
+    },
+    {
+      "id": 14,
+      "text": "Los humanos comparten el 50% de su ADN con los plátanos",
+      "is_true": true,
+      "category": "ciencia"
+    },
+    {
+      "id": 15,
+      "text": "Los rayos nunca caen dos veces en el mismo lugar",
+      "is_true": false,
+      "category": "ciencia"
+    },
+    {
+      "id": 16,
+      "text": "Cleopatra vivió más cerca de la llegada del hombre a la Luna que de la construcción de las Pirámides",
+      "is_true": true,
+      "category": "historia"
+    },
+    {
+      "id": 17,
+      "text": "Oxford University es más antigua que el Imperio Azteca",
+      "is_true": true,
+      "category": "historia"
+    },
+    {
+      "id": 18,
+      "text": "La Gran Muralla China es visible desde el espacio",
+      "is_true": false,
+      "category": "historia"
+    },
+    {
+      "id": 19,
+      "text": "Los vikingos llegaron a América antes que Colón",
+      "is_true": true,
+      "category": "historia"
+    },
+    {
+      "id": 20,
+      "text": "Napoleón Bonaparte era de baja estatura",
+      "is_true": false,
+      "category": "historia"
+    },
+    {
+      "id": 21,
+      "text": "El corazón humano late más de 100,000 veces al día",
+      "is_true": true,
+      "category": "cuerpo_humano"
+    },
+    {
+      "id": 22,
+      "text": "Los humanos tienen más huesos al nacer que cuando son adultos",
+      "is_true": true,
+      "category": "cuerpo_humano"
+    },
+    {
+      "id": 23,
+      "text": "Solo usamos el 10% de nuestro cerebro",
+      "is_true": false,
+      "category": "cuerpo_humano"
+    },
+    {
+      "id": 24,
+      "text": "Los ojos nunca dejan de crecer durante toda la vida",
+      "is_true": false,
+      "category": "cuerpo_humano"
+    },
+    {
+      "id": 25,
+      "text": "El estómago produce un nuevo revestimiento cada 3-4 días",
+      "is_true": true,
+      "category": "cuerpo_humano"
+    },
+    {
+      "id": 26,
+      "text": "Nintendo fue fundada en 1889 como una compañía de naipes",
+      "is_true": true,
+      "category": "tecnologia"
+    },
+    {
+      "id": 27,
+      "text": "El primer iPhone salió antes que el primer Android",
+      "is_true": true,
+      "category": "tecnologia"
+    },
+    {
+      "id": 28,
+      "text": "USB significa 'Universal Serial Bus'",
+      "is_true": true,
+      "category": "tecnologia"
+    },
+    {
+      "id": 29,
+      "text": "Google era originalmente llamado BackRub",
+      "is_true": true,
+      "category": "tecnologia"
+    },
+    {
+      "id": 30,
+      "text": "El primer ordenador pesaba más de 27 toneladas",
+      "is_true": true,
+      "category": "tecnologia"
+    }
+  ],
+  "categories": [
+    "animales",
+    "comida",
+    "ciencia",
+    "historia",
+    "cuerpo_humano",
+    "tecnologia"
+  ]
+}

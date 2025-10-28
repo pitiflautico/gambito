@@ -338,7 +338,7 @@ class RoundManager
         try {
             // 1. Leer configuración de timing desde game_state
             $gameConfig = $match->game_state['_config'] ?? [];
-            $timingConfig = $gameConfig['timing']['round_ended'] ?? null;
+            $timingConfig = $gameConfig['timing']['results'] ?? $gameConfig['timing']['round_ended'] ?? null;
             $roundPerTurn = $gameConfig['modules']['turn_system']['round_per_turn'] ?? false;
 
             // Si es la última ronda, NO auto-avanzar (el juego ya terminó o va a terminar)
@@ -361,7 +361,7 @@ class RoundManager
             ]);
 
             // 2. Emitir evento RoundEndedEvent con timing metadata
-            \Log::info('[RoundManager] About to emit RoundEndedEvent');
+            \Log::info("🏁 [BACKEND] Emitiendo RoundEndedEvent - Round: {$this->currentRound}");
             event(new \App\Events\Game\RoundEndedEvent(
                 match: $match,
                 roundNumber: $this->currentRound,
@@ -459,5 +459,105 @@ class RoundManager
         if ($this->turnManager) {
             $this->turnManager->reset();
         }
+    }
+
+    /**
+     * Emitir RoundStartedEvent.
+     *
+     * Este método es responsable ÚNICO de emitir el evento de inicio de ronda.
+     * RoundManager conoce toda la información necesaria:
+     * - current_round, total_rounds (propias)
+     * - phase (desde TurnManager/PhaseManager si está disponible)
+     *
+     * @param \App\Models\GameMatch $match Match del juego (ya filtrado si es necesario)
+     * @param array|null $timing Metadata de timing (opcional)
+     * @return void
+     */
+    public function emitRoundStartedEvent(
+        \App\Models\GameMatch $match,
+        ?array $timing = null
+    ): void {
+        // Obtener fase actual desde TurnManager si está disponible
+        $phase = 'playing'; // Default
+
+        if ($this->turnManager) {
+            // Si es PhaseManager, obtener fase actual
+            if ($this->turnManager instanceof \App\Services\Modules\TurnSystem\PhaseManager) {
+                $phase = $this->turnManager->getCurrentPhaseName();
+            }
+            // Si no, usar 'playing' como default
+        }
+
+        // También intentar leer desde game_state como fallback
+        if (isset($match->game_state['phase'])) {
+            $phase = $match->game_state['phase'];
+        }
+
+        \Log::info("🏁 [BACKEND] Emitiendo RoundStartedEvent - Round: {$this->currentRound}/{$this->totalRounds}, Phase: {$phase}");
+
+        event(new \App\Events\Game\RoundStartedEvent(
+            match: $match,
+            currentRound: $this->currentRound,
+            totalRounds: $this->totalRounds,
+            phase: $phase,
+            timing: $timing
+        ));
+
+        \Log::info('[RoundManager] RoundStartedEvent emitted', [
+            'match_id' => $match->id,
+            'current_round' => $this->currentRound,
+            'total_rounds' => $this->totalRounds,
+            'phase' => $phase
+        ]);
+    }
+
+    /**
+     * Iniciar timer de ronda automáticamente si está configurado.
+     *
+     * Este método gestiona el timer de ronda:
+     * - Lee la configuración desde game_state
+     * - Crea timer con RoundTimerExpiredEvent configurado
+     * - Conoce current_round directamente (propiedad propia)
+     * - Auto-guarda el timer en game_state
+     *
+     * IMPORTANTE: RoundManager es responsable de gestionar timers de ronda,
+     * no BaseGameEngine. Esto mantiene la separación de responsabilidades.
+     *
+     * @param \App\Models\GameMatch $match Match del juego
+     * @param \App\Services\Modules\TimerSystem\TimerService $timerService Servicio de timers
+     * @param array $config Configuración del juego (game_state['_config'])
+     * @param string $timerName Nombre del timer (default: 'round')
+     * @return bool True si se inició timer, false si no está configurado
+     */
+    public function startRoundTimer(
+        \App\Models\GameMatch $match,
+        \App\Services\Modules\TimerSystem\TimerService $timerService,
+        array $config,
+        string $timerName = 'round'
+    ): bool {
+        // Buscar duración del timer en configuración
+        $duration = $config['modules']['timer_system']['round_duration'] ?? null;
+
+        if ($duration === null || $duration <= 0) {
+            return false;
+        }
+
+        \Log::info('[RoundManager] Starting round timer', [
+            'match_id' => $match->id,
+            'timer_name' => $timerName,
+            'duration' => $duration,
+            'current_round' => $this->currentRound
+        ]);
+
+        // Configurar timer para emitir RoundTimerExpiredEvent cuando expire
+        $timerService->startTimer(
+            timerName: $timerName,
+            durationSeconds: $duration,
+            eventToEmit: \App\Events\Game\RoundTimerExpiredEvent::class,
+            eventData: [$match, $this->currentRound, $timerName],
+            restart: true
+        );
+
+        return true;
     }
 }

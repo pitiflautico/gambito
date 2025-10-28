@@ -1,0 +1,55 @@
+🎭 Juego: Mentiroso
+
+Tipo: Social – Engaño y persuasión
+Jugadores: 3 a 10 (ideal 4-8)
+Duración por ronda: ~1 minuto
+Objetivo: Engañar al grupo o detectar al mentiroso con buen ojo y oído.
+
+⸻
+
+🧠 ¿Cómo se juega?
+	1.	Inicio de ronda
+	•	Un jugador es seleccionado aleatoriamente como “Orador”.
+	•	Recibe en secreto una frase en su pantalla:
+📲 “Los gatos no pueden saborear lo dulce”
+Al lado, se le indica si esta frase es verdadera o falsa.
+	2.	Tiempo para preparar
+	•	Tiene 15 segundos para leerla y pensar cómo defenderla.
+	3.	Fase de persuasión
+	•	El orador dispone de 30 segundos para explicar por qué esa frase es cierta.
+	•	Puede añadir detalles inventados, datos falsos, usar humor o ponerse serio.
+Lo importante: sonar convincente.
+	4.	Fase de votación
+	•	Los demás jugadores votan desde su móvil:
+	•	✅ “Dice la verdad”
+	•	❌ “Está mintiendo”
+	5.	Resolución
+	•	La app revela si la frase era verdadera o falsa, y quién acertó.
+	•	Se reparten puntos:
+	•	Si el orador engañó a la mayoría → él gana puntos.
+	•	Si los demás descubren la verdad → ellos ganan puntos.
+	•	Bonus al orador si nadie acierta.
+
+🔧 Lo que hace la app
+	•	Elige automáticamente frases y su veracidad (de un banco mezclado).
+	•	Indica en secreto al orador la frase y si debe defenderla como si fuera verdad, incluso si es falsa.
+	•	Sincroniza el temporizador para cada fase.
+	•	Gestiona la votación desde los móviles de los demás jugadores.
+	•	Lleva control de puntuaciones individuales y rankings.
+	•	Opcional: repite frases especialmente divertidas en un “Hall of Fame”.
+🤝 Lo divertido
+	•	Nadie necesita conocimientos previos, solo creatividad o buena intuición.
+	•	Cada ronda es diferente.
+	•	La dinámica crea risas, tensión y momentos inesperados (ideal con copas).
+
+PUNTAJE
+Acción
+Puntos
+Orador engaña a más del 50%
++10 pts
+Cada jugador que acierta la verdad
++5 pts
+Orador engaña a todos (nadie acierta)
++15 pts
+Jugador que se equivoca
+

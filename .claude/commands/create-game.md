@@ -1,34 +1,269 @@
 ---
-description: Asistente IA para crear juegos - analiza descripción y genera arquitectura completa
+description: Asistente IA para crear juegos - analiza descripción y genera arquitectura completa con verificación por fases
 ---
 
-# Comando: Crear Nuevo Juego con IA
+# Comando: Crear Nuevo Juego con IA + Verificación por Fases
 
-Eres un asistente experto en la arquitectura de este proyecto. Tu objetivo es crear un nuevo juego de forma **inteligente, guiada y siguiendo todos los patrones establecidos**.
+Eres un asistente experto en la arquitectura de este proyecto. Tu objetivo es crear un nuevo juego de forma **inteligente, guiada, verificada paso a paso y siguiendo todos los patrones establecidos**.
 
-## Sintaxis
+## 🎯 Filosofía: Divide y Verifica
 
-```
-/create-game [ruta-a-descripcion.md]
-```
-
-**Dos modos de operación:**
-
-1. **Modo IA (recomendado)**: `/create-game docs/game-ideas/mi-juego.md`
-   - Analiza archivo con descripción del juego
-   - Infiere automáticamente módulos y arquitectura
-   - Pregunta SOLO lo ambiguo o crítico
-   - Genera estructura completa
-
-2. **Modo Interactivo**: `/create-game` (sin argumentos)
-   - Hace 12 preguntas paso a paso
-   - Útil para explorar opciones
+Este comando implementa un sistema de **generación por fases** donde:
+- Cada fase genera solo un grupo pequeño de archivos relacionados
+- Después de cada fase hay un **checkpoint automático**
+- No avanzas hasta que la fase actual esté 100% correcta
+- Previene errores comunes mediante templates y checklists
 
 ---
 
-## 📚 Arquitectura Actualizada (IMPORTANTE)
+## 🔴 ERRORES CRÍTICOS A EVITAR (Lecciones Aprendidas)
 
-Antes de empezar, debes conocer la arquitectura actual del proyecto:
+### ❌ ERROR #1: Broadcasting Incorrecto
+```php
+// ❌ MAL - Usa colas (nunca llega si queue:work no está corriendo)
+class CustomEvent implements ShouldBroadcast
+
+// ❌ MAL - Channel simple (EventManager escucha en PresenceChannel)
+public function broadcastOn(): Channel
+
+// ✅ BIEN - SIEMPRE usar estos dos juntos
+class CustomEvent implements ShouldBroadcastNow
+public function broadcastOn(): PresenceChannel
+```
+
+### ❌ ERROR #2: PhaseManager sin TimerService
+```php
+// ❌ MAL - PhaseManager no funciona sin TimerService
+$phaseManager = PhaseManager::fromArray($state);
+
+// ✅ BIEN - SIEMPRE conectar TimerService
+$phaseManager = PhaseManager::fromArray($state);
+$timerService = $this->getTimerService($match);
+$phaseManager->setTimerService($timerService);
+```
+
+### ❌ ERROR #3: Nombres de eventos inconsistentes
+```php
+// capabilities.json
+"PlayerDisconnectedEvent": {
+    "name": "player.disconnected"  // ❌ MAL
+}
+
+// ✅ BIEN - Debe coincidir exactamente con broadcastAs()
+"PlayerDisconnectedEvent": {
+    "name": "game.player.disconnected"
+}
+```
+
+### ❌ ERROR #4: Falta @stack('scripts')
+```blade
+{{-- ❌ MAL - El popup de desconexión no carga su JS --}}
+</body>
+</html>
+
+{{-- ✅ BIEN - SIEMPRE incluir antes de </body> --}}
+@stack('scripts')
+</body>
+</html>
+```
+
+### ❌ ERROR #5: Nombres de métodos del Engine
+```php
+// ❌ MAL - BaseGameEngine no encuentra el método
+public function handlePlayerDisconnect() { }
+
+// ✅ BIEN - Usar convención "on" + EventName
+public function onPlayerDisconnected() { }
+public function onPlayerReconnected() { }
+public function onTimerExpired() { }
+```
+
+---
+
+## 📋 TEMPLATES OBLIGATORIOS
+
+### Template: Event Class
+```php
+<?php
+namespace App\Events\Game;
+
+use App\Models\GameMatch;
+use Illuminate\Broadcasting\PresenceChannel;  // ← SIEMPRE PresenceChannel
+use Illuminate\Broadcasting\InteractsWithSockets;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;  // ← SIEMPRE ShouldBroadcastNow
+use Illuminate\Foundation\Events\Dispatchable;
+use Illuminate\Queue\SerializesModels;
+
+/**
+ * [Descripción del evento]
+ */
+class CustomEvent implements ShouldBroadcastNow  // ← CRÍTICO
+{
+    use Dispatchable, InteractsWithSockets, SerializesModels;
+
+    public string $roomCode;
+    public array $data;
+
+    public function __construct(GameMatch $match, array $data = [])
+    {
+        $this->roomCode = $match->room->code;
+        $this->data = $data;
+    }
+
+    public function broadcastOn(): PresenceChannel  // ← CRÍTICO
+    {
+        return new PresenceChannel("room.{$this->roomCode}");
+    }
+
+    public function broadcastAs(): string
+    {
+        // Convención: game.{category}.{action}
+        return 'game.custom.event';
+    }
+
+    public function broadcastWith(): array
+    {
+        return $this->data;
+    }
+}
+```
+
+### Template: game.blade.php
+```blade
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <title>{{ $room->game->name }} - {{ $code }}</title>
+    @vite(['resources/css/app.css'])
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+    <div id="app" class="container mx-auto px-4 py-8">
+        {{-- Game UI --}}
+    </div>
+
+    {{-- ✅ CRÍTICO: SIEMPRE incluir popup de desconexión --}}
+    <x-game.player-disconnected-popup />
+
+    @vite(['resources/js/app.js', 'games/{slug}/js/{GameName}GameClient.js'])
+
+    <script type="module">
+        const config = {
+            roomCode: '{{ $code }}',
+            matchId: {{ $match->id }},
+            playerId: {{ $playerId }},
+            userId: {{ $userId }},
+            gameSlug: '{slug}',
+            players: [],
+            scores: {},
+            eventConfig: @json($eventConfig),
+        };
+
+        const gameClient = new window.{GameName}GameClient(config);
+
+        // ✅ Cargar estado inicial ANTES de conectar WebSockets
+        (async () => {
+            try {
+                const response = await fetch(`/api/rooms/{{ $code }}/state`);
+                if (response.ok) {
+                    const data = await response.json();
+                    const gameState = data.game_state;
+
+                    if (gameState) {
+                        console.log('[{GameName}] Loading initial state:', gameState);
+                        gameClient.restoreGameState(gameState);
+                    }
+                } else {
+                    console.warn('⚠️ [{GameName}] Could not load initial state');
+                }
+            } catch (error) {
+                console.error('❌ [{GameName}] Error loading initial state:', error);
+            }
+
+            // Configurar Event Manager DESPUÉS de cargar el estado inicial
+            gameClient.setupEventManager();
+        })();
+    </script>
+
+    {{-- ✅ CRÍTICO: SIEMPRE incluir @stack('scripts') --}}
+    @stack('scripts')
+</body>
+</html>
+```
+
+### Template: capabilities.json
+```json
+{
+  "slug": "{slug}",
+  "version": "1.0",
+  "requires": {
+    "websockets": true,
+    "turns": true,
+    "scoring": true,
+    "timers": true
+  },
+  "provides": {
+    "events": [
+      "CustomEvent"
+    ],
+    "routes": [],
+    "views": [
+      "games/{slug}/game"
+    ]
+  },
+  "event_config": {
+    "channel": "room.{roomCode}",
+    "events": {
+      "RoundStartedEvent": {
+        "name": "game.round.started",
+        "description": "Sistema: Nueva ronda iniciada",
+        "handler": "handleRoundStarted"
+      },
+      "RoundEndedEvent": {
+        "name": "game.round.ended",
+        "description": "Sistema: Ronda finalizada con resultados",
+        "handler": "handleRoundEnded"
+      },
+      "GameStateUpdatedEvent": {
+        "name": "game.state.updated",
+        "description": "Broadcast cambios de estado del juego",
+        "handler": "handleGameStateUpdated"
+      },
+      "PlayersUnlockedEvent": {
+        "name": "game.players.unlocked",
+        "description": "Broadcast cuando todos los jugadores son desbloqueados",
+        "handler": "handlePlayersUnlocked"
+      },
+      "PlayerScoreUpdatedEvent": {
+        "name": "player.score.updated",
+        "description": "Broadcast cuando cambia la puntuación de un jugador",
+        "handler": "handlePlayerScoreUpdated"
+      },
+      "TimerUpdatedEvent": {
+        "name": "timer.updated",
+        "description": "Actualización del temporizador cada segundo",
+        "handler": "handleTimerUpdate"
+      },
+      "PlayerDisconnectedEvent": {
+        "name": "game.player.disconnected",
+        "description": "Sistema: Jugador desconectado",
+        "handler": "handlePlayerDisconnected"
+      },
+      "PlayerReconnectedEvent": {
+        "name": "game.player.reconnected",
+        "description": "Sistema: Jugador reconectado",
+        "handler": "handlePlayerReconnected"
+      }
+    }
+  }
+}
+```
+
+---
+
+## 📚 Arquitectura Actualizada
 
 ### Módulos del Sistema (14 configurables)
 
@@ -36,7 +271,7 @@ Antes de empezar, debes conocer la arquitectura actual del proyecto:
 - `game_core` - Ciclo de vida del juego
 - `room_manager` - Gestión de salas
 
-**Opcionales (se activan según necesidad):**
+**Opcionales:**
 - `guest_system` - Invitados sin registro
 - `turn_system` - Turnos (sequential/simultaneous/free)
 - `scoring_system` - Puntuación y ranking
@@ -50,703 +285,111 @@ Antes de empezar, debes conocer la arquitectura actual del proyecto:
 - `replay_history` - Grabación de partidas
 - `real_time_sync` - WebSockets (Laravel Reverb)
 
-### PlayerManager Unificado (CRÍTICO)
+### Convención de Nombres de Eventos
 
-**USAR PlayerManager, NO PlayerStateManager**
+Formato: `{category}.{subcategory}.{action}`
 
-PlayerManager combina:
-- Scores (puntuación)
-- Player state (locks, actions, custom states)
-- Roles (persistent y round-based)
-
-```php
-// ✅ CORRECTO - Inicializar en initialize()
-$playerManager = new PlayerManager(
-    $playerIds,
-    $this->scoreCalculator, // ← Propiedad de clase
-    [
-        'available_roles' => ['drawer', 'guesser'], // Si usa roles
-        'allow_multiple_persistent_roles' => false,
-        'track_score_history' => false,
-    ]
-);
-$this->savePlayerManager($match, $playerManager);
-
-// ✅ CORRECTO - Sumar puntos (emite evento automáticamente)
-$points = $playerManager->awardPoints($playerId, 'correct_answer', $context, $match);
-
-// ✅ CORRECTO - Bloquear jugador
-$playerManager->lockPlayer($playerId, $match, $player, $metadata);
-$this->savePlayerManager($match, $playerManager);
-
-// ✅ CORRECTO - Reset en startNewRound()
-$playerManager = $this->getPlayerManager($match, $this->scoreCalculator);
-$playerManager->reset($match); // Emite PlayersUnlockedEvent automáticamente
-$this->savePlayerManager($match, $playerManager); // ← CRÍTICO: Guardar inmediatamente
+**Categorías estándar:**
+```
+game.round.*      (started, ended)
+game.phase.*      (changed)
+game.turn.*       (changed)
+game.player.*     (disconnected, reconnected, eliminated)
+game.state.*      (updated)
+game.players.*    (unlocked)
+player.score.*    (updated)
+player.action.*   (submitted)
+timer.*           (updated, expired)
 ```
 
-### BaseGameEngine - Métodos Heredados
-
-**NO duplicar estos métodos** - se heredan automáticamente:
-
-```php
-// ✅ Heredado de BaseGameEngine
-protected function getGameConfig(): array
-// Carga automáticamente games/{slug}/config.json
-
-// ✅ Heredado de BaseGameEngine
-protected function getFinalScores(GameMatch $match): array
-// Obtiene scores desde PlayerManager automáticamente
-```
-
-### Round Lifecycle Protocol
-
-**Flujo estándar que TODOS los juegos siguen:**
-
-1. **Inicio de Ronda** (`handleNewRound`):
-   ```php
-   // BaseGameEngine automáticamente:
-   // 1. Avanza contador de ronda
-   // 2. Inicia timer de ronda
-   // 3. Llama a startNewRound() del juego
-   // 4. Filtra game_state con filterGameStateForBroadcast()
-   // 5. Emite RoundStartedEvent con timing
-
-   protected function startNewRound(GameMatch $match): void
-   {
-       // 1. Reset locks y acciones
-       $playerManager = $this->getPlayerManager($match, $this->scoreCalculator);
-       $playerManager->reset($match);
-       $this->savePlayerManager($match, $playerManager); // ← CRÍTICO
-
-       // 2. Lógica específica del juego
-       $this->loadNextQuestion($match);
-       $this->assignRoles($match); // Si usa roles
-   }
-   ```
-
-2. **Fin de Ronda** (`endCurrentRound`):
-   ```php
-   public function endCurrentRound(GameMatch $match): void
-   {
-       // Obtener resultados
-       $results = $this->getAllPlayerResults($match);
-
-       // Delegar al base (emite RoundEndedEvent automáticamente)
-       $this->completeRound($match, $results);
-   }
-   ```
-
-3. **Filtrar Información Sensible**:
-   ```php
-   protected function filterGameStateForBroadcast(array $gameState, GameMatch $match): array
-   {
-       $filtered = $gameState;
-
-       // Remover información que no todos deben ver
-       unset($filtered['current_answer']); // Solo mostrar al terminar
-
-       return $filtered;
-   }
-   ```
-
-### Protocolo de Refresh/Reconexión (F5)
-
-**Problema**: Cuando jugador refresca (F5), pierde estado local del frontend.
-
-**Solución Backend** - `/api/rooms/{code}/state`:
-```php
-// Retornar game_state COMPLETO (SIN filtrar)
-// El frontend decide qué mostrar según rol del jugador
-return response()->json([
-    'game_state' => $match->game_state, // NO usar filterGameStateForBroadcast aquí
-    'players' => $players,
-]);
-```
-
-**Solución Frontend** - `game.blade.php`:
-```javascript
-// 1. Cargar estado desde API
-const response = await fetch(`/api/rooms/${roomCode}/state`);
-const { game_state, players } = await response.json();
-
-// 2. Cargar players y scores
-gameClient.players = players;
-gameClient.scores = extractScores(game_state.player_system);
-
-// 3. Si juego está en 'playing', simular evento de ronda
-if (game_state?.phase === 'playing') {
-    const eventData = {
-        current_round: game_state.round_system?.current_round,
-        total_rounds: game_state.round_system?.total_rounds,
-        game_state: game_state,
-        timing: extractTimingFromActiveTimer(game_state.timer_system)
-    };
-
-    gameClient.handleRoundStarted(eventData);
-
-    // 4. Restaurar información privada según rol
-    if (hasPrivateRole(game_state, playerId)) {
-        // Restaurar info privada (ej: palabra del drawer, cartas, etc.)
-        const privateInfo = game_state.private_data_for_role;
-        gameClient.handlePrivateInfo(privateInfo);
-    }
-
-    // 5. Restaurar locks
-    if (game_state.player_system?.players?.[playerId]?.locked) {
-        gameClient.isLocked = true;
-        gameClient.showLockedUI();
-    }
-
-    // 6. Restaurar elementos visuales (canvas, tablero, etc.)
-    if (game_state.canvas_data) {
-        gameClient.restoreCanvas(game_state.canvas_data);
-    }
-}
-
-// 7. Si juego está en 'finished', simular evento de fin
-if (game_state?.phase === 'finished') {
-    const finishedEvent = {
-        winner: game_state.winner,
-        ranking: game_state.ranking,
-        scores: gameClient.scores,
-        game_state: game_state
-    };
-    gameClient.handleGameFinished(finishedEvent);
-}
-```
-
-**⚠️ CRÍTICO**:
-- `/api/rooms/{code}/state` NO debe filtrar información (retorna todo)
-- El frontend decide qué mostrar según el rol del jugador
-- Eventos públicos (RoundStartedEvent) SÍ deben usar `filterGameStateForBroadcast()`
-
-### Protocolo de Desconexión/Reconexión
-
-**Flujo Automático en BaseGameEngine:**
-
-1. **Jugador se desconecta** → `onPlayerDisconnected()`:
-```php
-// BaseGameEngine automáticamente:
-// 1. Pausa timer de ronda
-// 2. Marca juego como pausado
-// 3. Emite PlayerDisconnectedEvent
-// Los juegos pueden override para comportamiento custom
-```
-
-2. **Jugador se reconecta** → `onPlayerReconnected()`:
-```php
-// BaseGameEngine por defecto REINICIA la ronda actual
-// Los juegos pueden override para solo resumir:
-
-public function onPlayerReconnected(GameMatch $match, Player $player): void
-{
-    // Quitar pausa
-    $gameState = $match->game_state;
-    $gameState['paused'] = false;
-    unset($gameState['paused_reason']);
-    $match->game_state = $gameState;
-    $match->save();
-
-    // Resumir timer
-    $timerService = $this->getTimerService($match);
-    if ($timerService->hasTimer('round')) {
-        $timerService->resumeTimer('round');
-        $this->saveTimerService($match, $timerService);
-    }
-
-    // Emitir evento de reconexión (sin reiniciar ronda)
-    event(new PlayerReconnectedEvent($match, $player, false));
-}
-```
-
-**Ejemplo en generación**:
-```php
-// Si el juego necesita comportamiento especial al reconectar:
-// 1. Pictionary: Resume sin reiniciar (mantiene dibujo y palabra)
-// 2. Trivia: Resume sin reiniciar (mantiene pregunta)
-// 3. Juego de turnos: Podría reiniciar turno actual
-```
-
-### Juegos de Referencia
-
-**Estudia estos juegos como ejemplos:**
-
-1. **Pictionary** (`games/pictionary/`):
-   - ✅ Usa PlayerManager correctamente
-   - ✅ Roles de ronda (drawer/guesser rotando)
-   - ✅ filterGameStateForBroadcast() (oculta palabra)
-   - ✅ Eventos privados (WordRevealedEvent solo al drawer)
-   - ✅ Canvas de dibujo
-   - ✅ Claim + validation pattern
-
-2. **Trivia** (`games/trivia/`):
-   - ✅ Usa PlayerManager correctamente
-   - ✅ Sin roles (todos responden)
-   - ✅ filterGameStateForBroadcast() (oculta correct_answer)
-   - ✅ Speed bonus con timer
-   - ✅ Lock cuando responde (correcto o incorrecto)
-
-### Documentación de Referencia
-
-**Leer según necesidad:**
-- `docs/ROUND_LIFECYCLE_PROTOCOL.md` - Protocolo completo con checklist
-- `docs/GAME_MODULES_REFERENCE.md` - Detalles técnicos de módulos
-- `docs/CREATE_GAME_GUIDE.md` - Templates y convenciones
-- `docs/CONVENTIONS.md` - Convenciones de código
-- `docs/TIMER_SYSTEM_INTEGRATION.md` - Timer implementation
-- `docs/BASE_ENGINE_CLIENT_DESIGN.md` - Arquitectura base
+**⚠️ IMPORTANTE**: Los nombres en capabilities.json DEBEN coincidir exactamente con `broadcastAs()` del evento PHP.
 
 ---
 
-## 🤖 Modo IA: Análisis Inteligente
+## 🚀 PROCESO POR FASES (Nuevo)
 
-### Paso 1: Leer Archivo de Descripción
+### FASE 1: Análisis y Configuración
+**Objetivo**: Entender el juego y definir arquitectura
 
-El usuario proporciona un archivo markdown con la descripción del juego.
+**Pasos:**
+1. Leer archivo de descripción (si existe)
+2. Analizar y extraer información
+3. Inferir módulos necesarios
+4. Identificar ambigüedades
+5. Hacer preguntas SOLO sobre lo ambiguo
 
-**Ejemplo de archivo:**
-
-```markdown
-# Speed Math Challenge
-
-## Descripción
-Juego de matemáticas rápidas donde los jugadores compiten para resolver operaciones lo más rápido posible.
-
-## Mecánica
-1. Se muestra una operación matemática (suma, resta, multiplicación)
-2. Todos los jugadores responden al mismo tiempo
-3. El primero en acertar gana más puntos
-4. 10 preguntas por partida
-5. Cada pregunta tiene 15 segundos
-
-## Puntuación
-- Respuesta correcta: 10 puntos base
-- Speed bonus: +5 puntos si responde en primeros 5 segundos
-- Respuesta incorrecta: 0 puntos
-
-## Jugadores
-- Mínimo 2, máximo 8 jugadores
-- Permite invitados
-
-## Configuración opcional
-- Dificultad: fácil/medio/difícil
-- Número de preguntas: 5/10/15
+**Checkpoint 1:**
+```
+✅ Verificar:
+- Nombre del juego claro
+- Slug válido (lowercase, guiones)
+- Módulos identificados correctamente
+- Configuración completa (sin "TODO" o "???")
+- Respuestas del usuario claras
 ```
 
-### Paso 2: Análisis Automático
+**Output**: Configuración JSON completa
 
-Analiza el archivo e infiere automáticamente:
+---
 
-#### 2.1 Información Básica
-- **Nombre**: Speed Math Challenge
-- **Slug**: `speed-math-challenge`
-- **Tipo**: Preguntas y respuestas (Q&A)
-- **Descripción**: [extraer del archivo]
+### FASE 2: Estructura Base
+**Objetivo**: Crear archivos de configuración
 
-#### 2.2 Módulos Necesarios (Inferencia)
+**Generar:**
+1. `games/{slug}/config.json` (con módulos y timing)
+2. `games/{slug}/capabilities.json` (con event_config completo)
+3. `games/{slug}/README.md` (descripción básica)
 
-Analiza las palabras clave y mecánicas para inferir módulos:
+**Checkpoint 2:**
+```
+✅ Verificar config.json:
+- JSON válido (ejecutar: jq . config.json)
+- Módulos tienen "enabled": true/false
+- timing.round_ended configurado con auto_next
+- Todos los campos requeridos presentes
 
-| Palabra clave en descripción | Módulo a activar | Configuración |
-|------------------------------|------------------|---------------|
-| "compiten" | `scoring_system` | enabled: true |
-| "10 preguntas por partida" | `round_system` | total_rounds: 10 |
-| "al mismo tiempo" | `turn_system` | mode: "simultaneous" |
-| "15 segundos" | `timer_system` | round_duration: 15 |
-| "permite invitados" | `guest_system` | enabled: true |
-| "primeros en acertar" | PlayerManager | uses_locks: true |
-| "speed bonus" | ScoreCalculator | speed_bonus: true |
-
-**Resultado del análisis:**
-```json
-{
-  "modules": {
-    "round_system": {"enabled": true, "total_rounds": 10},
-    "turn_system": {"enabled": true, "mode": "simultaneous"},
-    "scoring_system": {"enabled": true},
-    "timer_system": {"enabled": true, "round_duration": 15},
-    "guest_system": {"enabled": true}
-  },
-  "player_config": {
-    "min": 2,
-    "max": 8,
-    "uses_locks": true,
-    "uses_roles": false
-  },
-  "scoring": {
-    "base_points": 10,
-    "speed_bonus": true,
-    "speed_threshold": 5
-  }
-}
+✅ Verificar capabilities.json:
+- JSON válido
+- event_config.channel = "room.{roomCode}"
+- TODOS los eventos base incluidos (RoundStarted, RoundEnded, etc.)
+- Nombres siguen convención game.*.*
+- Cada evento tiene: name, description, handler
 ```
 
-#### 2.3 Identificar Ambigüedades
+**Mostrar al usuario:**
+```
+📂 Estructura Base Generada:
+✅ config.json (módulos configurados)
+✅ capabilities.json (eventos mapeados)
+✅ README.md
 
-Busca información que falta o está ambigua:
-
-**Preguntas pendientes:**
-- ✅ Tiene rondas: Sí (10 preguntas)
-- ✅ Tiene timer: Sí (15s por ronda)
-- ✅ Turnos: Simultáneo
-- ✅ Puntuación: Definida (10 base + 5 bonus)
-- ❓ **Ambiguo**: ¿Todos pueden seguir respondiendo o se bloquea al primero que acierta?
-- ❓ **Ambiguo**: ¿Qué pasa cuando expira el timer?
-- ❓ **Falta**: ¿Cómo se generan las operaciones matemáticas?
-- ❓ **Falta**: ¿Se permiten equipos?
-
-### Paso 3: Preguntas Inteligentes
-
-Usa `AskUserQuestion` para preguntar SOLO lo ambiguo/faltante:
-
-```javascript
-AskUserQuestion({
-  questions: [
-    {
-      question: "Cuando el timer expira (15s), ¿qué sucede?",
-      header: "Timer expira",
-      multiSelect: false,
-      options: [
-        {
-          label: "Termina la ronda, nadie gana puntos",
-          description: "La pregunta se pierde si nadie responde a tiempo"
-        },
-        {
-          label: "Termina la ronda, quien haya respondido gana",
-          description: "Los que respondieron (correcto/incorrecto) mantienen resultado"
-        }
-      ]
-    },
-    {
-      question: "Cuando alguien acierta, ¿los demás pueden seguir respondiendo?",
-      header: "Lock behavior",
-      multiSelect: false,
-      options: [
-        {
-          label: "No - termina la ronda inmediatamente",
-          description: "El primero en acertar gana, otros pierden oportunidad"
-        },
-        {
-          label: "Sí - todos responden, se rankea por velocidad",
-          description: "Todos los que acierten ganan puntos (más rápido = más puntos)"
-        }
-      ]
-    },
-    {
-      question: "¿Cómo se generan las operaciones matemáticas?",
-      header: "Generación",
-      multiSelect: false,
-      options: [
-        {
-          label: "Pre-cargadas desde JSON",
-          description: "Crear questions.json con operaciones"
-        },
-        {
-          label: "Generadas aleatoriamente en runtime",
-          description: "El Engine genera operaciones dinámicamente"
-        }
-      ]
-    },
-    {
-      question: "¿Se permiten equipos?",
-      header: "Equipos",
-      multiSelect: false,
-      options: [
-        {
-          label: "Solo individual",
-          description: "Cada jugador compite solo"
-        },
-        {
-          label: "Solo equipos",
-          description: "Jugadores se agrupan en equipos"
-        },
-        {
-          label: "Ambos (configurable)",
-          description: "El host elige en lobby"
-        }
-      ]
-    }
-  ]
-})
+⏳ Esperando confirmación antes de continuar...
 ```
 
-### Paso 4: Completar Configuración
+---
 
-Con las respuestas, completa la configuración:
+### FASE 3: Backend - ScoreCalculator
+**Objetivo**: Sistema de puntuación
 
-```json
-{
-  "game": {
-    "name": "Speed Math Challenge",
-    "slug": "speed-math-challenge",
-    "type": "questions_answers",
-    "description": "Juego de matemáticas rápidas donde los jugadores compiten para resolver operaciones lo más rápido posible"
-  },
-  "players": {
-    "min": 2,
-    "max": 8,
-    "guest_support": true
-  },
-  "teams": {
-    "enabled": false // Según respuesta
-  },
-  "modules": {
-    "game_core": {"enabled": true},
-    "room_manager": {"enabled": true},
-    "guest_system": {"enabled": true},
-    "round_system": {
-      "enabled": true,
-      "total_rounds": 10,
-      "customizable": true,
-      "min": 5,
-      "max": 15
-    },
-    "turn_system": {
-      "enabled": true,
-      "mode": "simultaneous"
-    },
-    "scoring_system": {
-      "enabled": true,
-      "calculator": "SpeedMathScoreCalculator"
-    },
-    "timer_system": {
-      "enabled": true,
-      "round_duration": 15,
-      "countdown_visible": true,
-      "warning_threshold": 5,
-      "auto_advance_on_expire": true
-    },
-    "real_time_sync": {"enabled": true}
-  },
-  "scoring": {
-    "base_correct": 10,
-    "speed_bonus_enabled": true,
-    "speed_threshold": 5,
-    "speed_bonus_amount": 5,
-    "incorrect_penalty": 0
-  },
-  "timing": {
-    "round_start": {
-      "duration": 15,
-      "countdown_visible": true,
-      "warning_threshold": 5
-    },
-    "round_ended": {
-      "auto_next": true,
-      "delay": 3,
-      "message": "Siguiente pregunta"
-    }
-  },
-  "customizableSettings": {
-    "questions_per_game": {
-      "type": "number",
-      "min": 5,
-      "max": 15,
-      "default": 10,
-      "step": 5
-    },
-    "difficulty": {
-      "type": "select",
-      "options": ["easy", "medium", "hard"],
-      "default": "medium"
-    }
-  }
-}
-```
+**Generar:**
+1. `games/{slug}/{GameName}ScoreCalculator.php`
 
-### Paso 5: Generar Estructura
-
-Genera TODOS los archivos necesarios:
-
-#### 5.1 Engine (con PlayerManager)
-
+**Template aplicado:**
 ```php
 <?php
 
-namespace Games\SpeedMathChallenge;
-
-use App\Contracts\BaseGameEngine;
-use App\Models\GameMatch;
-use App\Models\Player;
-use Illuminate\Support\Facades\Log;
-
-class SpeedMathChallengeEngine extends BaseGameEngine
-{
-    protected SpeedMathChallengeScoreCalculator $scoreCalculator;
-
-    public function __construct()
-    {
-        $gameConfig = $this->getGameConfig(); // ← Heredado de BaseGameEngine
-        $scoringConfig = $gameConfig['scoring'] ?? [];
-        $this->scoreCalculator = new SpeedMathChallengeScoreCalculator($scoringConfig);
-    }
-
-    public function initialize(GameMatch $match): void
-    {
-        // TODO: Cargar preguntas (JSON o generadas)
-        $questions = $this->loadQuestions($match);
-
-        // Config inicial
-        $match->game_state = [
-            '_config' => [
-                'game' => 'speed-math-challenge',
-                'initialized_at' => now()->toDateTimeString(),
-                // ... más config
-            ],
-            'phase' => 'waiting',
-            'questions' => $questions,
-            'current_question' => null,
-        ];
-        $match->save();
-
-        // Cachear players
-        $this->cachePlayersInState($match);
-
-        // Inicializar módulos automáticamente
-        $this->initializeModules($match, [
-            'scoring_system' => [
-                'calculator' => $this->scoreCalculator
-            ],
-            'round_system' => [
-                'total_rounds' => count($questions)
-            ]
-        ]);
-
-        // Inicializar PlayerManager (NO PlayerStateManager)
-        $playerIds = $match->players->pluck('id')->toArray();
-        $playerManager = new \App\Services\Modules\PlayerSystem\PlayerManager(
-            $playerIds,
-            $this->scoreCalculator,
-            [
-                'available_roles' => [], // Sin roles
-                'allow_multiple_persistent_roles' => false,
-                'track_score_history' => false,
-            ]
-        );
-        $this->savePlayerManager($match, $playerManager);
-    }
-
-    protected function onGameStart(GameMatch $match): void
-    {
-        $match->game_state = array_merge($match->game_state, [
-            'phase' => 'playing',
-            'started_at' => now()->toDateTimeString(),
-        ]);
-        $match->save();
-
-        // Iniciar primera ronda (automático con RoundManager)
-        $this->handleNewRound($match, advanceRound: false);
-    }
-
-    protected function startNewRound(GameMatch $match): void
-    {
-        // 1. Reset locks (emite PlayersUnlockedEvent automáticamente)
-        $playerManager = $this->getPlayerManager($match, $this->scoreCalculator);
-        $playerManager->reset($match);
-        $this->savePlayerManager($match, $playerManager); // ← CRÍTICO
-
-        // 2. Cargar siguiente pregunta
-        $question = $this->loadNextQuestion($match);
-
-        // Timer ya se inició automáticamente por handleNewRound()
-    }
-
-    protected function processRoundAction(GameMatch $match, Player $player, array $data): array
-    {
-        // TODO: Validar respuesta
-        $playerManager = $this->getPlayerManager($match, $this->scoreCalculator);
-
-        if ($playerManager->isPlayerLocked($player->id)) {
-            return ['success' => false, 'message' => 'Ya respondiste'];
-        }
-
-        $currentQuestion = $this->getCurrentQuestion($match);
-        $answer = $data['answer'] ?? null;
-        $isCorrect = ($answer === $currentQuestion['correct_answer']);
-
-        $forceEnd = false;
-
-        if ($isCorrect) {
-            // Sumar puntos con speed bonus
-            $context = [
-                'time_taken' => $this->getElapsedTime($match, 'round'),
-                'time_limit' => 15,
-            ];
-            $points = $playerManager->awardPoints($player->id, 'correct_answer', $context, $match);
-
-            // TODO: Según configuración, ¿terminar ronda o seguir?
-            // $forceEnd = true; // Si solo el primero gana
-        }
-
-        // Bloquear jugador
-        $playerManager->lockPlayer($player->id, $match, $player, ['is_correct' => $isCorrect]);
-        $this->savePlayerManager($match, $playerManager);
-
-        return [
-            'success' => true,
-            'is_correct' => $isCorrect,
-            'force_end' => $forceEnd,
-        ];
-    }
-
-    public function endCurrentRound(GameMatch $match): void
-    {
-        $results = $this->getAllPlayerResults($match);
-        $this->completeRound($match, $results); // Automático
-    }
-
-    protected function getAllPlayerResults(GameMatch $match): array
-    {
-        $playerManager = $this->getPlayerManager($match, $this->scoreCalculator);
-        $allActions = $playerManager->getAllActions();
-        $currentQuestion = $this->getCurrentQuestion($match);
-
-        // TODO: Formatear resultados
-        return [
-            'question' => $currentQuestion,
-            'players' => $allActions,
-        ];
-    }
-
-    protected function filterGameStateForBroadcast(array $gameState, GameMatch $match): array
-    {
-        $filtered = $gameState;
-
-        // Ocultar respuesta correcta hasta que termine la ronda
-        if (isset($filtered['current_question']['correct_answer'])) {
-            unset($filtered['current_question']['correct_answer']);
-        }
-
-        return $filtered;
-    }
-
-    // getGameConfig() y getFinalScores() se heredan automáticamente
-
-    // TODO: Implementar helpers específicos del juego
-}
-```
-
-#### 5.2 ScoreCalculator
-
-```php
-<?php
-
-namespace Games\SpeedMathChallenge;
+namespace Games\{Slug};
 
 use App\Services\Modules\ScoringSystem\ScoreCalculatorInterface;
 
-class SpeedMathChallengeScoreCalculator implements ScoreCalculatorInterface
+class {GameName}ScoreCalculator implements ScoreCalculatorInterface
 {
     private array $config;
 
     public function __construct(array $config = [])
     {
         $this->config = array_merge([
-            'base_correct' => 10,
-            'speed_bonus_enabled' => true,
-            'speed_threshold' => 5,
-            'speed_bonus_amount' => 5,
+            // Valores por defecto desde config.json
         ], $config);
     }
 
@@ -754,141 +397,567 @@ class SpeedMathChallengeScoreCalculator implements ScoreCalculatorInterface
     {
         return match($reason) {
             'correct_answer' => $this->calculateCorrectAnswer($context),
+            'speed_bonus' => $this->calculateSpeedBonus($context),
+            // ... más reasons
             default => 0,
         };
     }
 
-    private function calculateCorrectAnswer(array $context): int
-    {
-        $points = $this->config['base_correct'];
-
-        // Speed bonus
-        if ($this->config['speed_bonus_enabled']) {
-            $timeTaken = $context['time_taken'] ?? PHP_INT_MAX;
-            $threshold = $this->config['speed_threshold'];
-
-            if ($timeTaken <= $threshold) {
-                $points += $this->config['speed_bonus_amount'];
-            }
-        }
-
-        return $points;
-    }
+    // Métodos privados para cálculos específicos
 }
 ```
 
-#### 5.3 config.json
+**Checkpoint 3:**
+```
+✅ Verificar ScoreCalculator:
+- Sintaxis PHP válida (php -l)
+- Implementa ScoreCalculatorInterface
+- Constructor recibe array config
+- Método calculate() implementado con match()
+- Todos los reasons del juego cubiertos
+- Usa valores de config, no hardcoded
+```
 
-```json
+**Mostrar:**
+```
+✅ ScoreCalculator generado
+
+📊 Reasons implementados:
+- correct_answer: 10 pts
+- speed_bonus: +5 pts
+- ...
+
+⏳ Esperando confirmación...
+```
+
+---
+
+### FASE 4: Backend - GameEngine (Parte 1: Estructura)
+**Objetivo**: Crear estructura del Engine sin lógica compleja
+
+**Generar:**
+1. `games/{slug}/{GameName}Engine.php` (solo estructura y métodos básicos)
+
+**Incluir:**
+```php
+<?php
+
+namespace Games\{Slug};
+
+use App\Contracts\BaseGameEngine;
+use App\Models\GameMatch;
+use App\Models\Player;
+use Illuminate\Support\Facades\Log;
+
+class {GameName}Engine extends BaseGameEngine
 {
-  "name": "Speed Math Challenge",
-  "slug": "speed-math-challenge",
-  "description": "Juego de matemáticas rápidas",
-  "type": "questions_answers",
-  "version": "1.0.0",
-  "players": {
-    "min": 2,
-    "max": 8
-  },
-  "modules": {
-    "guest_system": {"enabled": true},
-    "turn_system": {
-      "enabled": true,
-      "mode": "simultaneous"
-    },
-    "round_system": {
-      "enabled": true,
-      "total_rounds": 10
-    },
-    "scoring_system": {
-      "enabled": true,
-      "calculator": "SpeedMathChallengeScoreCalculator"
-    },
-    "timer_system": {
-      "enabled": true,
-      "round_duration": 15,
-      "countdown_visible": true,
-      "warning_threshold": 5
-    },
-    "real_time_sync": {"enabled": true}
-  },
-  "scoring": {
-    "base_correct": 10,
-    "speed_bonus_enabled": true,
-    "speed_threshold": 5,
-    "speed_bonus_amount": 5
-  },
-  "timing": {
-    "round_start": {
-      "duration": 15,
-      "countdown_visible": true,
-      "warning_threshold": 5
-    },
-    "round_ended": {
-      "auto_next": true,
-      "delay": 3,
-      "message": "Siguiente pregunta"
+    protected {GameName}ScoreCalculator $scoreCalculator;
+
+    public function __construct()
+    {
+        $gameConfig = $this->getGameConfig(); // ← Heredado
+        $scoringConfig = $gameConfig['scoring'] ?? [];
+        $this->scoreCalculator = new {GameName}ScoreCalculator($scoringConfig);
     }
-  },
-  "customizableSettings": {
-    "questions_per_game": {
-      "type": "number",
-      "min": 5,
-      "max": 15,
-      "default": 10,
-      "step": 5
-    },
-    "difficulty": {
-      "type": "select",
-      "options": ["easy", "medium", "hard"],
-      "default": "medium"
+
+    public function initialize(GameMatch $match): void
+    {
+        // TODO: Implementar en siguiente fase
     }
-  }
+
+    protected function onGameStart(GameMatch $match): void
+    {
+        // TODO: Implementar en siguiente fase
+    }
+
+    protected function startNewRound(GameMatch $match): void
+    {
+        // TODO: Implementar en siguiente fase
+    }
+
+    protected function processRoundAction(GameMatch $match, Player $player, array $data): array
+    {
+        // TODO: Implementar en siguiente fase
+    }
+
+    public function endCurrentRound(GameMatch $match): void
+    {
+        // TODO: Implementar en siguiente fase
+    }
+
+    protected function filterGameStateForBroadcast(array $gameState, GameMatch $match): array
+    {
+        // TODO: Implementar en siguiente fase
+        return $gameState;
+    }
+
+    public function checkWinCondition(GameMatch $match): ?Player
+    {
+        return null; // Por defecto
+    }
+
+    public function getGameStateForPlayer(GameMatch $match, Player $player): array
+    {
+        return [
+            'phase' => $match->game_state['phase'] ?? 'unknown',
+            'message' => 'El juego ha empezado',
+        ];
+    }
+
+    // ✅ Si usa PhaseManager, añadir métodos helper
+    // ✅ Si necesita comportamiento especial en desconexión, añadir onPlayerDisconnected/Reconnected
 }
 ```
 
-#### 5.4 Frontend (GameClient.js)
+**Checkpoint 4:**
+```
+✅ Verificar Engine estructura:
+- Sintaxis PHP válida (php -l)
+- Extiende BaseGameEngine
+- scoreCalculator como propiedad de clase
+- Constructor inicializa scoreCalculator
+- TODOS los métodos abstractos implementados (aunque sean TODO)
+- NO duplica getGameConfig() ni getFinalScores()
+- namespace correcto: Games\{Slug}
+```
 
+**Mostrar:**
+```
+✅ {GameName}Engine (estructura) generado
+
+📝 Métodos pendientes de implementar:
+- initialize()
+- onGameStart()
+- startNewRound()
+- processRoundAction()
+- endCurrentRound()
+- filterGameStateForBroadcast()
+
+⏳ Esperando confirmación...
+```
+
+---
+
+### FASE 5: Backend - GameEngine (Parte 2: initialize)
+**Objetivo**: Implementar inicialización del juego
+
+**Implementar en `initialize()`:**
+1. Cargar datos del juego (preguntas, cartas, etc.)
+2. Configurar game_state inicial
+3. Cachear players
+4. Inicializar módulos con `initializeModules()`
+5. **CRÍTICO**: Inicializar PlayerManager correctamente
+
+**Template:**
+```php
+public function initialize(GameMatch $match): void
+{
+    // 1. Cargar datos específicos del juego
+    $questions = $this->loadQuestions($match); // O loadCards(), etc.
+
+    // 2. Config inicial
+    $match->game_state = [
+        '_config' => [
+            'game' => '{slug}',
+            'initialized_at' => now()->toDateTimeString(),
+            // Más configuración
+        ],
+        'phase' => 'waiting',
+        'questions' => $questions,
+        'current_question' => null,
+    ];
+    $match->save();
+
+    // 3. Cachear players
+    $this->cachePlayersInState($match);
+
+    // 4. Inicializar módulos
+    $this->initializeModules($match, [
+        'scoring_system' => [
+            'calculator' => $this->scoreCalculator
+        ],
+        'round_system' => [
+            'total_rounds' => count($questions)
+        ]
+        // Más módulos según config.json
+    ]);
+
+    // 5. ✅ CRÍTICO: Inicializar PlayerManager
+    $playerIds = $match->players->pluck('id')->toArray();
+    $playerManager = new \App\Services\Modules\PlayerSystem\PlayerManager(
+        $playerIds,
+        $this->scoreCalculator,
+        [
+            'available_roles' => [], // ['drawer', 'guesser'] si usa roles
+            'allow_multiple_persistent_roles' => false,
+            'track_score_history' => false,
+        ]
+    );
+    $this->savePlayerManager($match, $playerManager);
+}
+```
+
+**Checkpoint 5:**
+```
+✅ Verificar initialize():
+- Sintaxis PHP válida
+- Carga datos del juego (questions, cards, etc.)
+- Configura game_state con phase: 'waiting'
+- Llama a cachePlayersInState()
+- Llama a initializeModules() con scoreCalculator
+- Inicializa PlayerManager (NO PlayerStateManager)
+- Llama a savePlayerManager()
+- NO usa PlayerStateManager en ninguna parte
+```
+
+**Mostrar:**
+```
+✅ initialize() implementado
+
+📦 Inicializa:
+- Game state con phase: 'waiting'
+- {N} preguntas/cartas cargadas
+- PlayerManager con {scoreCalculator}
+- Módulos: scoring, round, turn, timer
+
+⏳ Esperando confirmación...
+```
+
+---
+
+### FASE 6: Backend - GameEngine (Parte 3: startNewRound)
+**Objetivo**: Implementar inicio de ronda siguiendo el protocolo
+
+**Template:**
+```php
+protected function startNewRound(GameMatch $match): void
+{
+    // ✅ PASO 1: Reset locks (emite PlayersUnlockedEvent automáticamente)
+    $playerManager = $this->getPlayerManager($match, $this->scoreCalculator);
+    $playerManager->reset($match);
+    $this->savePlayerManager($match, $playerManager); // ← CRÍTICO
+
+    // ✅ PASO 2: Lógica específica del juego
+    $question = $this->loadNextQuestion($match);
+
+    // Si usa roles
+    $this->assignRoles($match);
+
+    // Si usa PhaseManager (múltiples fases por ronda)
+    // $this->startPhases($match);
+
+    // El timer ya se inició automáticamente por handleNewRound()
+}
+```
+
+**Checkpoint 6:**
+```
+✅ Verificar startNewRound():
+- Sintaxis PHP válida
+- PRIMERO: getPlayerManager()
+- SEGUNDO: reset() con $match
+- TERCERO: savePlayerManager() inmediatamente después
+- Carga siguiente pregunta/carta/dato
+- Asigna roles si el juego los usa
+- NO inicia timer manualmente (lo hace handleNewRound)
+- Si usa PhaseManager, conecta TimerService
+```
+
+**Mostrar:**
+```
+✅ startNewRound() implementado
+
+🔄 Flujo:
+1. Reset PlayerManager
+2. Carga siguiente elemento del juego
+3. {Asigna roles si aplica}
+4. {Inicia fases si aplica}
+
+⏳ Esperando confirmación...
+```
+
+---
+
+### FASE 7: Backend - GameEngine (Parte 4: processRoundAction)
+**Objetivo**: Procesar acciones de jugadores
+
+**Template:**
+```php
+protected function processRoundAction(GameMatch $match, Player $player, array $data): array
+{
+    $playerManager = $this->getPlayerManager($match, $this->scoreCalculator);
+
+    // Verificar si ya respondió/actuó
+    if ($playerManager->isPlayerLocked($player->id)) {
+        return ['success' => false, 'message' => 'Ya has respondido'];
+    }
+
+    // Validar y procesar acción
+    $result = $this->validatePlayerAction($match, $player, $data);
+
+    if ($result['is_correct']) {
+        // Otorgar puntos (emite PlayerScoreUpdatedEvent automáticamente)
+        $context = ['time_taken' => $this->getElapsedTime($match, 'round')];
+        $points = $playerManager->awardPoints($player->id, 'correct_answer', $context, $match);
+    }
+
+    // Bloquear jugador (registra acción)
+    $playerManager->lockPlayer($player->id, $match, $player, $result);
+    $this->savePlayerManager($match, $playerManager);
+
+    // Decidir si terminar ronda
+    $forceEnd = false;
+    if ($result['is_correct'] && $gameMode === 'first_wins') {
+        $forceEnd = true;
+    }
+
+    return [
+        'success' => true,
+        'result' => $result,
+        'force_end' => $forceEnd,
+    ];
+}
+```
+
+**Checkpoint 7:**
+```
+✅ Verificar processRoundAction():
+- Sintaxis PHP válida
+- Obtiene PlayerManager al inicio
+- Verifica isPlayerLocked() antes de procesar
+- Usa awardPoints() para dar puntos (NO modificar scores manualmente)
+- Usa lockPlayer() para bloquear (NO modificar locks manualmente)
+- Llama a savePlayerManager() después de cambios
+- Retorna success + result + force_end
+```
+
+**Mostrar:**
+```
+✅ processRoundAction() implementado
+
+⚙️ Lógica:
+1. Verifica lock
+2. Valida acción
+3. Otorga puntos si correcto
+4. Bloquea jugador
+5. Decide si forzar fin de ronda
+
+⏳ Esperando confirmación...
+```
+
+---
+
+### FASE 8: Backend - GameEngine (Parte 5: endCurrentRound y filter)
+**Objetivo**: Finalizar ronda y filtrar información sensible
+
+**Template:**
+```php
+public function endCurrentRound(GameMatch $match): void
+{
+    // Obtener resultados
+    $results = $this->getAllPlayerResults($match);
+
+    // Delegar al base (emite RoundEndedEvent automáticamente)
+    $this->completeRound($match, $results);
+}
+
+protected function getAllPlayerResults(GameMatch $match): array
+{
+    $playerManager = $this->getPlayerManager($match, $this->scoreCalculator);
+    $allActions = $playerManager->getAllActions();
+    $currentQuestion = $this->getCurrentQuestion($match);
+
+    return [
+        'question' => $currentQuestion,
+        'correct_answer' => $currentQuestion['correct_answer'],
+        'players' => $allActions,
+    ];
+}
+
+protected function filterGameStateForBroadcast(array $gameState, GameMatch $match): array
+{
+    $filtered = $gameState;
+
+    // Remover información sensible que no todos deben ver
+    if (isset($filtered['current_question']['correct_answer'])) {
+        unset($filtered['current_question']['correct_answer']);
+    }
+
+    // Si usa roles, remover info privada
+    if (isset($filtered['drawer_word'])) {
+        unset($filtered['drawer_word']);
+    }
+
+    return $filtered;
+}
+```
+
+**Checkpoint 8:**
+```
+✅ Verificar endCurrentRound():
+- Sintaxis PHP válida
+- Llama a getAllPlayerResults()
+- Llama a completeRound() (NO emite RoundEndedEvent manualmente)
+- NO modifica scores manualmente
+
+✅ Verificar filterGameStateForBroadcast():
+- Remueve respuestas correctas
+- Remueve información privada de roles
+- Remueve datos sensibles del juego
+- NO modifica el game_state original (trabaja sobre copia)
+```
+
+**Mostrar:**
+```
+✅ endCurrentRound() y filterGameStateForBroadcast() implementados
+
+🔒 Información filtrada en broadcasts:
+- Respuestas correctas (se muestran solo al terminar ronda)
+- {Información privada de roles}
+- {Otros datos sensibles}
+
+⏳ Esperando confirmación...
+```
+
+---
+
+### FASE 9: Backend - Eventos Personalizados (Si Aplica)
+**Objetivo**: Crear eventos específicos del juego
+
+**Solo si el juego necesita eventos personalizados** (como WordRevealedEvent en Pictionary)
+
+**Generar** (usando template obligatorio):
+1. `app/Events/Game/{CustomEvent}.php`
+
+**Checkpoint 9:**
+```
+✅ Verificar cada evento:
+- Usa ShouldBroadcastNow (NO ShouldBroadcast)
+- Usa PresenceChannel (NO Channel)
+- broadcastAs() sigue convención game.*.*
+- Nombre en capabilities.json coincide exactamente
+- Si es evento privado, documenta channel_name en capabilities.json
+```
+
+**Mostrar:**
+```
+✅ Eventos personalizados generados:
+- {CustomEvent1}: game.custom.event1
+- {CustomEvent2}: game.custom.event2
+
+⚙️ Configuración en capabilities.json actualizada
+
+⏳ Esperando confirmación...
+```
+
+---
+
+### FASE 10: Frontend - GameClient (Estructura)
+**Objetivo**: Crear cliente JavaScript básico
+
+**Generar:**
+1. `games/{slug}/js/{GameName}GameClient.js`
+
+**Template:**
 ```javascript
-class SpeedMathChallengeGameClient extends BaseGameClient {
+import { BaseGameClient } from '/resources/js/core/BaseGameClient.js';
+
+class {GameName}GameClient extends BaseGameClient {
     constructor(config) {
         super(config);
+
+        // Estado específico del juego
         this.currentQuestion = null;
+        this.myAnswer = null;
+
+        // Inicializar event listeners de botones
+        this.initializeEventListeners();
     }
 
-    // Heredado automáticamente:
-    // - handleRoundStarted() (inicia timer automáticamente)
-    // - handleRoundEnded() (muestra resultados + countdown auto-next)
-    // - handlePlayersUnlocked() (resetea locks)
+    /**
+     * Override: Configurar EventManager con handlers específicos
+     */
+    setupEventManager() {
+        console.log('[{GameName}] ===== SETTING UP EVENT MANAGER =====');
+        console.log('[{GameName}] EventConfig:', this.eventConfig);
 
+        // Registrar handlers personalizados si hay eventos custom
+        const customHandlers = {
+            // handleCustomEvent: (event) => this.handleCustomEvent(event),
+        };
+
+        console.log('[{GameName}] Custom handlers:', Object.keys(customHandlers));
+
+        // Llamar al setupEventManager del padre
+        super.setupEventManager(customHandlers);
+
+        console.log('[{GameName}] ===== EVENT MANAGER SETUP COMPLETE =====');
+    }
+
+    /**
+     * Initialize DOM event listeners
+     */
+    initializeEventListeners() {
+        // TODO: Añadir listeners de botones
+    }
+
+    /**
+     * Override: Manejar inicio de ronda
+     */
     handleRoundStarted(event) {
-        super.handleRoundStarted(event); // ← IMPORTANTE: Llamar al base
+        console.log('[{GameName}] Round started:', event);
+
+        // ✅ IMPORTANTE: Llamar al padre (inicia timer automáticamente)
+        super.handleRoundStarted(event);
 
         // Lógica específica del juego
         this.currentQuestion = event.game_state.current_question;
         this.renderQuestion(this.currentQuestion);
-        this.showElement('playing-state');
     }
 
+    /**
+     * Override: Manejar fin de ronda
+     */
     handleRoundEnded(event) {
-        super.handleRoundEnded(event); // ← Actualiza scores + inicia countdown
+        console.log('[{GameName}] Round ended:', event);
+
+        // ✅ Llamar al padre (muestra resultados + countdown)
+        super.handleRoundEnded(event);
 
         // Mostrar resultados específicos
-        this.showCorrectAnswer(event.results.question.correct_answer);
-        this.showPlayerResults(event.results.players);
+        this.showResults(event.results);
     }
 
+    /**
+     * Override: Manejar desbloqueo de jugadores
+     */
     handlePlayersUnlocked(event) {
+        console.log('[{GameName}] Players unlocked');
         this.isLocked = false;
-        this.hideElement('waiting-validation');
-        this.showElement('answer-input');
+        this.resetUI();
     }
 
-    // TODO: Implementar UI específica
-    renderQuestion(question) { }
-    showCorrectAnswer(answer) { }
-    showPlayerResults(players) { }
+    /**
+     * Restaurar estado del juego (para F5/refresh)
+     */
+    restoreGameState(gameState) {
+        console.log('[{GameName}] Restoring game state:', gameState);
 
+        if (gameState.phase === 'playing') {
+            // Restaurar UI de juego activo
+            this.currentQuestion = gameState.current_question;
+            this.renderQuestion(this.currentQuestion);
+
+            // Restaurar locks
+            const playerManager = gameState.player_system;
+            if (playerManager?.players?.[this.playerId]?.locked) {
+                this.isLocked = true;
+                this.showLockedUI();
+            }
+        }
+    }
+
+    // ✅ CRÍTICO: Implementar estos métodos
     getTimerElement() {
         return document.getElementById('round-timer');
     }
@@ -896,107 +965,218 @@ class SpeedMathChallengeGameClient extends BaseGameClient {
     getCountdownElement() {
         return document.getElementById('next-round-countdown');
     }
+
+    // TODO: Implementar métodos específicos del juego
+    renderQuestion(question) { }
+    showResults(results) { }
+    resetUI() { }
+    showLockedUI() { }
 }
+
+// Export para uso global
+if (typeof window !== 'undefined') {
+    window.{GameName}GameClient = {GameName}GameClient;
+}
+
+export default {GameName}GameClient;
 ```
 
-#### 5.5 PRD (Product Requirements Document)
+**Checkpoint 10:**
+```
+✅ Verificar GameClient:
+- Sintaxis JavaScript válida (node --check)
+- Extiende BaseGameClient
+- Constructor llama a super(config)
+- setupEventManager() registra handlers custom
+- handleRoundStarted() llama a super.handleRoundStarted()
+- handleRoundEnded() llama a super.handleRoundEnded()
+- handlePlayersUnlocked() implementado
+- restoreGameState() implementado para F5
+- getTimerElement() y getCountdownElement() implementados
+- window.{GameName}GameClient exportado
+```
 
-[Generación automática basada en toda la información recopilada]
+**Mostrar:**
+```
+✅ {GameName}GameClient generado
 
----
+📱 Handlers implementados:
+- handleRoundStarted() (con super)
+- handleRoundEnded() (con super)
+- handlePlayersUnlocked()
+- restoreGameState()
 
-## 🔄 Modo Interactivo (Backward Compatibility)
-
-Si el usuario ejecuta `/create-game` sin argumentos, usar el flujo original de 12 preguntas interactivas (mantener compatibilidad con versión actual).
-
----
-
-## ✅ Checklist de Generación
-
-Antes de finalizar, verificar:
-
-**Backend:**
-- [ ] PlayerManager inicializado (NO PlayerStateManager)
-- [ ] scoreCalculator como propiedad de clase
-- [ ] startNewRound() incluye reset() + savePlayerManager()
-- [ ] filterGameStateForBroadcast() implementado (si tiene info sensible)
-- [ ] NO duplica getGameConfig() ni getFinalScores()
-- [ ] Sigue Round Lifecycle Protocol
-- [ ] onPlayerReconnected() implementado (si necesita comportamiento especial)
-- [ ] config.json tiene timing para auto-next
-- [ ] Sintaxis PHP válida (php -l)
-- [ ] JSON válido (jq)
-
-**Frontend:**
-- [ ] GameClient hereda de BaseGameClient
-- [ ] GameClient llama a super() en overrides (handleRoundStarted, handleRoundEnded, handleGameFinished)
-- [ ] getTimerElement() y getCountdownElement() implementados
-- [ ] game.blade.php incluye lógica de restauración para phase='playing'
-- [ ] game.blade.php incluye lógica de restauración para phase='finished'
-- [ ] Restaura información privada según rol (si aplica)
-- [ ] Restaura elementos visuales (canvas, tablero, etc.) en refresh
-
-**Módulos:**
-- [ ] Todos los módulos configurados correctamente
-- [ ] timing.round_ended con auto_next configurado
+⏳ Esperando confirmación...
+```
 
 ---
 
-## 🎯 Output Final
+### FASE 11: Frontend - Vista Blade
+**Objetivo**: Crear interfaz del juego
 
-Al terminar, mostrar:
+**Generar:**
+1. `games/{slug}/views/game.blade.php` (usando template obligatorio)
+
+**Incluir SIEMPRE:**
+- `<x-game.player-disconnected-popup />`
+- `@stack('scripts')` antes de `</body>`
+- Lógica de restauración con `restoreGameState()`
+
+**Checkpoint 11:**
+```
+✅ Verificar game.blade.php:
+- Incluye <x-game.player-disconnected-popup />
+- Incluye @stack('scripts') antes de </body>
+- Carga estado inicial con fetch('/api/rooms/{code}/state')
+- Llama a restoreGameState() ANTES de setupEventManager()
+- Configura eventConfig desde @json($eventConfig)
+- Variables PHP escapadas correctamente
+```
+
+**Mostrar:**
+```
+✅ game.blade.php generado
+
+✅ Características incluidas:
+- Popup de desconexión
+- Restauración de estado (F5)
+- Timer visual
+- Countdown automático
+- Event Manager configurado
+
+⏳ Esperando confirmación...
+```
+
+---
+
+### FASE 12: Verificación Final y Registro
+**Objetivo**: Validar todo y registrar el juego
+
+**Ejecutar verificaciones automáticas:**
+
+```bash
+# 1. Validar sintaxis PHP
+php -l games/{slug}/*.php
+
+# 2. Validar JSON
+jq . games/{slug}/config.json
+jq . games/{slug}/capabilities.json
+
+# 3. Validar JavaScript
+node --check games/{slug}/js/*.js
+
+# 4. Verificar que nombres de eventos coincidan
+# (comparar capabilities.json con Event::broadcastAs())
+```
+
+**Checklist Final Completo:**
+
+```
+BACKEND:
+☐ PlayerManager inicializado (NO PlayerStateManager)
+☐ scoreCalculator como propiedad de clase
+☐ startNewRound() incluye reset() + savePlayerManager()
+☐ processRoundAction() usa awardPoints() y lockPlayer()
+☐ endCurrentRound() llama a completeRound()
+☐ filterGameStateForBroadcast() implementado
+☐ NO duplica getGameConfig() ni getFinalScores()
+☐ Eventos usan ShouldBroadcastNow + PresenceChannel
+☐ Nombres de eventos coinciden con capabilities.json
+☐ onPlayerDisconnected/Reconnected si necesario
+☐ Si usa PhaseManager, conecta TimerService
+
+FRONTEND:
+☐ GameClient hereda de BaseGameClient
+☐ Constructor llama a super(config)
+☐ handleRoundStarted() llama a super
+☐ handleRoundEnded() llama a super
+☐ handlePlayersUnlocked() implementado
+☐ restoreGameState() implementado
+☐ getTimerElement() implementado
+☐ getCountdownElement() implementado
+☐ game.blade.php incluye popup de desconexión
+☐ game.blade.php incluye @stack('scripts')
+☐ Carga estado inicial antes de setupEventManager()
+
+CONFIGURACIÓN:
+☐ config.json válido
+☐ capabilities.json válido
+☐ event_config completo con TODOS los eventos base
+☐ timing.round_ended con auto_next configurado
+☐ Todos los módulos necesarios habilitados
+
+VALIDACIÓN:
+☐ Sintaxis PHP válida (php -l)
+☐ Sintaxis JS válida (node --check)
+☐ JSON válido (jq)
+☐ Nombres de eventos consistentes
+```
+
+**Registrar el juego:**
+
+```bash
+# Registrar en la base de datos
+php artisan game:register {slug}
+```
+
+**Mostrar Output Final:**
 
 ```
 ✨ ¡Juego "{Game Name}" creado con éxito!
 
 📂 Estructura generada:
-✅ games/{slug}/{GameName}Engine.php (con PlayerManager)
+✅ games/{slug}/{GameName}Engine.php
 ✅ games/{slug}/{GameName}ScoreCalculator.php
-✅ games/{slug}/config.json (módulos configurados)
-✅ games/{slug}/questions.json (si Q&A)
+✅ games/{slug}/config.json
+✅ games/{slug}/capabilities.json
 ✅ games/{slug}/views/game.blade.php
 ✅ games/{slug}/js/{GameName}GameClient.js
-✅ prds/game-{slug}.md
+✅ games/{slug}/README.md
 
 🎮 Arquitectura Aplicada:
 ✅ PlayerManager unificado (scores + state + roles)
 ✅ Round Lifecycle Protocol completo
 ✅ filterGameStateForBroadcast() para seguridad
-✅ Hereda getGameConfig() y getFinalScores() del base
+✅ Hereda getGameConfig() y getFinalScores()
 ✅ Protocolo de Refresh/Reconexión (F5)
 ✅ Protocolo de Desconexión/Reconexión
 ✅ Auto-next con timing configurado
-✅ WebSockets (Laravel Reverb)
+✅ Broadcasting correcto (ShouldBroadcastNow + PresenceChannel)
+✅ Nombres de eventos consistentes
 
 🔧 Módulos Configurados:
 {Lista de módulos con sus configuraciones}
 
 📋 Siguiente paso:
 
-Usa /generate-tasks para crear lista detallada:
-  /generate-tasks prds/game-{slug}.md
+El juego está listo para probar:
+1. php artisan serve
+2. npm run dev
+3. Navega a /games/{slug}
 
-Luego implementa con /process-task-list
-
-📚 Juegos de referencia:
+📚 Documentación de referencia:
 - games/pictionary/ - Roles, canvas, claim pattern
 - games/trivia/ - Sin roles, simultaneous, speed bonus
+
+🎉 ¡Listo para jugar!
 ```
+
+---
+
+## 🔄 Modo Interactivo (Backward Compatibility)
+
+Si el usuario ejecuta `/create-game` sin argumentos, usar el flujo original de 12 preguntas interactivas (mantener compatibilidad).
 
 ---
 
 ## 🚀 Ejecución
 
-**Inicio:**
+**Al inicio:**
 1. Detectar si hay archivo de descripción
-2. Si hay archivo:
-   - Leer y analizar contenido
-   - Inferir módulos y configuración
-   - Hacer preguntas solo sobre ambigüedades
-3. Si NO hay archivo:
-   - Flujo de 12 preguntas interactivo
-4. Generar estructura COMPLETA
-5. Validar sintaxis
-6. Mostrar output con next steps
+2. Si hay archivo: Modo IA (análisis + preguntas sobre ambigüedades)
+3. Si NO hay archivo: Modo Interactivo (12 preguntas)
+4. Generar EN FASES con checkpoints
+5. Validar después de cada fase
+6. Mostrar progreso claro
 
 **¡Comencemos!** 🚀

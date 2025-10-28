@@ -46,11 +46,23 @@ class Timer
     protected int $totalPausedSeconds = 0;
 
     /**
+     * Clase del evento a emitir cuando expire (ej: RoundEndedEvent::class).
+     */
+    protected ?string $eventToEmit = null;
+
+    /**
+     * Datos a pasar al evento cuando expire.
+     */
+    protected array $eventData = [];
+
+    /**
      * Constructor.
      *
      * @param string $name Nombre del timer
      * @param int $duration Duración en segundos
      * @param DateTime $startedAt Timestamp de inicio
+     * @param string|null $eventToEmit Clase del evento a emitir cuando expire
+     * @param array $eventData Datos a pasar al evento
      * @param bool $isPaused Si está pausado
      * @param DateTime|null $pausedAt Cuándo se pausó
      * @param int $totalPausedSeconds Tiempo total pausado
@@ -59,6 +71,8 @@ class Timer
         string $name,
         int $duration,
         DateTime $startedAt,
+        ?string $eventToEmit = null,
+        array $eventData = [],
         bool $isPaused = false,
         ?DateTime $pausedAt = null,
         int $totalPausedSeconds = 0
@@ -66,6 +80,8 @@ class Timer
         $this->name = $name;
         $this->duration = $duration;
         $this->startedAt = $startedAt;
+        $this->eventToEmit = $eventToEmit;
+        $this->eventData = $eventData;
         $this->isPaused = $isPaused;
         $this->pausedAt = $pausedAt;
         $this->totalPausedSeconds = $totalPausedSeconds;
@@ -191,6 +207,26 @@ class Timer
     }
 
     /**
+     * Obtener clase del evento a emitir.
+     *
+     * @return string|null
+     */
+    public function getEventToEmit(): ?string
+    {
+        return $this->eventToEmit;
+    }
+
+    /**
+     * Obtener datos del evento.
+     *
+     * @return array
+     */
+    public function getEventData(): array
+    {
+        return $this->eventData;
+    }
+
+    /**
      * Serializar a array.
      *
      * @return array
@@ -201,6 +237,8 @@ class Timer
             'name' => $this->name,
             'duration' => $this->duration,
             'started_at' => $this->startedAt->format('Y-m-d H:i:s'),
+            'event_to_emit' => $this->eventToEmit,
+            'event_data' => $this->eventData,
             'is_paused' => $this->isPaused,
             'paused_at' => $this->pausedAt ? $this->pausedAt->format('Y-m-d H:i:s') : null,
             'total_paused_seconds' => $this->totalPausedSeconds,
@@ -219,6 +257,8 @@ class Timer
             name: $data['name'],
             duration: $data['duration'],
             startedAt: new DateTime($data['started_at']),
+            eventToEmit: $data['event_to_emit'] ?? null,
+            eventData: $data['event_data'] ?? [],
             isPaused: $data['is_paused'] ?? false,
             pausedAt: isset($data['paused_at']) ? new DateTime($data['paused_at']) : null,
             totalPausedSeconds: $data['total_paused_seconds'] ?? 0

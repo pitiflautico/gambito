@@ -26,7 +26,6 @@ export default class PresenceMonitor {
      * Debe ser llamado cuando el juego cambia de fase (waiting → playing → finished)
      */
     setPhase(phase) {
-        console.log(`[PresenceMonitor] Phase changed: ${this.currentPhase} → ${phase}`);
         this.currentPhase = phase;
     }
 
@@ -40,19 +39,16 @@ export default class PresenceMonitor {
             return;
         }
 
-        console.log(`[PresenceMonitor] Starting presence monitor for room ${this.roomCode}`);
 
         this.presenceChannel = window.Echo.join(`room.${this.roomCode}`);
 
         // Usuarios actualmente conectados
         this.presenceChannel.here((users) => {
-            console.log('[PresenceMonitor] Users here:', users.length);
             this.connectedUsers = users;
         });
 
         // Usuario se unió
         this.presenceChannel.joining((user) => {
-            console.log('[PresenceMonitor] User joining:', user.name);
 
             // Si el usuario estaba marcado como desconectado y ahora vuelve
             if (this.notifiedDisconnections.has(user.id)) {
@@ -64,17 +60,14 @@ export default class PresenceMonitor {
 
         // Usuario se fue
         this.presenceChannel.leaving((user) => {
-            console.log('[PresenceMonitor] User leaving:', user.name);
 
             this.connectedUsers = this.connectedUsers.filter(u => u.id !== user.id);
 
             // Siempre notificar al backend - el backend decidirá si debe procesarse
             // (el backend verifica si game_state.phase === 'playing')
-            console.log('[PresenceMonitor] Notifying backend of disconnection...');
             this.handlePlayerDisconnected(user);
         });
 
-        console.log('[PresenceMonitor] Presence monitor started successfully');
     }
 
     /**
@@ -85,7 +78,6 @@ export default class PresenceMonitor {
 
         // Evitar notificar múltiples veces
         if (this.notifiedDisconnections.has(user.id)) {
-            console.log('[PresenceMonitor] Already notified, skipping');
             return;
         }
 
@@ -106,7 +98,6 @@ export default class PresenceMonitor {
             const data = await response.json();
 
             if (data.success) {
-                console.log('[PresenceMonitor] Server notified of disconnection');
                 // El servidor emitirá PlayerDisconnectedEvent → BaseGameClient lo manejará
             } else {
                 console.error('[PresenceMonitor] Server rejected disconnection notification:', data.message);
@@ -125,11 +116,9 @@ export default class PresenceMonitor {
      * Manejar reconexión de jugador.
      */
     async handlePlayerReconnected(user) {
-        console.log(`[PresenceMonitor] Player reconnected: ${user.name}`);
 
         // Solo notificar si habíamos notificado la desconexión
         if (!this.notifiedDisconnections.has(user.id)) {
-            console.log('[PresenceMonitor] No previous disconnection recorded, skipping');
             return;
         }
 
@@ -150,7 +139,6 @@ export default class PresenceMonitor {
             const data = await response.json();
 
             if (data.success) {
-                console.log('[PresenceMonitor] Server notified of reconnection');
                 // El servidor emitirá PlayerReconnectedEvent → BaseGameClient lo manejará
             } else {
                 console.error('[PresenceMonitor] Server rejected reconnection notification:', data.message);
@@ -168,7 +156,6 @@ export default class PresenceMonitor {
         if (this.presenceChannel) {
             window.Echo.leave(`room.${this.roomCode}`);
             this.presenceChannel = null;
-            console.log('[PresenceMonitor] Presence monitor stopped');
         }
     }
 }

@@ -140,6 +140,7 @@ class GameMatch extends Model
         ]);
 
         // 4. Emitir evento game.started para redirigir a todos al room
+        \Log::info("🎮 [BACKEND] Emitiendo GameStartedEvent - Room: {$this->room->code}");
         event(new \App\Events\GameStartedEvent($this->room));
     }
 

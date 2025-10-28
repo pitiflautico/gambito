@@ -348,34 +348,23 @@ class TriviaEngine extends BaseGameEngine
      * Iniciar nueva ronda - Cargar siguiente pregunta.
      *
      * Este método se llama desde BaseGameEngine::handleNewRound()
-     * DESPUÉS de que RoundManager haya avanzado la ronda y reseteado el timer.
+     * DESPUÉS de que RoundManager haya avanzado la ronda.
+     *
+     * IMPORTANTE: PlayerManager ya fue reseteado por BaseGameEngine,
+     * aquí solo cargamos la lógica específica de Trivia (la pregunta).
      */
     protected function startNewRound(GameMatch $match): void
     {
-        Log::info("[Trivia] Starting new round", ['match_id' => $match->id]);
+        Log::info("[Trivia] Starting new round - loading question", ['match_id' => $match->id]);
 
-        // 1. Desbloquear jugadores (via PlayerManager)
-        // El reset emitirá automáticamente PlayersUnlockedEvent
-        $playerManager = $this->getPlayerManager($match, $this->scoreCalculator);
-        $playerManager->reset($match);  // ← Resetea locks, actions, states, etc. y emite evento
-
-        // IMPORTANTE: Guardar el reset antes de continuar
-        $this->savePlayerManager($match, $playerManager);
-
-        // 2. Cargar siguiente pregunta
+        // Solo lógica específica de Trivia: cargar pregunta
         $question = $this->loadNextQuestion($match);
 
-        // NOTA: El timer de ronda se inicia automáticamente por BaseGameEngine::handleNewRound()
-        // No es necesario llamar a startRoundTimer() aquí
-
-        Log::info("[Trivia] Question loaded and players unlocked", [
+        Log::info("[Trivia] Question loaded", [
             'match_id' => $match->id,
             'question_id' => $question['id'],
             'question' => $question['question']
         ]);
-
-        // Emitir evento específico de Trivia (opcional)
-        // event(new QuestionStartedEvent($match, $question));
     }
 
     // ========================================================================
@@ -471,109 +460,15 @@ class TriviaEngine extends BaseGameEngine
     }
 
     /**
-     * Finalizar ronda actual.
-     *
-     * Obtiene los resultados de la ronda y llama a completeRound()
-     * que se encarga de emitir eventos y avanzar a la siguiente ronda.
-     */
-    public function endCurrentRound(GameMatch $match): void
-    {
-        Log::info("[Trivia] Ending current round", ['match_id' => $match->id]);
-
-        // Obtener resultados de todos los jugadores
-        $results = $this->getAllPlayerResults($match);
-
-        // Llamar a completeRound() que:
-        // 1. Emite RoundEndedEvent
-        // 2. Avanza RoundManager
-        // 3. Verifica si el juego terminó
-        // 4. Si no terminó, llama a startNewRound() y emite RoundStartedEvent
-        $this->completeRound($match, $results);
-
-        Log::info("[Trivia] Round completed", [
-            'match_id' => $match->id,
-            'results' => $results
-        ]);
-    }
-
-    /**
-     * Analizar el estado actual de la ronda según las reglas de Trivia.
-     *
-     * REGLAS DE TRIVIA:
-     * 1. Si alguien acertó → ronda debe terminar
-     * 2. Si todos respondieron incorrectamente → ronda debe terminar
-     * 3. Si hay jugadores sin responder → ronda continúa
-     *
-     * NOTA: Este método es para análisis/debugging. La decisión real
-     * de terminar ronda se toma en processRoundAction() con force_end.
-     *
-     * @param GameMatch $match
-     * @return array ['should_end' => bool, 'reason' => string|null]
-     */
-    protected function checkRoundState(GameMatch $match): array
-    {
-        $playerManager =$this->getPlayerManager($match, $this->scoreCalculator);
-        $allActions = $playerManager->getAllActions();
-        
-        Log::info("[Trivia] Checking round state", [
-            'match_id' => $match->id,
-            'total_actions' => count($allActions),
-            'total_players' => $playerManager->getTotalPlayers(),
-            'locked_players' => count($playerManager->getLockedPlayers())
-        ]);
-        
-        // REGLA 1: Verificar si alguien acertó
-        foreach ($allActions as $playerId => $action) {
-            if ($action['type'] === 'answer' && $action['is_correct']) {
-                Log::info("[Trivia] Round state check: Player answered correctly", [
-                    'match_id' => $match->id,
-                    'player_id' => $playerId
-                ]);
-                
-                return [
-                    'should_end' => true,
-                    'reason' => 'player_answered_correctly'
-                ];
-            }
-        }
-        
-        // REGLA 2: Verificar si todos respondieron incorrectamente
-        $allLocked = $playerManager->areAllPlayersLocked();
-        
-        Log::info("[Trivia] Round state check - lock status", [
-            'match_id' => $match->id,
-            'all_locked' => $allLocked
-        ]);
-        
-        if ($allLocked) {
-            Log::info("[Trivia] Round state check: All players answered incorrectly", [
-                'match_id' => $match->id
-            ]);
-            
-            return [
-                'should_end' => true,
-                'reason' => 'all_players_answered_incorrectly'
-            ];
-        }
-        
-        // REGLA 3: Aún hay jugadores sin responder
-        Log::info("[Trivia] Round state check: Waiting for more players");
-        
-        return [
-            'should_end' => false,
-            'reason' => null
-        ];
-    }
-
-    /**
-     * Obtener resultados de todos los jugadores en la ronda actual.
+     * Obtener resultados de la ronda actual (implementación de Trivia).
      *
      * Retorna quién respondió, si acertó, y cuántos puntos ganó.
+     * BaseGameEngine::endCurrentRound() llama a este método automáticamente.
      *
      * @param GameMatch $match
-     * @return array
+     * @return array Resultados de la ronda
      */
-    protected function getAllPlayerResults(GameMatch $match): array
+    protected function getRoundResults(GameMatch $match): array
     {
         $playerManager =$this->getPlayerManager($match, $this->scoreCalculator);
         $allActions = $playerManager->getAllActions();

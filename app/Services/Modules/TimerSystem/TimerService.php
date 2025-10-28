@@ -48,6 +48,8 @@ class TimerService
      *
      * @param string $timerName Nombre único del timer
      * @param int $durationSeconds Duración en segundos
+     * @param string|null $eventToEmit Clase del evento a emitir cuando expire (ej: RoundEndedEvent::class)
+     * @param array $eventData Datos a pasar al evento cuando expire
      * @param DateTime|null $startTime Tiempo de inicio (default: now)
      * @param bool $restart Si true, reinicia el timer si ya existe (default: false)
      * @return Timer El timer creado
@@ -56,6 +58,8 @@ class TimerService
     public function startTimer(
         string $timerName,
         int $durationSeconds,
+        ?string $eventToEmit = null,
+        array $eventData = [],
         ?DateTime $startTime = null,
         bool $restart = false
     ): Timer {
@@ -70,7 +74,9 @@ class TimerService
         $timer = new Timer(
             name: $timerName,
             duration: $durationSeconds,
-            startedAt: $startTime ?? new DateTime()
+            startedAt: $startTime ?? new DateTime(),
+            eventToEmit: $eventToEmit,
+            eventData: $eventData
         );
 
         $this->timers[$timerName] = $timer;
@@ -101,6 +107,25 @@ class TimerService
     {
         $timer = $this->getTimer($timerName);
         $timer->resume();
+    }
+
+    /**
+     * Cancelar y eliminar un timer.
+     *
+     * Útil cuando un timer ya no es necesario (ej: una ronda terminó antes del timeout).
+     * El timer se elimina y NO emitirá ningún evento.
+     *
+     * @param string $timerName Nombre del timer
+     * @return bool True si se canceló, false si no existía
+     */
+    public function cancelTimer(string $timerName): bool
+    {
+        if (!$this->hasTimer($timerName)) {
+            return false;
+        }
+
+        unset($this->timers[$timerName]);
+        return true;
     }
 
     /**
@@ -149,21 +174,6 @@ class TimerService
     {
         $timer = $this->getTimer($timerName);
         return $timer->isPaused();
-    }
-
-    /**
-     * Cancelar/eliminar un timer.
-     *
-     * @param string $timerName Nombre del timer
-     * @return void
-     */
-    public function cancelTimer(string $timerName): void
-    {
-        if (!isset($this->timers[$timerName])) {
-            throw new \InvalidArgumentException("Timer '{$timerName}' no existe");
-        }
-
-        unset($this->timers[$timerName]);
     }
 
     /**
@@ -293,5 +303,54 @@ class TimerService
         }
 
         return new self($timers);
+    }
+
+    /**
+     * Emitir evento cuando un timer expira.
+     *
+     * Este método lee la configuración del timer (eventToEmit + eventData)
+     * y emite el evento especificado cuando el timer fue creado.
+     *
+     * Si el timer no tiene evento configurado, no emite nada.
+     *
+     * @param string $timerName Nombre del timer que expiró
+     * @return bool True si emitió evento, false si no había evento configurado
+     */
+    public function emitTimerExpiredEvent(string $timerName): bool
+    {
+        if (!$this->hasTimer($timerName)) {
+            \Log::warning('[TimerService] Intentando emitir evento de timer inexistente', [
+                'timer_name' => $timerName
+            ]);
+            return false;
+        }
+
+        $timer = $this->getTimer($timerName);
+        $eventToEmit = $timer->getEventToEmit();
+        $eventData = $timer->getEventData();
+
+        // Si no hay evento configurado, no hacer nada
+        if (!$eventToEmit) {
+            \Log::info('[TimerService] Timer sin evento configurado', [
+                'timer_name' => $timerName
+            ]);
+            return false;
+        }
+
+        \Log::info("⏰ [BACKEND] Emitiendo evento de timer - Timer: {$timerName}, Evento: {$eventToEmit}");
+
+        // Instanciar y emitir el evento dinámicamente
+        $eventInstance = new $eventToEmit(...array_values($eventData));
+        event($eventInstance);
+
+        \Log::info('[TimerService] Evento emitido correctamente', [
+            'timer_name' => $timerName,
+            'event_class' => $eventToEmit
+        ]);
+
+        // Eliminar el timer después de emitir el evento
+        $this->cancelTimer($timerName);
+
+        return true;
     }
 }

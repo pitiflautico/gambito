@@ -44,10 +44,15 @@ public function handleNewRound(GameMatch $match, bool $advanceRound = true): voi
 
     // 6. Emitir RoundStartedEvent con timing
     event(new RoundStartedEvent($matchFiltered, $currentRound, $totalRounds, $timing));
+
+    // 7. Llamar al hook onRoundStarted() para que el juego ejecute lógica custom
+    $this->onRoundStarted($match, $currentRound, $totalRounds);
 }
 ```
 
 #### 🎨 Específico del Juego (implementar en XxxEngine)
+
+##### Opción 1: Usando startNewRound() (Recomendado para lógica compleja)
 ```php
 // games/pictionary/PictionaryEngine.php
 protected function startNewRound(GameMatch $match): void
@@ -67,6 +72,26 @@ protected function startNewRound(GameMatch $match): void
 
     // 3. Emitir eventos privados si es necesario
     event(new WordRevealedEvent($match, $drawer, $word)); // Canal privado
+}
+```
+
+##### Opción 2: Usando hook onRoundStarted() (Recomendado para lógica post-evento)
+```php
+// games/mentiroso/MentirosoEngine.php
+protected function onRoundStarted(GameMatch $match, int $currentRound, int $totalRounds): void
+{
+    // Este hook se ejecuta DESPUÉS de emitir RoundStartedEvent
+    // Útil para:
+    // - Iniciar timers específicos del juego
+    // - Enviar notificaciones privadas a jugadores
+    // - Ejecutar lógica de negocio que NO afecta al evento emitido
+
+    // Ejemplo: Enviar frase secreta al orador
+    $gameState = $match->game_state;
+    $oradorId = $gameState['turn_system']['current_player'];
+    $frase = $gameState['current_statement'];
+
+    event(new StatementRevealedEvent($match, $oradorId, $frase));
 }
 ```
 
@@ -135,12 +160,19 @@ protected function completeRound(GameMatch $match, array $results = []): void
     $roundManager = $this->getRoundManager($match);
     $scores = $this->getScores($match->game_state);
 
-    // RoundManager maneja automáticamente:
+    // 1. RoundManager maneja automáticamente:
     // - Emitir RoundEndedEvent con timing
     // - Incluir auto_next y delay desde config.json
     $roundManager->completeRound($match, $results, $scores);
 
-    // Verificar si el juego terminó
+    // 2. Llamar al hook onRoundEnded() para que el juego ejecute lógica custom
+    $currentRound = $roundManager->getCurrentRound();
+    $this->onRoundEnded($match, $currentRound, $results, $scores);
+
+    // 3. Guardar estado actualizado
+    $this->saveRoundManager($match, $roundManager);
+
+    // 4. Verificar si el juego terminó
     if ($roundManager->isGameComplete()) {
         $this->finalize($match);
     }
@@ -148,6 +180,8 @@ protected function completeRound(GameMatch $match, array $results = []): void
 ```
 
 #### 🎨 Específico del Juego
+
+##### Opción 1: Usando endCurrentRound() (Recomendado para calcular resultados)
 ```php
 // games/pictionary/PictionaryEngine.php
 public function endCurrentRound(GameMatch $match): void
@@ -157,6 +191,26 @@ public function endCurrentRound(GameMatch $match): void
 
     // 2. Delegar al base (maneja todo automáticamente)
     $this->completeRound($match, $results);
+}
+```
+
+##### Opción 2: Usando hook onRoundEnded() (Recomendado para lógica post-evento)
+```php
+// games/mentiroso/MentirosoEngine.php
+protected function onRoundEnded(GameMatch $match, int $roundNumber, array $results, array $scores): void
+{
+    // Este hook se ejecuta DESPUÉS de emitir RoundEndedEvent
+    // Útil para:
+    // - Cancelar timers específicos del juego
+    // - Calcular estadísticas de la ronda
+    // - Preparar datos para la siguiente ronda
+    // - Ejecutar lógica de negocio que NO afecta al evento emitido
+
+    // Ejemplo: Registrar estadísticas de la ronda
+    Log::info("[Mentiroso] Round {$roundNumber} ended", [
+        'results' => $results,
+        'scores' => $scores,
+    ]);
 }
 ```
 
@@ -365,17 +419,128 @@ if (game_state?.phase === 'finished') {
 
 ---
 
+## 🪝 6. SISTEMA DE HOOKS
+
+### ¿Qué son los Hooks?
+
+Los hooks son métodos protegidos vacíos en `BaseGameEngine` que se ejecutan **DESPUÉS** de que se emitan los eventos del sistema. Permiten a los juegos específicos extender el comportamiento sin modificar el flujo base.
+
+### Hooks Disponibles
+
+#### onRoundStarted()
+```php
+/**
+ * Hook: Ejecutado DESPUÉS de emitir RoundStartedEvent.
+ *
+ * @param GameMatch $match
+ * @param int $currentRound
+ * @param int $totalRounds
+ * @return void
+ */
+protected function onRoundStarted(GameMatch $match, int $currentRound, int $totalRounds): void
+{
+    // Implementación vacía por defecto
+}
+```
+
+**Cuándo usar:**
+- ✅ Enviar eventos privados a jugadores específicos (ej: revelar frase al orador)
+- ✅ Iniciar timers específicos del juego
+- ✅ Ejecutar lógica que NO afecta al `RoundStartedEvent` ya emitido
+
+**Cuándo NO usar:**
+- ❌ Modificar `game_state` que debería estar en el evento (usar `startNewRound()` en su lugar)
+- ❌ Resetear estado de jugadores (usar `startNewRound()` en su lugar)
+
+#### onRoundEnded()
+```php
+/**
+ * Hook: Ejecutado DESPUÉS de emitir RoundEndedEvent.
+ *
+ * @param GameMatch $match
+ * @param int $roundNumber
+ * @param array $results
+ * @param array $scores
+ * @return void
+ */
+protected function onRoundEnded(GameMatch $match, int $roundNumber, array $results, array $scores): void
+{
+    // Implementación vacía por defecto
+}
+```
+
+**Cuándo usar:**
+- ✅ Cancelar timers específicos del juego
+- ✅ Calcular estadísticas de la ronda
+- ✅ Preparar datos para la siguiente ronda
+- ✅ Logging/debugging
+
+**Cuándo NO usar:**
+- ❌ Calcular resultados (usar `endCurrentRound()` en su lugar)
+- ❌ Modificar scores (ya se emitieron en el evento)
+
+### Diferencia entre startNewRound() y onRoundStarted()
+
+| Aspecto | startNewRound() | onRoundStarted() |
+|---------|-----------------|------------------|
+| **Cuándo se ejecuta** | ANTES de emitir RoundStartedEvent | DESPUÉS de emitir RoundStartedEvent |
+| **Propósito** | Preparar estado del juego | Ejecutar lógica post-evento |
+| **Modificar game_state** | ✅ Sí (visible en evento) | ⚠️ Posible pero no recomendado |
+| **Emitir eventos privados** | ✅ Sí | ✅ Sí (recomendado aquí) |
+| **Resetear módulos** | ✅ Sí (recomendado aquí) | ❌ No |
+| **Timing** | Sincrónico con evento | Post-evento |
+
+### Ejemplo Completo: Mentiroso
+
+```php
+// games/mentiroso/MentirosoEngine.php
+
+// 1. startNewRound() - Prepara estado del juego
+protected function startNewRound(GameMatch $match): void
+{
+    $playerManager = $this->getPlayerManager($match);
+    $playerManager->reset($match); // Resetea bloqueos
+    $this->savePlayerManager($match, $playerManager);
+
+    // Seleccionar frase y guardar en game_state
+    $frase = $this->selectRandomStatement();
+    $gameState = $match->game_state;
+    $gameState['current_statement'] = $frase;
+    $match->game_state = $gameState;
+    $match->save();
+
+    // Ahora RoundStartedEvent incluirá current_statement (filtrado)
+}
+
+// 2. onRoundStarted() - Envía evento privado DESPUÉS del evento público
+protected function onRoundStarted(GameMatch $match, int $currentRound, int $totalRounds): void
+{
+    // El orador necesita saber si la frase es verdadera o falsa
+    // Esto NO debe estar en el evento público RoundStartedEvent
+    $gameState = $match->game_state;
+    $oradorId = $gameState['turn_system']['current_player'];
+    $frase = $gameState['current_statement'];
+
+    // Emitir evento PRIVADO solo al orador
+    event(new StatementRevealedEvent($match, $oradorId, $frase));
+}
+```
+
+---
+
 ## ✅ Checklist para Nuevos Juegos
 
 Al crear un nuevo juego, asegúrate de implementar:
 
 ### Backend (Engine)
 
-- [ ] **startNewRound()**: Lógica de inicio de ronda específica
+- [ ] **startNewRound()**: Lógica de inicio de ronda específica (resetear módulos, preparar game_state)
 - [ ] **⚠️ CRÍTICO: savePlayerManager()**: Guardar INMEDIATAMENTE después de reset()
+- [ ] **onRoundStarted()** (opcional): Hook para lógica post-evento (enviar eventos privados, iniciar timers)
 - [ ] **endCurrentRound()**: Obtener resultados y llamar completeRound()
+- [ ] **onRoundEnded()** (opcional): Hook para lógica post-evento (cancelar timers, estadísticas, logging)
 - [ ] **filterGameStateForBroadcast()**: Filtrar información sensible (si aplica)
-- [ ] **Emitir eventos privados**: Si hay información que solo ciertos jugadores deben ver
+- [ ] **Emitir eventos privados**: Si hay información que solo ciertos jugadores deben ver (idealmente en hooks)
 - [ ] **Config timing**: Definir `round_start` y `round_ended` en config.json
 
 ### Frontend (GameClient)
@@ -439,5 +604,9 @@ Al crear un nuevo juego, asegúrate de implementar:
 
 ---
 
-**Última actualización**: 2025-01-27
+**Última actualización**: 2025-10-28
 **Autor**: Arquitectura del Sistema
+**Cambios**:
+- Añadido sistema de hooks: `onRoundStarted()` y `onRoundEnded()`
+- Documentación de cuándo usar cada hook vs métodos tradicionales
+- Ejemplos completos con Mentiroso

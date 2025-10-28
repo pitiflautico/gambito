@@ -90,8 +90,6 @@
 
         popup.style.display = 'flex';
         popup.classList.remove('hidden');
-
-        console.log('[DisconnectedPopup] Showing popup for player:', data.player_name);
     }
 
     /**
@@ -100,8 +98,6 @@
     function hideDisconnectedPopup(data) {
         popup.style.display = 'none';
         popup.classList.add('hidden');
-
-        console.log('[DisconnectedPopup] Hiding popup - player reconnected:', data.player_name);
     }
 
     /**

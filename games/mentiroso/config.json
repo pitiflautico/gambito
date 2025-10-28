@@ -1,0 +1,124 @@
+{
+  "id": 3,
+  "name": "Mentiroso",
+  "slug": "mentiroso",
+  "description": "Juego social de engaño y persuasión donde un orador defiende una frase (verdadera o falsa) y los demás deben adivinar",
+  "type": "social_deception",
+  "version": "1.0.0",
+  "minPlayers": 3,
+  "maxPlayers": 10,
+  "estimatedDuration": 15,
+  "players": {
+    "min": 3,
+    "max": 10,
+    "ideal": {
+      "min": 4,
+      "max": 8
+    }
+  },
+  "modules": {
+    "game_core": {
+      "enabled": true
+    },
+    "room_manager": {
+      "enabled": true
+    },
+    "guest_system": {
+      "enabled": true
+    },
+    "turn_system": {
+      "enabled": true,
+      "mode": "sequential",
+      "round_per_turn": true
+    },
+    "round_system": {
+      "enabled": true,
+      "total_rounds": 10
+    },
+    "scoring_system": {
+      "enabled": true,
+      "calculator": "MentirosoScoreCalculator"
+    },
+    "timer_system": {
+      "enabled": true,
+      "round_duration": 15,
+      "preparation_duration": 15,
+      "persuasion_duration": 30,
+      "voting_duration": 10,
+      "countdown_visible": true,
+      "warning_threshold": 5
+    },
+    "roles_system": {
+      "enabled": true,
+      "roles": ["orador", "votante"]
+    },
+    "real_time_sync": {
+      "enabled": true
+    }
+  },
+  "scoring": {
+    "orador_deceives_majority": 10,
+    "orador_deceives_all": 15,
+    "voter_correct": 5,
+    "voter_incorrect": 0
+  },
+  "timing": {
+    "round_start": {
+      "duration": 15,
+      "countdown_visible": true,
+      "message": "Preparando defensa..."
+    },
+    "preparation": {
+      "duration": 2,
+      "countdown_visible": true,
+      "message": "Preparando defensa..."
+    },
+    "persuasion": {
+      "duration": 5,
+      "countdown_visible": true,
+      "warning_threshold": 5,
+      "auto_advance_on_expire": true,
+      "message": "Tiempo de persuasión"
+    },
+    "voting": {
+      "duration": 15,
+      "countdown_visible": true,
+      "auto_advance_on_expire": true,
+      "message": "Vota: ¿Verdad o mentira?"
+    },
+    "results": {
+      "auto_next": true,
+      "delay": 10,
+      "message": "Siguiente ronda"
+    }
+  },
+  "customizableSettings": {
+    "rounds": {
+      "type": "number",
+      "min": 5,
+      "max": 15,
+      "default": 10,
+      "step": 5,
+      "label": "Número de rondas"
+    },
+    "preparation_time": {
+      "type": "number",
+      "min": 10,
+      "max": 30,
+      "default": 15,
+      "step": 5,
+      "label": "Tiempo de preparación (segundos)"
+    },
+    "persuasion_time": {
+      "type": "number",
+      "min": 20,
+      "max": 60,
+      "default": 30,
+      "step": 10,
+      "label": "Tiempo de persuasión (segundos)"
+    }
+  },
+  "canvas": {
+    "enabled": false
+  }
+}

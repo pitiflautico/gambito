@@ -45,7 +45,6 @@ export class BaseGameClient {
         this.presenceMonitor.start();
 
         // Solo mostrar el estado
-        console.log('state:', this.gameState?.phase || 'unknown');
     }
 
     /**
@@ -122,7 +121,6 @@ export class BaseGameClient {
         // Actualizar fase a "playing" cuando empieza la primera ronda
         if (this.presenceMonitor && this.currentRound === 1) {
             this.presenceMonitor.setPhase('playing');
-            console.log('[BaseGameClient] Game started - PresenceMonitor set to playing');
         }
 
         // Mostrar timer si existe timing metadata
@@ -220,7 +218,6 @@ export class BaseGameClient {
         // Detener PresenceMonitor (ya no necesitamos monitorear desconexiones)
         if (this.presenceMonitor) {
             this.presenceMonitor.stop();
-            console.log('[BaseGameClient] Game finished - PresenceMonitor stopped');
         }
 
         // Los juegos específicos sobrescriben este método para mostrar pantalla de resultados finales
@@ -233,7 +230,6 @@ export class BaseGameClient {
      * Por defecto, muestra un popup indicando que el juego está pausado.
      */
     handlePlayerDisconnected(event) {
-        console.log('[BaseGameClient] Player disconnected:', event);
 
         // Pausar timer si está activo
         if (this.timing && this.timing.activeTimers && this.timing.activeTimers.has('round_timer')) {
@@ -255,7 +251,6 @@ export class BaseGameClient {
      * Por defecto, oculta el popup y espera a que el backend reinicie la ronda.
      */
     handlePlayerReconnected(event) {
-        console.log('[BaseGameClient] Player reconnected:', event);
 
         // Dispatch custom event para que el Blade component oculte el popup
         window.dispatchEvent(new CustomEvent('game:player:reconnected', {
@@ -275,7 +270,6 @@ export class BaseGameClient {
      * Actualiza automáticamente this.scores y la UI si existe.
      */
     handlePlayerScoreUpdated(event) {
-        console.log('[BaseGameClient] Player score updated:', event);
 
         const { player_id, new_score, points_earned } = event;
 
@@ -330,7 +324,6 @@ export class BaseGameClient {
      */
     showMessage(message, type = 'info') {
         // Los juegos pueden sobrescribir esto para mostrar mensajes en UI
-        console.log(`[${type.toUpperCase()}] ${message}`);
     }
 
     /**
@@ -343,7 +336,6 @@ export class BaseGameClient {
         if (element) {
             element.classList.add('hidden');
         } else {
-            console.warn(`[BaseGameClient] Element with id "${id}" not found`);
         }
     }
 
@@ -357,7 +349,6 @@ export class BaseGameClient {
         if (element) {
             element.classList.remove('hidden');
         } else {
-            console.warn(`[BaseGameClient] Element with id "${id}" not found`);
         }
     }
 
@@ -383,7 +374,6 @@ export class BaseGameClient {
             const result = await response.json();
             return result;
         } catch (error) {
-            console.error(`❌ [BaseGameClient] Error sending action to ${endpoint}:`, error);
             throw error;
         }
     }
@@ -427,7 +417,6 @@ export class BaseGameClient {
             const result = await response.json();
 
             if (!result.success) {
-                console.error(`❌ [BaseGameClient] Action failed:`, result);
 
                 // Revertir actualización optimista si falló
                 if (optimistic) {
@@ -438,7 +427,6 @@ export class BaseGameClient {
             return result;
 
         } catch (error) {
-            console.error(`❌ [BaseGameClient] Error sending game action:`, error);
 
             // Revertir actualización optimista si hubo error
             if (optimistic) {
@@ -511,15 +499,12 @@ export class BaseGameClient {
             if (response.ok && data.success) {
                 if (data.already_processing) {
                     // Otro cliente ya está iniciando el juego (normal, no es error)
-                    console.log('⏸️  [BaseGameClient] Another client is starting the game, waiting for first event...');
                 }
             } else {
-                console.error('❌ [BaseGameClient] Error starting game:', data.error);
             }
 
             // En todos los casos, el cliente se sincronizará con los eventos del juego
         } catch (error) {
-            console.error('❌ [BaseGameClient] Network error notifying game ready:', error);
         }
     }
 
@@ -553,14 +538,11 @@ export class BaseGameClient {
 
             if (response.status === 409) {
                 // 409 Conflict: Otro cliente ya está iniciando la ronda
-                console.log('⏸️  [BaseGameClient] Another client is starting the round, waiting for RoundStartedEvent...');
             } else if (!response.ok || !data.success) {
-                console.error('❌ [BaseGameClient] Error starting next round:', data.error);
             }
 
             // En todos los casos, el cliente se sincronizará con RoundStartedEvent
         } catch (error) {
-            console.error('❌ [BaseGameClient] Network error notifying next round:', error);
         }
     }
 
@@ -614,7 +596,6 @@ export class BaseGameClient {
     renderPodium(ranking, scores, containerId = 'podium') {
         const podiumContainer = document.getElementById(containerId);
         if (!podiumContainer) {
-            console.warn(`⚠️ [BaseGameClient] Podium container '${containerId}' not found`);
             return;
         }
 
@@ -711,10 +692,8 @@ export class BaseGameClient {
             const result = await response.json();
 
             if (!result.success) {
-                console.warn(`⚠️ [BaseGameClient] Failed to check timer:`, result.message);
             }
         } catch (error) {
-            console.error(`❌ [BaseGameClient] Error checking timer expiration:`, error);
         }
 
         // Los juegos específicos pueden sobrescribir este método
