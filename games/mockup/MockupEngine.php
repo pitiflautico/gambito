@@ -318,6 +318,25 @@ class MockupEngine extends BaseGameEngine
     }
 
     /**
+     * Obtener resultados de la ronda actual (implementación abstracta requerida).
+     *
+     * Retorna los resultados procesados de la ronda para BaseGameEngine.
+     */
+    protected function getRoundResults(GameMatch $match): array
+    {
+        $playerState = $this->getPlayerStateManager($match);
+        $allActions = $playerState->getAllActions();
+
+        $scoreManager = $this->getScoreManager($match);
+        $scores = $scoreManager->getScores();
+
+        return [
+            'actions' => $allActions,
+            'scores' => $scores,
+        ];
+    }
+
+    /**
      * Obtener configuración del juego desde config.json.
      */
     protected function getGameConfig(): array
@@ -367,4 +386,37 @@ class MockupEngine extends BaseGameEngine
         $scoreManager = $this->getScoreManager($match);
         return $scoreManager->getScores();
     }
+
+    // ========================================================================
+    // MÉTODOS DE FASE: Callbacks cuando expiran las fases
+    // ========================================================================
+
+    /**
+     * Callback cuando expira la fase 1.
+     *
+     * Avanza a la fase 2.
+     */
+    // ========================================================================
+    // NOTAS SOBRE EVENTOS DE FASE
+    // ========================================================================
+
+    /**
+     * EVENTOS CUSTOM DE FASE:
+     *
+     * MockupGame usa Phase1EndedEvent como EJEMPLO de evento custom.
+     * PhaseManager lo emite automáticamente cuando:
+     * - El timer de phase1 expira
+     * - config.json define: phases[0].custom_event = "App\\Events\\Mockup\\Phase1EndedEvent"
+     *
+     * VENTAJAS de este approach event-driven:
+     * - PhaseManager emite el evento directamente (new CustomEvent($match, $phaseData))
+     * - No necesita callbacks ni instancias del engine en memoria
+     * - Mejor desacoplamiento y consistencia
+     * - El evento se broadcast al frontend automáticamente
+     *
+     * Si necesitas lógica específica cuando termina una fase, puedes:
+     * 1. Crear un Listener que escuche el evento custom
+     * 2. Ejecutar la lógica en el listener
+     * 3. Registrarlo en EventServiceProvider
+     */
 }

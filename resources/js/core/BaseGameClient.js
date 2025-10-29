@@ -766,6 +766,66 @@ export class BaseGameClient {
         // Los juegos específicos pueden sobrescribir este método
         // para agregar efectos visuales o sonoros adicionales
     }
+
+    // ========================================================================
+    // STATE RESTORATION
+    // ========================================================================
+
+    /**
+     * Restaurar estado del juego desde gameState
+     *
+     * Este método base restaura automáticamente:
+     * - Round actual desde round_system
+     * - Scores desde player_state_system o scoring_system
+     * - Fase actual
+     *
+     * Los juegos específicos pueden sobrescribir este método para
+     * restaurar estado adicional específico del juego.
+     *
+     * @param {Object} gameState - Estado del juego desde el backend
+     */
+    restoreGameState(gameState) {
+        console.log('[BaseGameClient] Restoring game state:', gameState);
+
+        // Guardar referencia al game state
+        this.gameState = gameState;
+
+        // Restaurar round actual desde round_system
+        if (gameState.round_system) {
+            this.currentRound = gameState.round_system.current_round || 1;
+            this.totalRounds = gameState.round_system.total_rounds || 10;
+
+            // Actualizar UI de ronda si existe
+            this.updateElement('current-round', this.currentRound);
+            this.updateElement('total-rounds', this.totalRounds);
+        }
+
+        // Restaurar scores desde player_state_system o scoring_system
+        if (gameState.player_state_system?.scores) {
+            this.scores = gameState.player_state_system.scores;
+        } else if (gameState.scoring_system?.scores) {
+            this.scores = gameState.scoring_system.scores;
+        }
+
+        // Restaurar fase actual
+        if (gameState.phase) {
+            this.updateElement('current-phase', gameState.phase);
+        }
+
+        // Los juegos específicos deben sobrescribir este método
+        // y llamar a super.restoreGameState(gameState) primero
+        console.log('[BaseGameClient] State restored - round:', this.currentRound, 'scores:', this.scores);
+    }
+
+    /**
+     * Helper: Actualizar contenido de un elemento del DOM
+     */
+    updateElement(id, content) {
+        const element = document.getElementById(id);
+        if (element) {
+            element.textContent = content;
+        }
+    }
 }
 
 // Exportar para que esté disponible globalmente

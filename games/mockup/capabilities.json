@@ -1,12 +1,19 @@
 {
-  "game_type": "generic",
-  "supports_teams": true,
-  "supports_spectators": true,
-  "supports_ai": false,
-  "max_duration_minutes": 30,
-  "features": [
-    "real_time_updates",
-    "turn_based",
-    "multiplayer"
-  ]
+  "slug": "mockup",
+  "version": "2.0",
+  "requires": {
+    "websockets": true,
+    "roles": false,
+    "timers": true,
+    "scoring": true
+  },
+  "provides": {
+    "events": [
+      "Phase1EndedEvent"
+    ],
+    "routes": [],
+    "views": [
+      "games/mockup/game"
+    ]
+  }
 }

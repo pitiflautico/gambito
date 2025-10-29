@@ -1,33 +1,85 @@
 {
+  "id": "mockup",
   "name": "Mockup Game",
   "slug": "mockup",
-  "version": "1.0.0",
-  "description": "Juego mockup para testing y validación de BaseGameEngine",
-  
+  "version": "2.0.0",
+  "description": "Juego de prueba con 2 fases para validar sistema de eventos y timers",
+  "minPlayers": 1,
+  "maxPlayers": 4,
+  "estimatedDuration": 10,
+
   "timing": {
     "round_ended": {
       "type": "countdown",
-      "seconds": 3
+      "message": "Siguiente ronda",
+      "delay": 3,
+      "auto_next": true
     }
   },
-  
+
+  "event_config": {
+    "channel": "room.{roomCode}",
+    "events": {
+      "PhaseChangedEvent": {
+        "name": ".phase.changed",
+        "handler": "handlePhaseChanged"
+      },
+      "RoundStartedEvent": {
+        "name": ".round.started",
+        "handler": "handleRoundStarted"
+      },
+      "RoundEndedEvent": {
+        "name": ".round.ended",
+        "handler": "handleRoundEnded"
+      },
+      "Phase1EndedEvent": {
+        "name": ".mockup.phase1.ended",
+        "handler": "handlePhase1Ended"
+      }
+    }
+  },
+
   "modules": {
-    "scoring_system": {
+    "game_core": {
+      "enabled": true
+    },
+    "room_manager": {
+      "enabled": true
+    },
+    "guest_system": {
       "enabled": true
     },
     "round_system": {
+      "enabled": true,
+      "total_rounds": 3,
+      "inter_round_delay": 3
+    },
+    "phase_system": {
+      "enabled": true,
+      "phases": [
+        {
+          "name": "phase1",
+          "duration": 5,
+          "custom_event": "App\\Events\\Mockup\\Phase1EndedEvent"
+        },
+        {
+          "name": "phase2",
+          "duration": 5,
+          "custom_event": null
+        }
+      ]
+    },
+    "timer_system": {
       "enabled": true
     },
-    "turn_system": {
+    "scoring_system": {
       "enabled": false
     },
-    "player_state": {
+    "real_time_sync": {
       "enabled": true
     }
   },
-  
-  "turn_mode": "simultaneous",
-  
+
   "customizableSettings": {
     "rounds": {
       "type": "number",
@@ -36,10 +88,5 @@
       "min": 1,
       "max": 10
     }
-  },
-  
-  "scoring": {
-    "action_points": 10,
-    "description": "10 puntos por participar en cada ronda"
   }
 }
