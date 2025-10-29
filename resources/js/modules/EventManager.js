@@ -136,13 +136,11 @@ class EventManager {
             return;
         }
 
-        console.log('📡 [EventManager] Registering listeners:', this.eventConfig.events);
-
         Object.entries(this.eventConfig.events).forEach(([eventClass, config]) => {
             const { name, handler } = config;
 
             if (!this.handlers[handler]) {
-                console.warn(`⚠️ [EventManager] Handler not found: ${handler} for event ${name}`);
+                // Silenciar warnings de handlers opcionales
                 return;
             }
 
@@ -150,7 +148,6 @@ class EventManager {
             // Laravel Echo requiere un punto inicial para eventos personalizados
             const eventName = name.startsWith('.') ? name : `.${name}`;
             this.channel.listen(eventName, (event) => {
-                console.log(`📨 [EventManager] Event received: ${name}`, event);
                 try {
                     this.handlers[handler](event);
                 } catch (error) {
@@ -161,7 +158,6 @@ class EventManager {
                 }
             });
 
-            console.log(`✅ [EventManager] Registered: ${name} -> ${handler}`);
             this.listeners.push({ eventClass, name, handler });
         });
     }

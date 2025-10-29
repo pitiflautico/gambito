@@ -720,17 +720,15 @@ class RoomController extends Controller
             // 1. Emitir evento de countdown
             event(new \App\Events\Game\GameCountdownEvent($room, 3));
 
-            \Log::info("All players ready in room - Starting countdown", [
+            \Log::info("✅ [RoomController] All players ready - Countdown started", [
                 'room_code' => $code,
                 'players' => $room->match->players()->count(),
             ]);
 
-            // 2. Después de 3 segundos, inicializar el engine
-            // IMPORTANTE: Esto debe hacerse en un job o delay, por ahora lo hacemos directo
-            // TODO: Mover a un job con delay de 3 segundos
-
-            // Por ahora, emitimos el evento y el frontend esperará countdown
-            // El engine se inicializará cuando el frontend notifique countdown finished
+            // NOTA: GameStartedEvent ya NO se emite aquí
+            // Se emitirá desde PlayController::apiDomLoaded() cuando TODOS los jugadores
+            // hayan cargado completamente su DOM y estén listos para recibir eventos.
+            // Esto garantiza sincronización perfecta sin eventos perdidos.
 
             return response()->json([
                 'success' => true,
@@ -791,31 +789,51 @@ class RoomController extends Controller
             ], 200); // 200 OK para evitar errores en consola
         }
 
-        // Lock adquirido - proceder a inicializar
+        // Lock adquirido - proceder a marcar sala como 'playing'
         try {
-            \Log::info('🔒 [Transition] Lock acquired, initializing engine', [
+            \Log::info('🔒 [Transition] Lock acquired, preparing room for game', [
                 'room_code' => $code,
                 'match_id' => $match->id,
                 'game' => $room->game->slug,
             ]);
 
-            // Inicializar engine
-            $match->initializeEngine();
+            // IMPORTANTE: Ya NO llamamos a initializeEngine() aquí
+            // La inicialización completa del engine se hará desde PlayController::apiDomLoaded()
+            // cuando TODOS los jugadores tengan su DOM cargado.
+            //
+            // Aquí solo:
+            // 1. Cambiamos el status de la sala a 'playing'
+            // 2. Seteamos phase = 'starting' en game_state
+            // 3. Emitimos GameInitializedEvent para que los clientes redirijan a /play
 
-            \Log::info("✅ [Transition] Game engine initialized successfully", [
+            // Actualizar status de sala
+            $room->update(['status' => Room::STATUS_PLAYING]);
+
+            // Setear game_state mínimo con phase = 'starting'
+            $match->game_state = array_merge($match->game_state ?? [], [
+                'phase' => 'starting',
+                'transition_completed_at' => now()->toDateTimeString(),
+            ]);
+            $match->save();
+
+            // Emitir evento para redirigir clientes a /play
+            event(new \App\Events\Game\GameInitializedEvent($match, $match->game_state));
+
+            \Log::info("✅ [Transition] Room prepared for game (engine will initialize when all DOM loaded)", [
                 'room_code' => $code,
                 'game' => $room->game->slug,
+                'phase' => 'starting',
             ]);
 
             return response()->json([
                 'success' => true,
-                'message' => 'Engine inicializado',
+                'message' => 'Room prepared, waiting for all players DOM loaded',
             ]);
         } catch (\Exception $e) {
-            \Log::error("❌ [Transition] Error initializing engine: {$e->getMessage()}");
+            \Log::error("❌ [Transition] Error preparing room: {$e->getMessage()}");
             return response()->json([
                 'success' => false,
-                'message' => 'Error al inicializar engine: ' . $e->getMessage(),
+                'message' => 'Error al preparar sala: ' . $e->getMessage(),
             ], 500);
         } finally {
             // SIEMPRE liberar el lock

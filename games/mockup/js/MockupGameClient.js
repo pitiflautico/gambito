@@ -4,10 +4,7 @@ const { BaseGameClient } = window;
 export class MockupGameClient extends BaseGameClient {
     constructor(config) {
         super(config);
-
-        console.log('[MockupClient] Constructor called with config:', config);
-
-        // Setup EventManager con handlers personalizados
+        this.customHandlers = null; // Guardar referencia a los handlers
         this.setupEventManager();
     }
 
@@ -15,68 +12,25 @@ export class MockupGameClient extends BaseGameClient {
      * Override: Configurar EventManager con handlers específicos de Mockup
      */
     setupEventManager() {
-        console.log('[MockupClient] Setting up EventManager...');
-
         // Registrar handlers personalizados de Mockup
-        const customHandlers = {
+        this.customHandlers = {
+            handleDomLoaded: (event) => {
+                // Llamar al handler del padre primero
+                super.handleDomLoaded(event);
+            },
             handleGameStarted: (event) => {
-                console.log('🎮 ========================================');
-                console.log('🎮 PARTIDA INICIADA');
-                console.log('🎮 ========================================');
-                console.log('Data:', event);
-                this.handleGameStarted(event);
+                // Silencioso
             },
-            handlePhaseChanged: (event) => {
-                console.log('🔄 ========================================');
-                console.log('🔄 CAMBIO DE FASE');
-                console.log('🔄 ========================================');
-                console.log('Fase:', event.phase);
-                console.log('Duración:', event.duration, 'segundos');
-                console.log('Ronda:', event.round);
-                console.log('Data completa:', event);
-                this.handlePhaseChanged(event);
-            },
-            handleRoundStarted: (event) => {
-                console.log('🔵 ========================================');
-                console.log('🔵 RONDA INICIADA');
-                console.log('🔵 ========================================');
-                console.log('Ronda:', event.round);
-                console.log('Total rondas:', event.total_rounds);
-                console.log('Data completa:', event);
-                this.handleRoundStarted(event);
-            },
-            handleRoundEnded: (event) => {
-                console.log('🔴 ========================================');
-                console.log('🔴 RONDA TERMINADA');
-                console.log('🔴 ========================================');
-                console.log('Ronda:', event.round);
-                console.log('Resultados:', event.results);
-                console.log('Scores:', event.scores);
-                console.log('Data completa:', event);
-                this.handleRoundEnded(event);
-            },
-            handleGameFinished: (event) => {
-                console.log('🏁 ========================================');
-                console.log('🏁 PARTIDA TERMINADA');
-                console.log('🏁 ========================================');
-                console.log('Ganador:', event.winner);
-                console.log('Ranking:', event.ranking);
-                console.log('Data completa:', event);
-                this.handleGameFinished(event);
+            handlePhase1Started: (event) => {
+                console.log('🎯 PHASE 1 STARTED', event);
             },
             handlePhase1Ended: (event) => {
-                console.log('⭐ ========================================');
-                console.log('⭐ FASE 1 COMPLETADA (Custom Event)');
-                console.log('⭐ ========================================');
-                console.log('Data:', event);
-                // Este es solo para demostrar eventos custom
+                console.log('🏁 PHASE 1 ENDED', event);
             }
         };
 
         // Llamar al setupEventManager del padre con los handlers custom
-        super.setupEventManager(customHandlers);
-
-        console.log('[MockupClient] EventManager configured successfully');
+        super.setupEventManager(this.customHandlers);
     }
 
     /**

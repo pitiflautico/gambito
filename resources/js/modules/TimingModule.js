@@ -32,38 +32,29 @@ class TimingModule {
      * Suscribirse a eventos del juego para gestión automática de timers
      */
     subscribeToGameEvents() {
-        console.log('🎯 [TimingModule] Subscribing to game events...');
-
         // ROUND ENDED: Cancelar timers de fase/juego (NO el countdown de siguiente ronda)
         window.addEventListener('game:round:ended', (e) => {
-            console.log('🏁 [TimingModule] Event received: game:round:ended', e.detail);
             this.log('Round ended - cancelling game/phase timers');
             this.cancelGameTimers();
         });
 
         // PLAYER DISCONNECTED: Pausar TODOS los timers (para poder reanudar después)
         window.addEventListener('game:player:disconnected', (e) => {
-            console.log('🔌 [TimingModule] Event received: game:player:disconnected', e.detail);
-            console.log('🔌 [TimingModule] Active countdowns:', Array.from(this.activeCountdowns.keys()));
             this.log('Player disconnected - pausing all timers');
             this.pauseAllTimers();
         });
 
         // PLAYER RECONNECTED: Reanudar timers pausados
         window.addEventListener('game:player:reconnected', (e) => {
-            console.log('🔄 [TimingModule] Event received: game:player:reconnected', e.detail);
             this.log('Player reconnected - resuming timers');
             this.resumeAllTimers();
         });
 
         // GAME FINISHED: Cancelar TODO definitivamente
         window.addEventListener('game:finished', (e) => {
-            console.log('🏆 [TimingModule] Event received: game:finished', e.detail);
             this.log('Game finished - cancelling all timers');
             this.cancelAllTimers();
         });
-
-        console.log('✅ [TimingModule] Event subscriptions complete');
     }
 
     /**
@@ -86,32 +77,19 @@ class TimingModule {
      * Usado cuando un jugador se desconecta para poder reanudar después
      */
     pauseAllTimers() {
-        console.log('⏸️  [TimingModule] pauseAllTimers() called');
-        console.log('⏸️  [TimingModule] Active timers count:', this.activeCountdowns.size);
-
         if (this.activeCountdowns.size === 0) {
-            console.log('⚠️  [TimingModule] No active timers to pause');
             return;
         }
 
         this.activeCountdowns.forEach((countdown, name) => {
-            console.log(`⏸️  [TimingModule] Pausing timer: ${name}`, {
-                hasAnimationFrame: !!countdown.animationFrameId,
-                animationFrameId: countdown.animationFrameId,
-                hasElement: !!countdown.element
-            });
-
             // Guardar el animationFrameId ANTES de cancelar
             const frameId = countdown.animationFrameId;
 
             // Cancelar el animationFrame pero guardar el estado
             if (frameId) {
                 cancelAnimationFrame(frameId);
-                console.log(`✅ [TimingModule] Animation frame ${frameId} cancelled for ${name}`);
                 // Verificar que realmente se canceló
                 countdown.animationFrameId = null;
-            } else {
-                console.warn(`⚠️  [TimingModule] No animation frame to cancel for ${name}`);
             }
 
             // Marcar como pausado y guardar tiempo restante
@@ -128,13 +106,10 @@ class TimingModule {
                 countdown.element.textContent = remainingSeconds + ' ⏸️';
                 countdown.element.classList.add('timer-paused');
                 countdown.element.style.opacity = '0.6';
-                console.log(`🎨 [TimingModule] Timer ${name} frozen at ${remainingSeconds}s with pause indicator`);
             }
 
             this.log(`Timer ${name} paused with ${remainingSeconds}s remaining`);
         });
-
-        console.log('✅ [TimingModule] All timers paused');
     }
 
     /**

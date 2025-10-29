@@ -11,6 +11,10 @@ return [
     'base_events' => [
         'channel' => 'room.{roomCode}',
         'events' => [
+            'DomLoadedEvent' => [
+                'name' => 'dom.loaded',
+                'handler' => 'handleDomLoaded'
+            ],
             'GameStartedEvent' => [
                 'name' => 'game.started',
                 'handler' => 'handleGameStarted'

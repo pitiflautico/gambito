@@ -43,6 +43,11 @@ Route::prefix('rooms')->name('api.rooms.')->group(function () {
     Route::post('/{code}/ready', [RoomController::class, 'apiReady'])->name('ready');
     Route::post('/{code}/initialize-engine', [RoomController::class, 'apiInitializeEngine'])->name('initialize-engine');
 
+    // DOM Load Synchronization
+    Route::post('/{code}/dom-loaded', [PlayController::class, 'apiDomLoaded'])
+        ->middleware(['web'])
+        ->name('dom-loaded');
+
     // Gestión de Rondas
     Route::post('/{code}/next-round', [\App\Http\Controllers\PlayController::class, 'apiNextRound'])->name('next-round');
     Route::post('/{code}/check-timer', [\App\Http\Controllers\PlayController::class, 'apiCheckTimer'])->name('check-timer');

@@ -9,11 +9,47 @@
   },
   "provides": {
     "events": [
+      "Phase1StartedEvent",
       "Phase1EndedEvent"
     ],
     "routes": [],
     "views": [
       "games/mockup/game"
     ]
+  },
+  "event_config": {
+    "channel": "room.{roomCode}",
+    "events": {
+      "GameStartedEvent": {
+        "name": "game.started",
+        "description": "Sistema: Juego iniciado",
+        "handler": "handleGameStarted"
+      },
+      "RoundStartedEvent": {
+        "name": "game.round.started",
+        "description": "Sistema: Nueva ronda iniciada",
+        "handler": "handleRoundStarted"
+      },
+      "RoundEndedEvent": {
+        "name": "game.round.ended",
+        "description": "Sistema: Ronda finalizada",
+        "handler": "handleRoundEnded"
+      },
+      "PhaseChangedEvent": {
+        "name": "game.phase.changed",
+        "description": "Sistema: Cambio de fase",
+        "handler": "handlePhaseChanged"
+      },
+      "Phase1StartedEvent": {
+        "name": "mockup.phase1.started",
+        "description": "Mockup: Fase 1 iniciada",
+        "handler": "handlePhase1Started"
+      },
+      "Phase1EndedEvent": {
+        "name": "mockup.phase1.ended",
+        "description": "Mockup: Fase 1 terminada",
+        "handler": "handlePhase1Ended"
+      }
+    }
   }
 }

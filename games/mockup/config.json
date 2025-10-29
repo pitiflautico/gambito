@@ -60,12 +60,14 @@
         {
           "name": "phase1",
           "duration": 5,
-          "custom_event": "App\\Events\\Mockup\\Phase1EndedEvent"
+          "on_start": "App\\Events\\Mockup\\Phase1StartedEvent",
+          "on_end": "App\\Events\\Mockup\\Phase1EndedEvent"
         },
         {
           "name": "phase2",
           "duration": 5,
-          "custom_event": null
+          "on_start": null,
+          "on_end": null
         }
       ]
     },

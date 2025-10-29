@@ -42,9 +42,47 @@ export class BaseGameClient {
             this.roomCode,
             this.gameState?.phase || 'waiting'
         );
-        this.presenceMonitor.start();
 
-        // Solo mostrar el estado
+        // IMPORTANTE: Esperar a que el presence channel esté conectado ANTES de emitir DomLoaded
+        // Esto garantiza que el cliente recibirá todos los eventos del juego
+        this.presenceMonitor.start().then(() => {
+            // Channel conectado - ahora sí emitir DomLoaded
+            this.emitDomLoaded();
+        });
+    }
+
+    /**
+     * Emitir evento DomLoaded para notificar al backend que el DOM está listo.
+     *
+     * Este método se ejecuta automáticamente al instanciar BaseGameClient.
+     * Notifica al backend que el frontend está completamente cargado y listo
+     * para recibir eventos.
+     *
+     * El backend usa esto para coordinar el inicio del juego cuando TODOS
+     * los jugadores tienen su DOM cargado.
+     */
+    async emitDomLoaded() {
+        try {
+            const response = await fetch(`/api/rooms/${this.roomCode}/dom-loaded`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                },
+                body: JSON.stringify({
+                    room_code: this.roomCode
+                })
+            });
+
+            const result = await response.json();
+
+            // Silencioso - no mostrar logs para evitar ruido en consola
+            if (!result.success) {
+                console.error('❌ [DomLoaded] Error:', result);
+            }
+        } catch (error) {
+            console.error('❌ [DomLoaded] Error notifying backend:', error);
+        }
     }
 
     /**
@@ -55,6 +93,7 @@ export class BaseGameClient {
     setupEventManager(customHandlers = {}) {
         // Handlers por defecto que todos los juegos usan
         const defaultHandlers = {
+            handleDomLoaded: (event) => this.handleDomLoaded(event),
             handleGameStarted: (event) => this.handleGameStarted(event),
             handleRoundStarted: (event) => this.handleRoundStarted(event),
             handleRoundEnded: (event) => this.handleRoundEnded(event),
@@ -81,6 +120,23 @@ export class BaseGameClient {
     // ========================================================================
     // HANDLERS DE EVENTOS GENÉRICOS
     // ========================================================================
+
+    /**
+     * Handler genérico: DOM cargado
+     *
+     * Se ejecuta cuando otro jugador carga su DOM y está listo.
+     * Muestra feedback visual de cuántos jugadores están listos.
+     */
+    handleDomLoaded(event) {
+        // Silencioso - actualizar UI si existe
+        const readyCountElement = document.getElementById('players-ready-count');
+        if (readyCountElement) {
+            readyCountElement.textContent = `${event.players_ready}/${event.total_players} jugadores listos`;
+        }
+
+        // Los juegos específicos pueden sobrescribir este método
+        // para mostrar animaciones o notificaciones
+    }
 
     /**
      * Handler genérico: Juego iniciado
@@ -183,24 +239,14 @@ export class BaseGameClient {
      * Se ejecuta cuando el juego cambia de fase (ej: lobby -> playing -> finished)
      */
     handlePhaseChanged(event) {
-        console.log('🎯 [BaseGameClient] handlePhaseChanged called', event);
-
         // Actualizar fase en PresenceMonitor
         if (this.presenceMonitor && event.new_phase) {
             this.presenceMonitor.setPhase(event.new_phase);
         }
 
         // Iniciar timer de fase si viene timing metadata en additional_data
-        console.log('🔍 [BaseGameClient] Checking timer data:', {
-            has_additional_data: !!event.additional_data,
-            has_server_time: !!event.additional_data?.server_time,
-            has_duration: !!event.additional_data?.duration,
-            additional_data: event.additional_data
-        });
-
         if (event.additional_data?.server_time && event.additional_data?.duration) {
             const timerElement = this.getTimerElement();
-            console.log('🔍 [BaseGameClient] Timer element found:', !!timerElement, timerElement);
 
             if (timerElement) {
                 // Convertir duración de segundos a milisegundos
@@ -209,13 +255,6 @@ export class BaseGameClient {
                 // Usar nombre de fase para el timer (o 'phase' por defecto)
                 const timerName = event.new_phase ? `phase_${event.new_phase}` : 'phase';
 
-                console.log('⏰ [BaseGameClient] Starting timer:', {
-                    timerName,
-                    server_time: event.additional_data.server_time,
-                    durationMs,
-                    duration_sec: event.additional_data.duration
-                });
-
                 this.timing.startServerSyncedCountdown(
                     event.additional_data.server_time,
                     durationMs,
@@ -223,13 +262,7 @@ export class BaseGameClient {
                     () => this.onPhaseTimerExpired(event.new_phase), // Callback cuando expira
                     timerName
                 );
-
-                console.log(`⏰ [BaseGameClient] Phase timer started: ${timerName} (${event.additional_data.duration}s)`);
-            } else {
-                console.warn('⚠️ [BaseGameClient] Timer element not found (id="timer")');
             }
-        } else {
-            console.warn('⚠️ [BaseGameClient] No timing data in event');
         }
 
         // Los juegos específicos sobrescriben este método para manejar transiciones de fase
@@ -695,8 +728,6 @@ export class BaseGameClient {
      * Notifica al backend para que ejecute checkTimerAndAutoAdvance().
      */
     async onPhaseTimerExpired(phaseName) {
-        console.log(`⏰ [BaseGameClient] Phase timer expired: ${phaseName}`);
-
         const timerElement = this.getTimerElement();
         if (timerElement) {
             timerElement.textContent = '¡Tiempo agotado!';
@@ -704,7 +735,7 @@ export class BaseGameClient {
         }
 
         try {
-            const response = await fetch(`/api/rooms/${this.roomCode}/check-timer`, {
+            await fetch(`/api/rooms/${this.roomCode}/check-timer`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -715,12 +746,8 @@ export class BaseGameClient {
                     timestamp: Date.now()
                 })
             });
-
-            if (!response.ok) {
-                console.error('❌ [BaseGameClient] Error checking timer:', response.statusText);
-            }
         } catch (error) {
-            console.error('❌ [BaseGameClient] Failed to notify backend about timer expiration:', error);
+            // Silently handle error
         }
     }
 
@@ -778,6 +805,7 @@ export class BaseGameClient {
      * - Round actual desde round_system
      * - Scores desde player_state_system o scoring_system
      * - Fase actual
+     * - Dispara handlers correspondientes para sincronizar la UI
      *
      * Los juegos específicos pueden sobrescribir este método para
      * restaurar estado adicional específico del juego.
@@ -785,8 +813,6 @@ export class BaseGameClient {
      * @param {Object} gameState - Estado del juego desde el backend
      */
     restoreGameState(gameState) {
-        console.log('[BaseGameClient] Restoring game state:', gameState);
-
         // Guardar referencia al game state
         this.gameState = gameState;
 
@@ -795,9 +821,13 @@ export class BaseGameClient {
             this.currentRound = gameState.round_system.current_round || 1;
             this.totalRounds = gameState.round_system.total_rounds || 10;
 
-            // Actualizar UI de ronda si existe
-            this.updateElement('current-round', this.currentRound);
-            this.updateElement('total-rounds', this.totalRounds);
+            // Simular RoundStartedEvent para que los handlers actualicen la UI
+            if (this.currentRound > 0) {
+                this.handleRoundStarted({
+                    round: this.currentRound,
+                    total_rounds: this.totalRounds
+                });
+            }
         }
 
         // Restaurar scores desde player_state_system o scoring_system
@@ -807,14 +837,25 @@ export class BaseGameClient {
             this.scores = gameState.scoring_system.scores;
         }
 
-        // Restaurar fase actual
+        // Restaurar fase actual - simular PhaseChangedEvent
         if (gameState.phase) {
-            this.updateElement('current-phase', gameState.phase);
+            // Obtener duración de la fase desde phase_system si existe
+            let phaseDuration = null;
+            if (gameState._config?.modules?.phase_system?.phases) {
+                const phases = gameState._config.modules.phase_system.phases;
+                const currentPhaseConfig = phases.find(p => p.name === gameState.phase);
+                phaseDuration = currentPhaseConfig?.duration || null;
+            }
+
+            this.handlePhaseChanged({
+                phase: gameState.phase,
+                duration: phaseDuration,
+                round: this.currentRound
+            });
         }
 
         // Los juegos específicos deben sobrescribir este método
         // y llamar a super.restoreGameState(gameState) primero
-        console.log('[BaseGameClient] State restored - round:', this.currentRound, 'scores:', this.scores);
     }
 
     /**

@@ -129,7 +129,16 @@ class GameMatch extends Model
         // 2. Actualizar estado de la sala a 'active' (no 'playing' todavía)
         $this->room->update(['status' => Room::STATUS_ACTIVE]);
 
-        // 3. Refrescar para obtener el estado actualizado
+        // 3. Inicializar game_state mínimo con phase = 'waiting'
+        // La transición lo cambiará a 'starting', y el engine a 'playing'
+        if (empty($this->game_state)) {
+            $this->game_state = [
+                'phase' => 'waiting',
+            ];
+            $this->save();
+        }
+
+        // 4. Refrescar para obtener el estado actualizado
         $this->refresh();
 
         \Log::info("Match started - Players will be redirected to game room", [
@@ -139,7 +148,7 @@ class GameMatch extends Model
             'players_count' => $this->players()->count(),
         ]);
 
-        // 4. Emitir evento game.started para redirigir a todos al room
+        // 5. Emitir evento game.started para redirigir a todos al room
         \Log::info("🎮 [BACKEND] Emitiendo GameStartedEvent - Room: {$this->room->code}");
         event(new \App\Events\GameStartedEvent($this->room));
     }
@@ -180,8 +189,12 @@ class GameMatch extends Model
             'state' => $this->game_state,
         ]);
 
-        // 5. Emitir evento de inicialización completa
+        // 5. Emitir eventos de inicialización
         event(new \App\Events\Game\GameInitializedEvent($this, $this->game_state));
+
+        // NOTA: GameStartedEvent NO se emite aquí porque el frontend aún no está conectado
+        // Se emitirá desde TransitionController cuando todos los jugadores estén conectados
+        // y listos para recibir eventos en tiempo real
     }
 
     /**

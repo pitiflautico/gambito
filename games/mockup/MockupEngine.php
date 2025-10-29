@@ -153,12 +153,14 @@ class MockupEngine extends BaseGameEngine
 
     /**
      * Lógica al iniciar el juego (después del countdown).
-     * 
+     *
      * Llamado por BaseGameEngine::startGame() después de resetear módulos.
+     *
+     * RESPONSABILIDAD: Iniciar la primera ronda del juego.
      */
     protected function onGameStart(GameMatch $match): void
     {
-        Log::info("[Mockup] onGameStart called", ['match_id' => $match->id]);
+        Log::info("🎮 [Mockup] ===== PARTIDA INICIADA ===== onGameStart()", ['match_id' => $match->id]);
 
         // Actualizar fase a "playing"
         $match->game_state = array_merge($match->game_state, [
@@ -166,7 +168,13 @@ class MockupEngine extends BaseGameEngine
         ]);
         $match->save();
 
-        Log::info("[Mockup] Game phase set to playing");
+        Log::info("🎮 [Mockup] Fase actualizada a 'playing'");
+
+        // Iniciar la primera ronda (advanceRound = false porque es la primera)
+        // Esto emitirá RoundStartedEvent y PhaseChangedEvent automáticamente
+        $this->handleNewRound($match, advanceRound: false);
+
+        Log::info("🎮 [Mockup] Primera ronda iniciada - handleNewRound() completado");
     }
 
     /**

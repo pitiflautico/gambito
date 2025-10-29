@@ -89,36 +89,23 @@
         const config = {
             roomCode: '{{ $room->code }}',
             matchId: {{ $match->id }},
-            playerId: {{ session('player_id') ?? 'null' }},
-            userId: {{ auth()->id() ?? 'null' }},
+            playerId: {{ $playerId ?? 'null' }},
+            userId: {{ $userId ?? 'null' }},
             gameSlug: 'mockup',
             players: [],
             scores: {},
-            eventConfig: @json($game->capabilities['event_config'] ?? null),
+            eventConfig: @json($eventConfig ?? null),
         };
 
         // Crear instancia del cliente de Mockup
         const mockupClient = new window.MockupGameClient(config);
 
-        // Cargar estado inicial ANTES de conectar WebSockets
-        (async () => {
-            try {
-                const response = await fetch(`/api/rooms/{{ $room->code }}/state`);
-                if (response.ok) {
-                    const data = await response.json();
-                    const gameState = data.game_state;
-
-                    if (gameState) {
-                        console.log('[Mockup] Loading initial state:', gameState);
-                        mockupClient.restoreGameState(gameState);
-                    }
-                } else {
-                    console.error('[Mockup] Failed to load initial state');
-                }
-            } catch (error) {
-                console.error('[Mockup] Error loading state:', error);
-            }
-        })();
+        // NOTA: Ya NO necesitamos simular GameStartedEvent aquí
+        // El flujo correcto es:
+        // 1. BaseGameClient constructor → emitDomLoaded()
+        // 2. Backend cuenta jugadores con DOM cargado
+        // 3. Cuando todos listos → Backend emite GameStartedEvent
+        // 4. handleGameStarted() se ejecuta automáticamente
 
         // Guardar referencia global para debugging
         window.mockupClient = mockupClient;

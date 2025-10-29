@@ -31,43 +31,48 @@ export default class PresenceMonitor {
 
     /**
      * Iniciar el monitoreo de presence channel.
+     *
+     * @returns {Promise} Promesa que se resuelve cuando el channel está conectado
      */
     start() {
-        if (typeof window.Echo === 'undefined') {
-            console.warn('[PresenceMonitor] Laravel Echo not loaded, retrying...');
-            setTimeout(() => this.start(), 500);
-            return;
-        }
-
-
-        this.presenceChannel = window.Echo.join(`room.${this.roomCode}`);
-
-        // Usuarios actualmente conectados
-        this.presenceChannel.here((users) => {
-            this.connectedUsers = users;
-        });
-
-        // Usuario se unió
-        this.presenceChannel.joining((user) => {
-
-            // Si el usuario estaba marcado como desconectado y ahora vuelve
-            if (this.notifiedDisconnections.has(user.id)) {
-                this.handlePlayerReconnected(user);
+        return new Promise((resolve) => {
+            if (typeof window.Echo === 'undefined') {
+                console.warn('[PresenceMonitor] Laravel Echo not loaded, retrying...');
+                setTimeout(() => this.start().then(resolve), 500);
+                return;
             }
 
-            this.connectedUsers.push(user);
+            this.presenceChannel = window.Echo.join(`room.${this.roomCode}`);
+
+            // Usuarios actualmente conectados
+            // Este callback se ejecuta cuando el channel está COMPLETAMENTE conectado
+            this.presenceChannel.here((users) => {
+                this.connectedUsers = users;
+                // Silencioso - channel conectado
+
+                // Resolver la promesa - el channel está listo
+                resolve();
+            });
+
+            // Usuario se unió
+            this.presenceChannel.joining((user) => {
+                // Si el usuario estaba marcado como desconectado y ahora vuelve
+                if (this.notifiedDisconnections.has(user.id)) {
+                    this.handlePlayerReconnected(user);
+                }
+
+                this.connectedUsers.push(user);
+            });
+
+            // Usuario se fue
+            this.presenceChannel.leaving((user) => {
+                this.connectedUsers = this.connectedUsers.filter(u => u.id !== user.id);
+
+                // Siempre notificar al backend - el backend decidirá si debe procesarse
+                // (el backend verifica si game_state.phase === 'playing')
+                this.handlePlayerDisconnected(user);
+            });
         });
-
-        // Usuario se fue
-        this.presenceChannel.leaving((user) => {
-
-            this.connectedUsers = this.connectedUsers.filter(u => u.id !== user.id);
-
-            // Siempre notificar al backend - el backend decidirá si debe procesarse
-            // (el backend verifica si game_state.phase === 'playing')
-            this.handlePlayerDisconnected(user);
-        });
-
     }
 
     /**

@@ -78,22 +78,6 @@ class PlayController extends Controller
 
         $playerId = $player->id;
 
-        // Obtener el rol del jugador desde el motor del juego
-        $gameState = $room->match->game_state ?? [];
-        $currentDrawerId = $gameState['current_drawer_id'] ?? null;
-        $role = ($player->id === $currentDrawerId) ? 'drawer' : 'guesser';
-
-        // Obtener lista de jugadores con sus datos
-        $players = $room->match->players->map(function ($p) use ($currentDrawerId, $gameState) {
-            return [
-                'id' => $p->id,
-                'name' => $p->name,
-                'score' => $gameState['scores'][$p->id] ?? 0,
-                'is_drawer' => ($p->id === $currentDrawerId),
-                'is_eliminated' => in_array($p->id, $gameState['eliminated_this_round'] ?? [])
-            ];
-        });
-
         // Cargar event_config mergeando base events con eventos del juego
         $gameSlug = $room->game->slug;
         $capabilitiesPath = base_path("games/{$gameSlug}/capabilities.json");
@@ -132,13 +116,186 @@ class PlayController extends Controller
                 'match' => $room->match,
                 'playerId' => $playerId,
                 'userId' => $player->user_id, // Necesario para canal privado de eventos
-                'role' => $role,
                 'eventConfig' => $eventConfig,
             ]);
         }
 
         // Fallback: Cargar vista genérica si el juego no tiene vista específica
-        return view('rooms.show', compact('code', 'room', 'playerId', 'role', 'players', 'eventConfig'));
+        return view('rooms.show', compact('code', 'room', 'playerId', 'eventConfig'));
+    }
+
+    // ========================================================================
+    // API ENDPOINTS - LIFECYCLE & SYNCHRONIZATION
+    // ========================================================================
+
+    /**
+     * API: Notificar que el DOM del jugador está cargado y listo.
+     *
+     * Este endpoint es llamado por BaseGameClient cuando el frontend termina de
+     * cargar el DOM y está listo para recibir eventos. El backend usa esto para
+     * coordinar el inicio del juego cuando TODOS los jugadores están listos.
+     *
+     * Race Condition Protection:
+     * - Usa Redis para trackear jugadores con DOM cargado
+     * - Solo el último jugador en reportarse iniciará el juego
+     * - Emite DomLoadedEvent para notificar progreso a todos los clientes
+     * - Cuando todos están listos → Emite GameStartedEvent
+     *
+     * @param \Illuminate\Http\Request $request
+     * @param string $code Room code
+     */
+    public function apiDomLoaded(Request $request, string $code)
+    {
+        $code = strtoupper($code);
+
+        try {
+            // 1. Buscar sala y validar
+            $room = $this->roomService->findRoomByCode($code);
+
+            if (!$room) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Sala no encontrada',
+                ], 404);
+            }
+
+            $match = $room->match;
+
+            if (!$match) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No hay partida activa en esta sala',
+                ], 404);
+            }
+
+            // 2. Obtener el jugador actual
+            $player = null;
+            if (Auth::check()) {
+                $player = $match->players()->where('user_id', Auth::id())->first();
+            } elseif ($this->playerSessionService->hasGuestSession()) {
+                $guestData = $this->playerSessionService->getGuestData();
+                $player = $match->players()->where('session_id', $guestData['session_id'])->first();
+            }
+
+            if (!$player) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Jugador no encontrado en esta partida',
+                ], 403);
+            }
+
+            \Log::info('📱 [DomLoaded] Player DOM ready', [
+                'room_code' => $code,
+                'player_id' => $player->id,
+                'player_name' => $player->name,
+            ]);
+
+            // 3. Usar Cache para trackear jugadores con DOM cargado (transparente: array local o Redis en prod)
+            $cacheKey = "match:{$match->id}:dom_ready";
+            $cache = \Illuminate\Support\Facades\Cache::store(); // Usa 'array' en local, 'redis' en prod
+
+            // Obtener set actual de jugadores listos (o array vacío)
+            $playersReadySet = $cache->get($cacheKey, []);
+
+            // Añadir jugador al set (idempotente)
+            if (!in_array($player->id, $playersReadySet)) {
+                $playersReadySet[] = $player->id;
+                $cache->put($cacheKey, $playersReadySet, now()->addMinutes(5));
+            }
+
+            // Contar jugadores con DOM cargado
+            $playersReady = count($playersReadySet);
+            $totalPlayers = $match->players()->count();
+
+            \Log::info('📊 [DomLoaded] Progress', [
+                'room_code' => $code,
+                'players_ready' => $playersReady,
+                'total_players' => $totalPlayers,
+            ]);
+
+            // 4. Emitir evento DomLoadedEvent para actualizar UI de todos los clientes
+            event(new \App\Events\Game\DomLoadedEvent(
+                $code,
+                $player->id,
+                $totalPlayers,
+                $playersReady
+            ));
+
+            // 5. Si todos los jugadores tienen DOM cargado → Iniciar el juego (solo si no ha iniciado ya)
+            if ($playersReady >= $totalPlayers) {
+                $currentPhase = $match->game_state['phase'] ?? 'waiting';
+
+                // Verificar si el juego ya ha iniciado
+                if ($currentPhase === 'starting') {
+                    \Log::info('🎮 [DomLoaded] All players ready - Starting game!', [
+                        'room_code' => $code,
+                        'match_id' => $match->id,
+                        'current_phase' => $currentPhase,
+                    ]);
+
+                    // Limpiar cache (ya no necesitamos trackear)
+                    $cache->forget($cacheKey);
+
+                    // EMITIR GameStartedEvent ANTES de inicializar el engine
+                    // Esto notifica al frontend que el juego está por comenzar
+                    event(new \App\Events\Game\GameStartedEvent($match, $match->game_state ?? []));
+
+                    \Log::info('📢 [DomLoaded] GameStartedEvent emitted', [
+                        'room_code' => $code,
+                        'match_id' => $match->id,
+                    ]);
+
+                    // INICIALIZAR EL ENGINE DEL JUEGO
+                    // Este es el ÚNICO lugar donde se inicializa completamente el engine.
+                    // Esto llama a:
+                    // 1. engine->initialize($match) - Configura el juego
+                    // 2. engine->startGame($match) - Resetea módulos y llama onGameStart()
+                    // 3. Actualiza room status a 'playing'
+                    // 4. Emite GameInitializedEvent
+                    \Log::info('🎮 [DomLoaded] Initializing game engine...', [
+                        'room_code' => $code,
+                        'match_id' => $match->id,
+                    ]);
+
+                    $match->initializeEngine();
+
+                    \Log::info('✅ [DomLoaded] Game engine initialized and started successfully', [
+                        'room_code' => $code,
+                        'match_id' => $match->id,
+                        'phase' => $match->game_state['phase'] ?? 'unknown',
+                    ]);
+                } else {
+                    \Log::info('⏭️  [DomLoaded] Game already started, skipping GameStartedEvent', [
+                        'room_code' => $code,
+                        'match_id' => $match->id,
+                        'current_phase' => $currentPhase,
+                    ]);
+
+                    // Limpiar cache de todas formas
+                    $cache->forget($cacheKey);
+                }
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'DOM loaded registered',
+                'players_ready' => $playersReady,
+                'total_players' => $totalPlayers,
+                'all_ready' => $playersReady >= $totalPlayers,
+            ], 200);
+
+        } catch (\Exception $e) {
+            \Log::error('❌ [DomLoaded] Error processing DOM loaded', [
+                'room_code' => $code,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Error processing DOM loaded: ' . $e->getMessage(),
+            ], 500);
+        }
     }
 
     // ========================================================================

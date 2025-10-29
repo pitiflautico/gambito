@@ -101,20 +101,27 @@ class RoundManager
     /**
      * Extraer configuración de fases desde config del juego.
      *
-     * Lógica:
-     * - Si hay timing.{phase_name} configurados → juego multi-fase
-     * - Si NO hay → juego single-fase, usar timer_system.round_duration
+     * Prioridad de extracción:
+     * 1. modules.phase_system.phases (configuración explícita con eventos on_start/on_end)
+     * 2. timing.{phase_name} (configuración legacy multi-fase)
+     * 3. Fase única "main" con timer_system.round_duration o turn_system.time_limit
      *
      * @param array $config Configuración del juego
-     * @return array Array de fases [{name, duration}, ...]
+     * @return array Array de fases [{name, duration, on_start?, on_end?}, ...]
      */
     protected static function extractPhasesFromConfig(array $config): array
     {
         $timing = $config['timing'] ?? [];
         $timerSystem = $config['modules']['timer_system'] ?? [];
         $turnSystem = $config['modules']['turn_system'] ?? [];
+        $phaseSystem = $config['modules']['phase_system'] ?? [];
 
-        // 1. MULTI-FASE: Si hay configuración explícita de fases en timing
+        // PRIORIDAD 1: Si hay phase_system.phases configuradas explícitamente
+        if (!empty($phaseSystem['enabled']) && !empty($phaseSystem['phases'])) {
+            return $phaseSystem['phases'];
+        }
+
+        // PRIORIDAD 2: MULTI-FASE: Si hay configuración explícita de fases en timing
         $phases = [];
         $hasExplicitPhases = false;
 

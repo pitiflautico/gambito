@@ -100,6 +100,21 @@ class PhaseManager extends TurnManager
         }
 
         $phaseName = $this->getCurrentPhaseName();
+        $currentPhaseConfig = $this->phases[$this->currentTurnIndex] ?? null;
+
+        // Emitir evento on_start ANTES de iniciar el timer (si está configurado)
+        if ($currentPhaseConfig && isset($currentPhaseConfig['on_start']) && $this->match) {
+            $onStartEvent = $currentPhaseConfig['on_start'];
+            if ($onStartEvent && class_exists($onStartEvent)) {
+                \Log::info("🎯 [PhaseManager] Emitting on_start event", [
+                    'event' => $onStartEvent,
+                    'phase' => $phaseName,
+                    'match_id' => $this->match->id
+                ]);
+
+                event(new $onStartEvent($this->match, $currentPhaseConfig));
+            }
+        }
 
         // Cancelar timer anterior si existe
         if ($this->timerService->hasTimer($phaseName)) {

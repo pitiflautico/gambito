@@ -3,9 +3,9 @@
 namespace App\Events\Mockup;
 
 use App\Models\GameMatch;
-use Illuminate\Broadcasting\Channel;
+use Illuminate\Broadcasting\PresenceChannel;
 use Illuminate\Broadcasting\InteractsWithSockets;
-use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
@@ -22,11 +22,14 @@ use Illuminate\Queue\SerializesModels;
  * - Se broadcast al frontend automáticamente
  * - Frontend puede suscribirse para lógica específica de fase 1
  */
-class Phase1EndedEvent implements ShouldBroadcast
+class Phase1EndedEvent implements ShouldBroadcastNow
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
-    public GameMatch $match;
+    public string $roomCode;
+    public int $matchId;
+    public string $phase;
+    public string $completedAt;
     public array $phaseData;
 
     /**
@@ -37,16 +40,19 @@ class Phase1EndedEvent implements ShouldBroadcast
      */
     public function __construct(GameMatch $match, array $phaseData = [])
     {
-        $this->match = $match;
+        $this->roomCode = $match->room->code;
+        $this->matchId = $match->id;
+        $this->phase = 'phase1';
+        $this->completedAt = now()->toDateTimeString();
         $this->phaseData = $phaseData;
     }
 
     /**
      * Canal de broadcast (room específico).
      */
-    public function broadcastOn(): Channel
+    public function broadcastOn(): PresenceChannel
     {
-        return new Channel('room.' . $this->match->room->code);
+        return new PresenceChannel('room.' . $this->roomCode);
     }
 
     /**
@@ -63,10 +69,10 @@ class Phase1EndedEvent implements ShouldBroadcast
     public function broadcastWith(): array
     {
         return [
-            'match_id' => $this->match->id,
-            'room_code' => $this->match->room->code,
-            'phase' => 'phase1',
-            'completed_at' => now()->toDateTimeString(),
+            'match_id' => $this->matchId,
+            'room_code' => $this->roomCode,
+            'phase' => $this->phase,
+            'completed_at' => $this->completedAt,
             'phase_data' => $this->phaseData,
         ];
     }
