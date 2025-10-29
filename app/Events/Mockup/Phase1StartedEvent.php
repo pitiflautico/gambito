@@ -23,6 +23,8 @@ class Phase1StartedEvent implements ShouldBroadcastNow
     public int $matchId;
     public string $phase;
     public ?int $duration;
+    public string $timerId;
+    public int $serverTime;
 
     /**
      * Create a new event instance.
@@ -33,6 +35,8 @@ class Phase1StartedEvent implements ShouldBroadcastNow
         $this->matchId = $match->id;
         $this->phase = 'phase1';
         $this->duration = $phaseConfig['duration'] ?? null;
+        $this->timerId = 'timer'; // ID del elemento HTML donde se muestra el countdown
+        $this->serverTime = now()->timestamp; // Timestamp del servidor para sincronización
     }
 
     /**
@@ -57,9 +61,12 @@ class Phase1StartedEvent implements ShouldBroadcastNow
     public function broadcastWith(): array
     {
         return [
+            'room_code' => $this->roomCode,
             'match_id' => $this->matchId,
             'phase' => $this->phase,
             'duration' => $this->duration,
+            'timer_id' => $this->timerId,
+            'server_time' => $this->serverTime,
         ];
     }
 }

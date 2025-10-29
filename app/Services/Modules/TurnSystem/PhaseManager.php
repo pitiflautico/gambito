@@ -121,23 +121,47 @@ class PhaseManager extends TurnManager
             $this->timerService->cancelTimer($phaseName);
         }
 
-        // Preparar datos del evento
-        // NOTA: NO podemos pasar el $match aquí porque no se serializa correctamente
-        // En su lugar, pasamos solo el match_id y el listener lo cargará
-        $eventData = [
-            'matchId' => $this->match ? $this->match->id : null,
-            'phaseName' => $phaseName,
-            'phaseIndex' => $this->currentTurnIndex,
-            'isLastPhase' => $this->isLastPhase()
-        ];
+        // Obtener el evento on_end configurado para esta fase (puede ser null)
+        $onEndEvent = $currentPhaseConfig['on_end'] ?? null;
 
-        // Crear timer con evento configurado
-        $this->timerService->startTimer(
-            timerName: $phaseName,
-            durationSeconds: $this->timeLimit,
-            eventToEmit: \App\Events\Game\PhaseTimerExpiredEvent::class,
-            eventData: $eventData
-        );
+        // Si hay evento on_end configurado, crear timer que lo emita cuando expire
+        if ($onEndEvent && class_exists($onEndEvent)) {
+            // Preparar datos del evento
+            // IMPORTANTE: No podemos pasar el objeto GameMatch completo porque no se serializa
+            // En su lugar, pasamos el match_id y el TimerService lo reconstruirá
+            $eventData = [
+                'match_id' => $this->match ? $this->match->id : null,
+                'phaseConfig' => $currentPhaseConfig
+            ];
+
+            \Log::info("⏱️ [PhaseManager] Creating timer with on_end event", [
+                'phase' => $phaseName,
+                'duration' => $this->timeLimit,
+                'event_to_emit' => $onEndEvent,
+                'match_id' => $eventData['match_id']
+            ]);
+
+            // Crear timer con el evento on_end directamente configurado
+            $this->timerService->startTimer(
+                timerName: $phaseName,
+                durationSeconds: $this->timeLimit,
+                eventToEmit: $onEndEvent,
+                eventData: $eventData
+            );
+        } else {
+            // Fase sin evento on_end: crear timer sin evento (solo para tracking de tiempo)
+            \Log::info("⏱️ [PhaseManager] Creating timer without on_end event (passive phase)", [
+                'phase' => $phaseName,
+                'duration' => $this->timeLimit
+            ]);
+
+            $this->timerService->startTimer(
+                timerName: $phaseName,
+                durationSeconds: $this->timeLimit,
+                eventToEmit: null,  // Sin evento
+                eventData: []
+            );
+        }
 
         return true;
     }
@@ -219,9 +243,24 @@ class PhaseManager extends TurnManager
     public function triggerPhaseExpired(): bool
     {
         $currentPhaseName = $this->getCurrentPhaseName();
+        $currentPhaseConfig = $this->phases[$this->currentTurnIndex] ?? null;
         $hasCallback = isset($this->phaseCallbacks[$currentPhaseName]);
 
-        // Emitir evento si tenemos el match
+        // Emitir evento on_end PERSONALIZADO (si está configurado)
+        if ($currentPhaseConfig && isset($currentPhaseConfig['on_end']) && $this->match) {
+            $onEndEvent = $currentPhaseConfig['on_end'];
+            if ($onEndEvent && class_exists($onEndEvent)) {
+                \Log::info("🏁 [PhaseManager] Emitting on_end event", [
+                    'event' => $onEndEvent,
+                    'phase' => $currentPhaseName,
+                    'match_id' => $this->match->id
+                ]);
+
+                event(new $onEndEvent($this->match, $currentPhaseConfig));
+            }
+        }
+
+        // Emitir evento GENÉRICO si tenemos el match
         if ($this->match !== null) {
             event(new \App\Events\Game\PhaseTimerExpiredEvent(
                 $this->match,

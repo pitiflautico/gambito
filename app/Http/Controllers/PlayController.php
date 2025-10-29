@@ -146,6 +146,7 @@ class PlayController extends Controller
      */
     public function apiDomLoaded(Request $request, string $code)
     {
+
         $code = strtoupper($code);
 
         try {
@@ -265,14 +266,19 @@ class PlayController extends Controller
                         'phase' => $match->game_state['phase'] ?? 'unknown',
                     ]);
                 } else {
-                    \Log::info('⏭️  [DomLoaded] Game already started, skipping GameStartedEvent', [
+                    \Log::info('⏭️  [DomLoaded] Game already started, resending current state to player', [
                         'room_code' => $code,
                         'match_id' => $match->id,
                         'current_phase' => $currentPhase,
+                        'player_id' => $player->id,
                     ]);
 
                     // Limpiar cache de todas formas
                     $cache->forget($cacheKey);
+
+                    // Usar el método del engine para reenviar el estado actual al jugador
+                    $engine = $match->getEngine();
+                    $engine->onPlayerReconnected($match, $player);
                 }
             }
 
@@ -454,6 +460,46 @@ class PlayController extends Controller
         }
 
         try {
+            // NUEVO: Sistema modular con TimerService
+            $timerName = $request->input('timer_name');
+
+            if ($timerName) {
+                \Log::info('⏰ [PlayController] Timer expiration notification received', [
+                    'timer_name' => $timerName,
+                    'match_id' => $match->id,
+                    'room_code' => $code
+                ]);
+
+                // Obtener TimerService desde game_state
+                if (isset($match->game_state['timer_system'])) {
+                    $timerService = \App\Services\Modules\TimerSystem\TimerService::fromArray($match->game_state);
+
+                    if ($timerService->hasTimer($timerName)) {
+                        // Emitir el evento configurado para este timer
+                        $emitted = $timerService->emitTimerExpiredEvent($timerName);
+
+                        if ($emitted) {
+                            // Actualizar game_state sin el timer eliminado
+                            $timerData = $timerService->toArray();
+                            $gameState = $match->game_state;
+                            $gameState['timer_system'] = $timerData['timer_system'] ?? [];
+                            $match->game_state = $gameState;
+                            $match->save();
+
+                            return response()->json([
+                                'success' => true,
+                                'message' => "Timer '{$timerName}' expired and event emitted",
+                            ], 200);
+                        }
+                    }
+                }
+
+                \Log::warning('⚠️ [PlayController] Timer not found or no event configured', [
+                    'timer_name' => $timerName,
+                    'match_id' => $match->id
+                ]);
+            }
+
             // Obtener el engine del juego
             $engine = $match->getEngine();
 

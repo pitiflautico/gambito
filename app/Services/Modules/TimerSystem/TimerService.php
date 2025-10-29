@@ -354,9 +354,31 @@ class TimerService
 
         \Log::info("⏰ [BACKEND] Emitiendo evento de timer - Timer: {$timerName}, Evento: {$eventToEmit}");
 
-        // Instanciar y emitir el evento dinámicamente
-        $eventInstance = new $eventToEmit(...array_values($eventData));
-        event($eventInstance);
+        // Si el eventData tiene match_id, reconstruir el objeto GameMatch
+        if (isset($eventData['match_id'])) {
+            $match = \App\Models\GameMatch::find($eventData['match_id']);
+            if (!$match) {
+                \Log::error('[TimerService] GameMatch not found', [
+                    'match_id' => $eventData['match_id']
+                ]);
+                return false;
+            }
+
+            // Reordenar el array para asegurar el orden correcto: (GameMatch, array)
+            // Los eventos esperan: __construct(GameMatch $match, array $phaseConfig)
+            $orderedData = [
+                $match,  // Primer argumento: GameMatch
+                $eventData['phaseConfig'] ?? []  // Segundo argumento: array
+            ];
+
+            // Instanciar y emitir el evento dinámicamente
+            $eventInstance = new $eventToEmit(...$orderedData);
+            event($eventInstance);
+        } else {
+            // Sin match_id, usar los datos tal cual
+            $eventInstance = new $eventToEmit(...array_values($eventData));
+            event($eventInstance);
+        }
 
         \Log::info('[TimerService] Evento emitido correctamente', [
             'timer_name' => $timerName,

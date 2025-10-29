@@ -142,6 +142,117 @@ class TimingModule {
     }
 
     /**
+     * Procesar automáticamente eventos con timer
+     *
+     * Detecta eventos con timer_id, server_time, duration y:
+     * - Inicia countdown visual sincronizado
+     * - Notifica al backend cuando expire (estrategia híbrida)
+     * - Race control para evitar notificaciones duplicadas
+     *
+     * @param {Object} event - Evento recibido del backend
+     * @param {string} roomCode - Código de la sala
+     */
+    autoProcessEvent(event, roomCode) {
+        // Detectar si el evento tiene datos de timer
+        if (!event.timer_id || !event.server_time || !event.duration) {
+            return; // No es un evento con timer
+        }
+
+        console.log('⏱️ [TimingModule] Detectado evento con timer', {
+            timer_id: event.timer_id,
+            timer_name: event.timer_name || event.phase,
+            duration: event.duration,
+            server_time: event.server_time
+        });
+
+        const timerElement = document.getElementById(event.timer_id);
+        if (!timerElement) {
+            this.log(`Timer element not found: #${event.timer_id}`);
+            return;
+        }
+
+        // Nombre del timer (puede venir en timer_name, phase, o timer_id)
+        const timerName = event.timer_name || event.phase || event.timer_id;
+
+        // Convertir duration a milisegundos si viene en segundos
+        const durationMs = event.duration > 1000 ? event.duration : event.duration * 1000;
+
+        this.log(`Auto-processing timer from event`, {
+            timer_id: event.timer_id,
+            timer_name: timerName,
+            server_time: event.server_time,
+            duration: event.duration,
+            duration_ms: durationMs
+        });
+
+        // Callback cuando el timer expira: notificar al backend con race control
+        const onExpiredCallback = () => {
+            console.log('⏰ [TimingModule] Timer expirado, notificando al backend', {
+                timer_name: timerName,
+                room_code: roomCode
+            });
+            this.notifyTimerExpired(timerName, roomCode);
+        };
+
+        // Iniciar countdown visual sincronizado con callback
+        this.startServerSyncedCountdown(
+            event.server_time,
+            durationMs,
+            timerElement,
+            onExpiredCallback,
+            timerName
+        );
+    }
+
+    /**
+     * Notificar al backend que un timer ha expirado
+     *
+     * Usa race control (lock en backend) para evitar que múltiples
+     * clientes notifiquen al mismo tiempo
+     *
+     * @param {string} timerName - Nombre del timer que expiró
+     * @param {string} roomCode - Código de la sala
+     */
+    async notifyTimerExpired(timerName, roomCode) {
+        if (!roomCode) {
+            console.error('❌ [TimingModule] No room code available for timer notification');
+            return;
+        }
+
+        this.log(`⏰ Notifying backend: timer expired`, {
+            timer_name: timerName,
+            room_code: roomCode
+        });
+
+        try {
+            const response = await fetch(`/api/rooms/${roomCode}/check-timer`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || ''
+                },
+                body: JSON.stringify({
+                    timer_name: timerName
+                })
+            });
+
+            if (!response.ok) {
+                console.error('❌ [TimingModule] Failed to notify timer expiration', {
+                    status: response.status,
+                    timer_name: timerName
+                });
+                return;
+            }
+
+            const data = await response.json();
+            this.log(`✅ Backend notified of timer expiration`, data);
+
+        } catch (error) {
+            console.error('❌ [TimingModule] Error notifying timer expiration:', error);
+        }
+    }
+
+    /**
      * Countdown sincronizado con timestamp del servidor
      *
      * Este es el método que usan los juegos AAA para sincronización perfecta.

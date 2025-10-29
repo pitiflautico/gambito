@@ -14,6 +14,7 @@ class EventManager {
      * @param {string} config.gameSlug - Slug del juego (trivia, pictionary, etc)
      * @param {Object} config.eventConfig - Configuración de eventos desde capabilities.json
      * @param {Object} config.handlers - Mapa de handlers: { handleEventName: function }
+     * @param {Object} config.timingModule - Instancia de TimingModule para procesamiento automático de timers
      * @param {boolean} config.autoConnect - Conectar automáticamente (default: true)
      */
     constructor(config) {
@@ -21,6 +22,7 @@ class EventManager {
         this.gameSlug = config.gameSlug;
         this.eventConfig = config.eventConfig || {};
         this.handlers = config.handlers || {};
+        this.timingModule = config.timingModule || null;
         this.autoConnect = config.autoConnect !== false;
 
         this.channel = null;
@@ -149,6 +151,15 @@ class EventManager {
             const eventName = name.startsWith('.') ? name : `.${name}`;
             this.channel.listen(eventName, (event) => {
                 try {
+                    console.log(`📩 [EventManager] Evento recibido: ${name}`, event);
+
+                    // PRIMERO: Procesamiento automático de timers (si TimingModule está disponible)
+                    // TimingModule solo muestra countdown visual, el backend maneja la expiración
+                    if (this.timingModule && typeof this.timingModule.autoProcessEvent === 'function') {
+                        this.timingModule.autoProcessEvent(event, this.roomCode);
+                    }
+
+                    // DESPUÉS: Ejecutar handler del juego
                     this.handlers[handler](event);
                 } catch (error) {
                     console.error(`❌ [EventManager] Error handling ${name}:`, error);

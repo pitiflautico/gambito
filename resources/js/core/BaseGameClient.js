@@ -113,7 +113,8 @@ export class BaseGameClient {
             roomCode: this.roomCode,
             gameSlug: this.gameSlug,
             eventConfig: this.eventConfig,
-            handlers: handlers
+            handlers: handlers,
+            timingModule: this.timing // Pasar TimingModule para procesamiento automático
         });
     }
 

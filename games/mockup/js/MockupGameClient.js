@@ -19,13 +19,13 @@ export class MockupGameClient extends BaseGameClient {
                 super.handleDomLoaded(event);
             },
             handleGameStarted: (event) => {
-                // Silencioso
+                console.log('🎮 [Mockup] JUEGO INICIADO', event);
             },
             handlePhase1Started: (event) => {
-                console.log('🎯 PHASE 1 STARTED', event);
+                console.log('🎯 [Mockup] FASE 1 INICIADA - Timer de 5 segundos comenzando', event);
             },
             handlePhase1Ended: (event) => {
-                console.log('🏁 PHASE 1 ENDED', event);
+                console.log('🏁 [Mockup] FASE 1 FINALIZADA - Timer expirado correctamente', event);
             }
         };
 
