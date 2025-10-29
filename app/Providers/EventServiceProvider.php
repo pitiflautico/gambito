@@ -15,6 +15,9 @@ class EventServiceProvider extends ServiceProvider
         \App\Events\Game\RoundEndedEvent::class => [
             \App\Listeners\CancelPhaseManagerTimersOnRoundEnd::class,
         ],
+        \App\Events\Game\PhaseTimerExpiredEvent::class => [
+            \App\Listeners\Mentiroso\HandlePhaseTimerExpired::class,
+        ],
     ];
 
     /**

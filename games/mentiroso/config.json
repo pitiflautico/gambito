@@ -42,7 +42,7 @@
     },
     "timer_system": {
       "enabled": true,
-      "round_duration": 15,
+      "round_duration": null,
       "preparation_duration": 15,
       "persuasion_duration": 30,
       "voting_duration": 10,

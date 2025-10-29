@@ -86,6 +86,48 @@ class PhaseManager extends TurnManager
     }
 
     /**
+     * Override: Iniciar timer con configuración de evento.
+     *
+     * PhaseManager sobrescribe startTurnTimer() para configurar el timer
+     * con el evento PhaseTimerExpiredEvent que se emitirá al expirar.
+     *
+     * @return bool True si se inició el timer
+     */
+    public function startTurnTimer(): bool
+    {
+        if ($this->timeLimit === null || $this->timerService === null) {
+            return false;
+        }
+
+        $phaseName = $this->getCurrentPhaseName();
+
+        // Cancelar timer anterior si existe
+        if ($this->timerService->hasTimer($phaseName)) {
+            $this->timerService->cancelTimer($phaseName);
+        }
+
+        // Preparar datos del evento
+        // NOTA: NO podemos pasar el $match aquí porque no se serializa correctamente
+        // En su lugar, pasamos solo el match_id y el listener lo cargará
+        $eventData = [
+            'matchId' => $this->match ? $this->match->id : null,
+            'phaseName' => $phaseName,
+            'phaseIndex' => $this->currentTurnIndex,
+            'isLastPhase' => $this->isLastPhase()
+        ];
+
+        // Crear timer con evento configurado
+        $this->timerService->startTimer(
+            timerName: $phaseName,
+            durationSeconds: $this->timeLimit,
+            eventToEmit: \App\Events\Game\PhaseTimerExpiredEvent::class,
+            eventData: $eventData
+        );
+
+        return true;
+    }
+
+    /**
      * Obtener el nombre de la fase actual.
      *
      * @return string
@@ -126,6 +168,21 @@ class PhaseManager extends TurnManager
     }
 
     /**
+     * GameMatch asociado (necesario para emitir eventos)
+     */
+    protected ?\App\Models\GameMatch $match = null;
+
+    /**
+     * Establecer el GameMatch asociado.
+     *
+     * @param \App\Models\GameMatch $match
+     */
+    public function setMatch(\App\Models\GameMatch $match): void
+    {
+        $this->match = $match;
+    }
+
+    /**
      * Registrar callback para cuando expira el timer de una fase.
      *
      * @param string $phaseName Nombre de la fase
@@ -137,23 +194,37 @@ class PhaseManager extends TurnManager
     }
 
     /**
-     * Ejecutar callback de expiración si existe.
+     * Ejecutar callback de expiración si existe y emitir evento.
      *
-     * Este método debe ser llamado por TimerService cuando expira el timer.
+     * Este método debe ser llamado cuando expira el timer de una fase.
+     * Emite el evento PhaseTimerExpiredEvent para que los juegos puedan reaccionar.
      *
-     * @return bool True si se ejecutó callback, false si no existe
+     * @return bool True si se ejecutó callback o emitió evento, false si no hay nada
      */
     public function triggerPhaseExpired(): bool
     {
         $currentPhaseName = $this->getCurrentPhaseName();
+        $hasCallback = isset($this->phaseCallbacks[$currentPhaseName]);
 
-        if (isset($this->phaseCallbacks[$currentPhaseName])) {
+        // Emitir evento si tenemos el match
+        if ($this->match !== null) {
+            event(new \App\Events\Game\PhaseTimerExpiredEvent(
+                $this->match,
+                $currentPhaseName,
+                $this->currentTurnIndex,
+                $this->isLastPhase()
+            ));
+        }
+
+        // Ejecutar callback si existe (backward compatibility)
+        if ($hasCallback) {
             $callback = $this->phaseCallbacks[$currentPhaseName];
             $callback($this->getCurrentPhase());
             return true;
         }
 
-        return false;
+        // Retornar true si al menos emitimos el evento
+        return $this->match !== null;
     }
 
     /**

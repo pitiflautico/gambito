@@ -397,7 +397,9 @@ class RoundManager
 
             // Si existe TimerService en el state, conectarlo automáticamente al TurnManager
             if (isset($data['timer_system'])) {
-                $timerService = \App\Services\Modules\TimerSystem\TimerService::fromArray($data);
+                // Extraer timer_system según su estructura (puede estar anidado)
+                $timerData = $data['timer_system']['timer_system'] ?? $data['timer_system'];
+                $timerService = \App\Services\Modules\TimerSystem\TimerService::fromArray(['timer_system' => $timerData]);
                 $turnManager->setTimerService($timerService);
             }
         }
@@ -589,12 +591,26 @@ class RoundManager
             timing: $timing
         ));
 
-        \Log::info('[RoundManager] RoundStartedEvent emitted', [
-            'match_id' => $match->id,
-            'current_round' => $this->currentRound,
-            'total_rounds' => $this->totalRounds,
-            'phase' => $phase
-        ]);
+        // Configurar PhaseManager con match y arrancar timer
+        if ($this->turnManager && $this->turnManager instanceof \App\Services\Modules\TurnSystem\PhaseManager) {
+            $this->turnManager->setMatch($match);
+            $this->turnManager->startTurnTimer();
+
+            // Guardar el game_state actualizado con PhaseManager Y TimerService
+            $gameState = $match->game_state;
+            $gameState['turn_system'] = $this->turnManager->toArray();
+
+            // IMPORTANTE: También guardar el TimerService actualizado con el timer nuevo
+            $timerService = $this->turnManager->getTimerService();
+            if ($timerService) {
+                $timerData = $timerService->toArray();
+                // toArray() devuelve ['timer_system' => ...], extraer solo la parte interna
+                $gameState['timer_system'] = $timerData['timer_system'] ?? [];
+            }
+
+            $match->game_state = $gameState;
+            $match->save();
+        }
     }
 
     /**

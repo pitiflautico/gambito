@@ -93,15 +93,9 @@ export class MentirosoGameClient extends BaseGameClient {
     handleRoundStarted(event) {
         console.log('🏁 [FRONTEND] RoundStartedEvent RECIBIDO - Round:', event.current_round);
 
-        // NO llamar a super.handleRoundStarted() porque usa timer de ronda legacy
-        // En su lugar, actualizamos round info manualmente
-        this.currentRound = event.current_round;
-        this.totalRounds = event.total_rounds;
-
-        // Actualizar fase a "playing" en PresenceMonitor
-        if (this.presenceMonitor && this.currentRound === 1) {
-            this.presenceMonitor.setPhase('playing');
-        }
+        // ✅ Llamar a super para actualizar round info (ya NO inicia timer)
+        // BaseGameClient.handleRoundStarted() solo actualiza currentRound y totalRounds
+        super.handleRoundStarted(event);
 
         const { current_round, total_rounds, game_state } = event;
 
@@ -214,6 +208,17 @@ export class MentirosoGameClient extends BaseGameClient {
             return;
         }
 
+        // 🛡️ DEFENSIVE CHECK: Si estamos mostrando resultados, IGNORAR PhaseChangedEvent
+        // hasta que termine el countdown (BaseGameClient llamará a handleRoundStarted cuando corresponda)
+        const resultsPhase = document.getElementById('results-phase');
+        if (resultsPhase && !resultsPhase.classList.contains('hidden')) {
+            console.log('[Mentiroso] ⏸️ Ignoring PhaseChangedEvent while showing results', {
+                new_phase: phase,
+                reason: 'waiting_for_round_countdown'
+            });
+            return;
+        }
+
         // Update phase UI
         this.updatePhase(phase);
 
@@ -241,14 +246,26 @@ export class MentirosoGameClient extends BaseGameClient {
     /**
      * Handle round ended event
      */
-    async handleRoundEnded(event) {
+    handleRoundEnded(event) {
         console.log('🏁 [FRONTEND] RoundEndedEvent RECIBIDO - Round:', event.round_number);
 
-        // Call parent handler first (emite evento para TimingModule que cancela timers automáticamente)
-        await super.handleRoundEnded(event);
+        // Llamar primero al handler base que actualiza scores y maneja timing
+        super.handleRoundEnded(event);
 
-        // Show results (gets data from event.results)
-        this.showResults(event.results || {});
+        // Ocultar todas las fases de juego
+        this.hideElement('waiting-phase');
+        this.hideElement('preparation-phase');
+        this.hideElement('persuasion-phase');
+        this.hideElement('voting-phase');
+
+        // Mostrar fase de resultados con countdown
+        this.showElement('results-phase');
+        this.showElement('timer-container');
+        this.updateElement('timer-message', 'Siguiente ronda en...');
+
+        // Actualizar datos de resultados en la pantalla
+        const results = event.results || {};
+        this.updateResultsDisplay(results);
     }
 
     /**
@@ -369,9 +386,9 @@ export class MentirosoGameClient extends BaseGameClient {
     }
 
     /**
-     * Show round results
+     * Update results display with round data
      */
-    showResults(data) {
+    updateResultsDisplay(data) {
         // Extract statement text (handle both object and string)
         const statement = data.statement || {};
         const statementText = typeof statement === 'object' ? statement.text : statement;
@@ -416,8 +433,8 @@ export class MentirosoGameClient extends BaseGameClient {
             this.updateScoreboard(data.scores);
         }
 
-        // Show results phase
-        this.updatePhase('results');
+        // Note: No llamamos updatePhase('results') aquí porque handleRoundEnded()
+        // ya manejó mostrar/ocultar las fases correctamente
     }
 
     /**
@@ -500,9 +517,10 @@ export class MentirosoGameClient extends BaseGameClient {
      * Override: Get countdown element for round transitions
      *
      * Usado por BaseGameClient para mostrar countdown entre rondas
+     * Retorna el elemento SIN proxy para que el countdown se muestre correctamente
      */
     getCountdownElement() {
-        return this.getTimerElement();
+        return document.getElementById('timer');
     }
 
     /**
@@ -578,11 +596,18 @@ export class MentirosoGameClient extends BaseGameClient {
             }
 
             if (subPhase === 'voting') {
-                // Check if already voted
-                const myVote = gameState.votes?.find(v => v.player_id === this.playerId);
-                if (myVote) {
+                // Check if already voted by looking at player_system locks
+                const myPlayerData = playerSystem[this.playerId];
+                if (myPlayerData?.locked === true) {
                     this.hasVoted = true;
-                    this.votedValue = myVote.vote;
+                    // Get vote value from action metadata
+                    this.votedValue = myPlayerData.action?.vote ?? null;
+
+                    console.log('[Mentiroso] Restored vote state on reconnect:', {
+                        hasVoted: this.hasVoted,
+                        votedValue: this.votedValue,
+                        playerData: myPlayerData
+                    });
                 }
             }
 

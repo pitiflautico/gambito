@@ -43,16 +43,24 @@ class CancelPhaseManagerTimersOnRoundEnd
             // Cancelar todos los timers
             $phaseManager->cancelAllTimers();
 
-            // Guardar el estado actualizado
-            $gameState['phase_manager'] = $phaseManager->toArray();
+            // IMPORTANTE: Resetear las fases a la primera fase manualmente
+            // No llamamos a reset() porque intentaría iniciar un timer (aunque fallará sin TimerService)
+            // Mejor hacerlo explícitamente para claridad
+            $phaseManagerData['current_turn_index'] = 0;
+            $phaseManagerData['is_paused'] = false;
+            $phaseManagerData['direction'] = 1;
+
+            // Guardar el estado actualizado directamente
+            $gameState['phase_manager'] = $phaseManagerData;
             $match->game_state = $gameState;
             $match->save();
 
-            Log::info("[PhaseManager Listener] Timers cancelled successfully", [
-                'match_id' => $match->id
+            Log::info("[PhaseManager Listener] Timers cancelled and phases reset successfully", [
+                'match_id' => $match->id,
+                'reset_to_first_phase' => true
             ]);
         } catch (\Exception $e) {
-            Log::error("[PhaseManager Listener] Error cancelling timers", [
+            Log::error("[PhaseManager Listener] Error cancelling timers and resetting phases", [
                 'match_id' => $match->id,
                 'error' => $e->getMessage()
             ]);

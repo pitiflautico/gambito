@@ -183,6 +183,9 @@ class MentirosoEngine extends BaseGameEngine
             return;
         }
 
+        // NOTA: RoundManager ya configuró PhaseManager (setMatch + startTurnTimer)
+        // en emitRoundStartedEvent(). Aquí solo emitimos PhaseChangedEvent para el frontend.
+
         $currentPhase = $phaseManager->getCurrentPhaseName();
         $timingInfo = $phaseManager->getTimingInfo();
 
@@ -191,11 +194,13 @@ class MentirosoEngine extends BaseGameEngine
             'duration' => $timingInfo['delay'] ?? 0
         ];
 
-        Log::info("[Mentiroso] Emitting PhaseChangedEvent after RoundStarted", [
+        Log::info("🚀🚀🚀 [EMIT] PhaseChangedEvent FROM onRoundStarted", [
             'match_id' => $match->id,
             'current_round' => $currentRound,
-            'phase' => $currentPhase,
-            'duration' => $timing['duration']
+            'new_phase' => $currentPhase,
+            'previous_phase' => '',
+            'duration' => $timing['duration'],
+            'location' => 'onRoundStarted'
         ]);
 
         event(new \App\Events\Game\PhaseChangedEvent(
@@ -227,10 +232,36 @@ class MentirosoEngine extends BaseGameEngine
      */
     protected function onRoundStarting(GameMatch $match): void
     {
-        Log::info("[Mentiroso] Preparing round data", ['match_id' => $match->id]);
+        $roundManager = $this->getRoundManager($match);
+        $currentRound = $roundManager->getCurrentRound();
 
-        // 1. Rotar orador
-        $this->rotateOrador($match);
+        Log::info("[Mentiroso] Preparing round data", [
+            'match_id' => $match->id,
+            'current_round' => $currentRound
+        ]);
+
+        // 🛡️ DEFENSIVE CHECK: Solo preparar ronda si NO hay statement actual
+        // Esto previene rotar orador múltiples veces si onRoundStarting() se llama por error
+        $gameState = $match->game_state;
+        if (isset($gameState['current_statement']) && $gameState['current_statement'] !== null) {
+            Log::warning("[Mentiroso] Round already started, skipping onRoundStarting", [
+                'match_id' => $match->id,
+                'current_round' => $currentRound,
+                'current_statement' => $gameState['current_statement']
+            ]);
+            return; // Ya se preparó esta ronda, no hacer nada
+        }
+
+        // 1. Rotar orador SOLO si no es la primera ronda
+        // La primera ronda ya tiene current_orador_index=0 establecido en onGameStart()
+        if ($currentRound > 1) {
+            $this->rotateOrador($match);
+        } else {
+            Log::info("[Mentiroso] Skipping orador rotation for first round", [
+                'match_id' => $match->id,
+                'current_round' => $currentRound
+            ]);
+        }
 
         // 2. Cargar siguiente frase
         $statement = $this->loadNextStatement($match);
@@ -238,14 +269,25 @@ class MentirosoEngine extends BaseGameEngine
         // 3. Asignar roles (orador/votantes)
         $this->assignRoles($match);
 
-        // 4. Iniciar PhaseManager y fase de preparación
-        $phaseManager = $this->createPhaseManager($match);
-        $this->savePhaseManager($match, $phaseManager);
+        // 4. Obtener PhaseManager del RoundManager (ya inicializado por BaseGameEngine)
+        $roundManager = $this->getRoundManager($match);
+        $phaseManager = $roundManager->getTurnManager(); // PhaseManager
 
-        // Establecer fase inicial y limpiar flags de completado
+        if (!$phaseManager) {
+            Log::error("[Mentiroso] PhaseManager NOT FOUND - should have been created by RoundManager", [
+                'match_id' => $match->id
+            ]);
+            return;
+        }
+
+        // NOTA: La configuración del PhaseManager (setMatch + startTurnTimer) se hace
+        // en onRoundStarted(), que se ejecuta DESPUÉS de RoundStartedEvent.
+        // Esto garantiza que el timer se crea con el match ya configurado.
+
+        // Establecer fase inicial
+        $currentPhase = $phaseManager->getCurrentPhaseName();
         $gameState = $match->game_state;
-        $gameState['current_phase'] = 'preparation';
-        unset($gameState['_completing_round']);  // Limpiar flag de concurrencia
+        $gameState['current_phase'] = $currentPhase;
         $match->game_state = $gameState;
         $match->save();
 
@@ -253,14 +295,13 @@ class MentirosoEngine extends BaseGameEngine
             'match_id' => $match->id,
             'statement' => $statement['text'],
             'orador_id' => $this->getCurrentOradorId($match),
-            'phase' => 'preparation'
+            'phase' => $currentPhase
         ]);
 
         // Emitir evento personalizado con la frase (SOLO al orador, canal privado)
         $currentOradorId = $this->getCurrentOradorId($match);
         $orador = Player::find($currentOradorId);
         if ($orador) {
-            $roundManager = $this->getRoundManager($match);
             event(new \App\Events\Mentiroso\StatementRevealedEvent(
                 $match,
                 $orador,
@@ -269,10 +310,6 @@ class MentirosoEngine extends BaseGameEngine
                 $roundManager->getCurrentRound()
             ));
         }
-
-        // Iniciar timer de la primera fase (preparation)
-        $phaseManager->startTurnTimer();
-        $this->savePhaseManager($match, $phaseManager);
 
         // NOTA: NO emitimos PhaseChangedEvent aquí porque onRoundStarting() se ejecuta
         // ANTES de que RoundStartedEvent sea emitido. En su lugar, usamos onRoundStarted()
@@ -367,12 +404,28 @@ class MentirosoEngine extends BaseGameEngine
         ]);
 
         // Verificar si todos los votantes ya votaron (con protección contra concurrencia)
-        $lockKey = "game:match:{$match->id}:vote-check";
+        // ⚠️ IMPORTANTE: Usar el MISMO lock que endCurrentRound() para evitar race conditions
+        // Si el timer expira mientras se procesa un voto, el voto se procesa primero
+        $lockKey = "game:match:{$match->id}:end-round";
 
-        return \Illuminate\Support\Facades\Cache::lock($lockKey, 5)->block(3, function() use ($match, $player, $playerManager) {
+        return \Illuminate\Support\Facades\Cache::lock($lockKey, 10)->block(8, function() use ($match, $player, $playerManager) {
             // Recargar match desde BD para obtener la versión más actualizada
             $match->refresh();
             $playerManager = $this->getPlayerManager($match, $this->scoreCalculator);
+
+            // 🛡️ DEFENSIVE CHECK: Verificar que la ronda no haya terminado mientras esperábamos el lock
+            // Si current_statement es null, significa que endCurrentRound() ya ejecutó
+            if (!isset($match->game_state['current_statement']) || $match->game_state['current_statement'] === null) {
+                Log::warning("[Mentiroso] Vote arrived after round ended, ignoring", [
+                    'match_id' => $match->id,
+                    'player_id' => $player->id
+                ]);
+
+                return [
+                    'success' => false,
+                    'message' => 'La ronda ya terminó',
+                ];
+            }
 
             $votantes = $playerManager->getPlayersWithRoundRole('votante');
             $lockedPlayers = $playerManager->getLockedPlayers();
@@ -392,8 +445,6 @@ class MentirosoEngine extends BaseGameEngine
                     'votantes_count' => count($votantes)
                 ]);
 
-                // NO marcar _completing_round aquí
-                // Dejar que endCurrentRound() lo maneje con su propio lock
                 return [
                     'success' => true,
                     'force_end' => true,  // BaseGameEngine espera este flag
@@ -413,8 +464,7 @@ class MentirosoEngine extends BaseGameEngine
      *
      * Mentiroso NECESITA sobrescribir este método porque:
      * 1. Requiere lock de concurrencia (múltiples notificaciones de timer simultáneas)
-     * 2. Usa flag `_completing_round` para prevenir ejecuciones duplicadas
-     * 3. Necesita refresh del match para obtener votos más recientes de BD
+     * 2. Necesita refresh del match para obtener votos más recientes de BD
      *
      * NOTA: PhaseManager ahora se autogestion mediante listener
      * (CancelPhaseManagerTimersOnRoundEnd) que escucha RoundEndedEvent
@@ -428,33 +478,33 @@ class MentirosoEngine extends BaseGameEngine
      */
     public function endCurrentRound(GameMatch $match): void
     {
+        Log::info("🔵🔵🔵 [ENTRY] endCurrentRound", [
+            'match_id' => $match->id,
+            'location' => 'endCurrentRound'
+        ]);
+
         $lockKey = "game:match:{$match->id}:end-round";
 
         \Illuminate\Support\Facades\Cache::lock($lockKey, 5)->block(3, function() use ($match) {
-            // Verificar si ya se completó
-            $match->refresh();
-            $gameState = $match->game_state;
-
-            if (isset($gameState['_completing_round'])) {
-                Log::info("[Mentiroso] Round already completing, skipping endCurrentRound", [
-                    'match_id' => $match->id
-                ]);
-                return;
-            }
-
-            // Marcar como completando
-            $gameState['_completing_round'] = true;
-            $match->game_state = $gameState;
-            $match->save();
-
-            Log::info("[Mentiroso] Ending current round", ['match_id' => $match->id]);
-
             // CRÍTICO: Refrescar match para obtener los votos más recientes
             // Los votos se guardaron en processVote() pero necesitamos la última versión
             $match->refresh();
 
+            Log::info("[Mentiroso] Ending current round", ['match_id' => $match->id]);
+
             // Obtener resultados de todos los jugadores
             $results = $this->getRoundResults($match);
+
+            // ✅ IMPORTANTE: Limpiar current_statement ANTES de completeRound()
+            // Esto permite que onRoundStarting() de la siguiente ronda cargue nueva frase
+            $gameState = $match->game_state;
+            $gameState['current_statement'] = null;
+            $match->game_state = $gameState;
+            $match->save();
+
+            Log::info("[Mentiroso] Current statement cleared for next round", [
+                'match_id' => $match->id
+            ]);
 
             // Llamar a completeRound() que maneja el flow completo
             $this->completeRound($match, $results);
@@ -464,6 +514,11 @@ class MentirosoEngine extends BaseGameEngine
                 'results' => $results
             ]);
         });
+
+        Log::info("🔴🔴🔴 [EXIT] endCurrentRound", [
+            'match_id' => $match->id,
+            'location' => 'endCurrentRound'
+        ]);
     }
 
     /**
@@ -567,117 +622,27 @@ class MentirosoEngine extends BaseGameEngine
     // ========================================================================
 
     /**
-     * Obtener o crear PhaseManager para la partida actual
+     * Obtener PhaseManager desde RoundManager
      */
     private function getPhaseManager(GameMatch $match): ?PhaseManager
     {
-        $phaseState = $match->game_state['phase_manager'] ?? null;
+        $roundManager = $this->getRoundManager($match);
+        $phaseManager = $roundManager->getTurnManager(); // PhaseManager
 
-        if (!$phaseState) {
-            return null;
+        if ($phaseManager) {
+            // Configurar match para emitir eventos
+            $phaseManager->setMatch($match);
+
+            // NOTA: Ya NO re-registramos callbacks.
+            // El sistema ahora es event-driven: PhaseTimerExpiredEvent → Listener → phase handlers
         }
-
-        $phaseManager = PhaseManager::fromArray($phaseState);
-
-        // Conectar TimerService (necesario para timing automático)
-        try {
-            $timerService = $this->getTimerService($match);
-            $phaseManager->setTimerService($timerService);
-        } catch (\RuntimeException $e) {
-            Log::warning("[Mentiroso] TimerService not available for PhaseManager", [
-                'error' => $e->getMessage()
-            ]);
-        }
-
-        // Re-registrar callbacks (no se pueden serializar)
-        $this->registerPhaseCallbacks($phaseManager, $match);
 
         return $phaseManager;
     }
 
-    /**
-     * Registrar callbacks para las fases
-     */
-    private function registerPhaseCallbacks(PhaseManager $phaseManager, GameMatch $match): void
-    {
-        $phaseManager->onPhaseExpired('preparation', function () use ($match) {
-            $this->onPhaseExpired($match, 'preparation');
-        });
-
-        $phaseManager->onPhaseExpired('persuasion', function () use ($match) {
-            $this->onPhaseExpired($match, 'persuasion');
-        });
-
-        $phaseManager->onPhaseExpired('voting', function () use ($match) {
-            $this->onPhaseExpired($match, 'voting');
-        });
-    }
-
-    /**
-     * Guardar PhaseManager en el estado del juego
-     */
-    private function savePhaseManager(GameMatch $match, PhaseManager $phaseManager): void
-    {
-        $gameState = $match->game_state;
-        $gameState['phase_manager'] = $phaseManager->toArray();
-        $match->game_state = $gameState;
-        $match->save();
-
-        // Guardar TimerService si está disponible (puede haber sido modificado)
-        $timerService = $phaseManager->getTimerService();
-        if ($timerService) {
-            $this->saveTimerService($match, $timerService);
-        }
-    }
-
-    /**
-     * Crear PhaseManager con las fases desde config
-     */
-    private function createPhaseManager(GameMatch $match): PhaseManager
-    {
-        // Usar getPhaseConfig() para normalizar configuración
-        $phases = $this->getPhaseConfig();
-
-        $phaseManager = new PhaseManager($phases);
-
-        // Conectar TimerService (necesario para timing automático)
-        try {
-            $timerService = $this->getTimerService($match);
-            $phaseManager->setTimerService($timerService);
-        } catch (\RuntimeException $e) {
-            Log::warning("[Mentiroso] TimerService not available for PhaseManager", [
-                'error' => $e->getMessage()
-            ]);
-        }
-
-        // Registrar callbacks
-        $this->registerPhaseCallbacks($phaseManager, $match);
-
-        return $phaseManager;
-    }
-
-
-    /**
-     * Callback cuando expira el timer de una fase
-     */
-    private function onPhaseExpired(GameMatch $match, string $phaseName): void
-    {
-        Log::info("[Mentiroso] Phase expired", [
-            'match_id' => $match->id,
-            'phase' => $phaseName
-        ]);
-
-        // Recargar match para evitar stale data
-        $match->refresh();
-
-        if ($phaseName === 'preparation' || $phaseName === 'persuasion') {
-            // Avanzar a la siguiente fase
-            $this->advanceToNextPhase($match);
-        } elseif ($phaseName === 'voting') {
-            // Timer de votación expiró, terminar ronda
-            $this->endCurrentRound($match);
-        }
-    }
+    // NOTA: registerPhaseCallbacks() y onPhaseExpired() fueron eliminados.
+    // Ahora usamos event-driven architecture:
+    // PhaseManager emite PhaseTimerExpiredEvent → HandlePhaseTimerExpired listener → phase handlers
 
     /**
      * Avanzar a la siguiente fase
@@ -692,32 +657,36 @@ class MentirosoEngine extends BaseGameEngine
         }
 
         $previousPhase = $phaseManager->getCurrentPhaseName();
+
+        // nextPhase() avanza la fase Y crea el nuevo timer automáticamente
         $phaseInfo = $phaseManager->nextPhase();
         $newPhase = $phaseInfo['phase_name'];
 
-        // Actualizar current_phase en game_state
+        // Actualizar game_state con la nueva fase
         $gameState = $match->game_state;
         $gameState['current_phase'] = $newPhase;
+
+        // Guardar RoundManager (que contiene PhaseManager actualizado)
+        $roundManager = $this->getRoundManager($match);
+        $this->saveRoundManager($match, $roundManager);
+
+        // CRÍTICO: Guardar también el timer_system con el nuevo timer
+        $timerService = $phaseManager->getTimerService();
+        if ($timerService) {
+            $timerData = $timerService->toArray();
+            $gameState['timer_system'] = $timerData['timer_system'] ?? [];
+        }
+
         $match->game_state = $gameState;
         $match->save();
 
-        // Guardar PhaseManager actualizado
-        $this->savePhaseManager($match, $phaseManager);
-
-        Log::info("[Mentiroso] Phase advanced", [
-            'match_id' => $match->id,
-            'previous_phase' => $previousPhase,
-            'new_phase' => $newPhase,
-            'duration' => $phaseInfo['duration']
-        ]);
-
-        // Emitir evento de cambio de fase
+        // Emitir evento de cambio de fase para notificar al frontend
         $timing = [
             'server_time' => now()->timestamp,
             'duration' => $phaseInfo['duration']
         ];
 
-        $event = new PhaseChangedEvent(
+        event(new PhaseChangedEvent(
             $match,
             $newPhase,
             $previousPhase,
@@ -726,17 +695,59 @@ class MentirosoEngine extends BaseGameEngine
                 'game_state' => $this->filterGameStateForBroadcast($match->game_state, $match),
                 'timing' => $timing
             ]
-        );
+        ));
+    }
 
-        Log::info("[Mentiroso] Emitting PhaseChangedEvent", [
-            'match_id' => $match->id,
-            'room_code' => $match->room->code,
-            'new_phase' => $newPhase,
-            'previous_phase' => $previousPhase,
-            'timing' => $timing
+    // ========================================================================
+    // PHASE HANDLERS - Event-Driven Architecture
+    // ========================================================================
+
+    /**
+     * Handler: Fase de preparación terminada
+     *
+     * Se ejecuta cuando expira el timer de la fase "preparation".
+     * Avanza automáticamente a la siguiente fase (persuasion).
+     */
+    public function onPreparationEnd(GameMatch $match): void
+    {
+        Log::info("[Mentiroso] Preparation phase ended", [
+            'match_id' => $match->id
         ]);
 
-        event($event);
+        // Avanzar a la siguiente fase (persuasion)
+        $this->advanceToNextPhase($match);
+    }
+
+    /**
+     * Handler: Fase de persuasión terminada
+     *
+     * Se ejecuta cuando expira el timer de la fase "persuasion".
+     * Avanza automáticamente a la siguiente fase (voting).
+     */
+    public function onPersuasionEnd(GameMatch $match): void
+    {
+        Log::info("[Mentiroso] Persuasion phase ended", [
+            'match_id' => $match->id
+        ]);
+
+        // Avanzar a la siguiente fase (voting)
+        $this->advanceToNextPhase($match);
+    }
+
+    /**
+     * Handler: Fase de votación terminada
+     *
+     * Se ejecuta cuando expira el timer de la fase "voting".
+     * Termina la ronda actual y procesa los resultados.
+     */
+    public function onVotingEnd(GameMatch $match): void
+    {
+        Log::info("[Mentiroso] Voting phase ended - ending round", [
+            'match_id' => $match->id
+        ]);
+
+        // Terminar la ronda actual
+        $this->endCurrentRound($match);
     }
 
     // ========================================================================
@@ -934,13 +945,7 @@ class MentirosoEngine extends BaseGameEngine
             $phaseManager->cancelAllTimers();
         }
 
-        // 3. Limpiar flag de completado de ronda
-        $gameState = $match->game_state;
-        unset($gameState['_completing_round']);
-        $match->game_state = $gameState;
-        $match->save();
-
-        // 4. Reiniciar la ronda actual (sin avanzar contador)
+        // 3. Reiniciar la ronda actual (sin avanzar contador)
         // handleNewRound con advanceRound=false mantiene la ronda actual pero reinicia todo
         $this->handleNewRound($match, advanceRound: false);
 
@@ -967,9 +972,6 @@ class MentirosoEngine extends BaseGameEngine
      */
     public function getGameStateForPlayer(GameMatch $match, Player $player): array
     {
-        // Verificar si el timer de fase ha expirado
-        $this->checkPhaseTimerExpiration($match);
-
         return [
             'phase' => $match->game_state['phase'] ?? 'unknown',
             'message' => 'El juego ha empezado',
@@ -977,14 +979,20 @@ class MentirosoEngine extends BaseGameEngine
     }
 
     /**
-     * Manejar expiración de timers (preparation, persuasion, voting).
+     * Manejar expiración de timer - Event-Driven Architecture.
      *
-     * Este método es llamado cuando el frontend notifica que un timer expiró.
-     * Verificamos con PhaseManager y ejecutamos callbacks automáticamente.
+     * Este método es llamado por el frontend cuando el countdown llega a 0.
+     * Simplemente le dice a TimerService que emita el evento configurado.
+     *
+     * Flujo:
+     * 1. Frontend notifica timer expiró
+     * 2. TimerService emite PhaseTimerExpiredEvent (con datos del timer)
+     * 3. HandlePhaseTimerExpired listener recibe evento
+     * 4. Listener llama a onPreparationEnd/onPersuasionEnd/onVotingEnd
      *
      * @param GameMatch $match
-     * @param string $timerType Tipo de timer: 'preparation', 'persuasion', 'voting'
-     * @return array Resultado de la acción
+     * @param string $timerType Nombre de la fase (preparation, persuasion, voting)
+     * @return array Resultado
      */
     public function onTimerExpired(GameMatch $match, string $timerType): array
     {
@@ -993,50 +1001,50 @@ class MentirosoEngine extends BaseGameEngine
             'timer_type' => $timerType
         ]);
 
-        // Obtener PhaseManager
+        // Obtener TimerService del PhaseManager
         $phaseManager = $this->getPhaseManager($match);
-
         if (!$phaseManager) {
-            Log::warning("[Mentiroso] PhaseManager not found, falling back to direct handling");
-
-            // Fallback: manejar manualmente
-            switch ($timerType) {
-                case 'preparation':
-                case 'persuasion':
-                    $this->advanceToNextPhase($match);
-                    return ['action' => 'phase_advanced_fallback', 'from' => $timerType];
-
-                case 'voting':
-                    $this->endCurrentRound($match);
-                    return ['action' => 'round_ended_fallback'];
-
-                default:
-                    return ['action' => 'ignored', 'reason' => 'unknown_timer_type'];
-            }
+            return ['success' => false, 'message' => 'PhaseManager not found'];
         }
 
-        // Verificar si el timer realmente expiró en el backend
-        if (!$phaseManager->isTimeExpired()) {
-            Log::debug("[Mentiroso] Timer not expired yet in backend", [
+        $timerService = $phaseManager->getTimerService();
+        if (!$timerService) {
+            return ['success' => false, 'message' => 'TimerService not found'];
+        }
+
+        // 🛡️ DEFENSIVE CHECK: Verificar que estamos en la fase correcta
+        $currentPhase = $phaseManager->getCurrentPhaseName();
+        if ($currentPhase !== $timerType) {
+            Log::info("[Mentiroso] onTimerExpired IGNORED - phase already changed", [
+                'match_id' => $match->id,
                 'timer_type' => $timerType,
-                'remaining_time' => $phaseManager->getTimingInfo()['time_remaining'] ?? 'unknown'
+                'current_phase' => $currentPhase
             ]);
-            return ['action' => 'ignored', 'reason' => 'timer_not_expired'];
+            return ['success' => false, 'message' => 'Phase already changed', 'current' => $currentPhase];
         }
 
-        // Ejecutar callback registrado para la fase actual
-        // Los callbacks ya están registrados en registerPhaseCallbacks()
-        $callbackExecuted = $phaseManager->triggerPhaseExpired();
+        // 🛡️ LOCK: Solo procesar una vez por fase
+        $roundManager = $this->getRoundManager($match);
+        $currentRound = $roundManager->getCurrentRound();
+        $lockKey = "game:match:{$match->id}:round:{$currentRound}:phase:{$timerType}";
 
-        if ($callbackExecuted) {
-            Log::info("[Mentiroso] Phase callback executed via PhaseManager", [
-                'phase' => $timerType
-            ]);
-            return ['action' => 'callback_executed', 'phase' => $timerType];
+        try {
+            $result = \Illuminate\Support\Facades\Cache::lock($lockKey, 10)->block(3, function() use ($timerService, $timerType) {
+                // Emitir el evento configurado en el timer
+                // El TimerService lee eventToEmit + eventData y emite PhaseTimerExpiredEvent
+                $emitted = $timerService->emitTimerExpiredEvent($timerType);
+
+                if ($emitted) {
+                    return ['success' => true, 'message' => 'Event emitted', 'phase' => $timerType];
+                }
+
+                return ['success' => false, 'message' => 'Timer not found or no event configured'];
+            });
+
+            return $result;
+        } catch (\Illuminate\Contracts\Cache\LockTimeoutException $e) {
+            return ['success' => false, 'message' => 'Already being processed'];
         }
-
-        Log::warning("[Mentiroso] No callback registered for phase: {$timerType}");
-        return ['action' => 'no_callback', 'phase' => $timerType];
     }
 
     /**
