@@ -59,61 +59,55 @@ class PhaseManager extends TurnManager
     }
 
     /**
-     * Avanzar a la siguiente fase.
+     * FLUJO ÚNICO: Iniciar/configurar la fase actual.
      *
-     * Override de nextTurn() para actualizar el timeLimit de la nueva fase.
+     * Este es el ÚNICO método que debe usarse para iniciar una fase.
+     * TODAS las fases (primera, intermedia, última) pasan por aquí.
      *
-     * @return array ['phase_name', 'phase_index', 'cycle_completed', 'duration']
+     * Responsabilidades:
+     * 1. Emitir on_start (si está configurado)
+     * 2. Crear timer con on_end (o PhaseEndedEvent por defecto)
+     *
+     * @return bool True si se inició correctamente
      */
-    public function nextPhase(): array
+    public function startPhase(): bool
     {
-        // Avanzar al siguiente "turno" (fase)
-        $turnInfo = parent::nextTurn();
-
-        // Actualizar timeLimit para la nueva fase
-        $currentPhaseConfig = $this->phases[$this->currentTurnIndex];
-        $this->timeLimit = $currentPhaseConfig['duration'] ?? null;
-
-        // Iniciar timer de la nueva fase
-        $this->startTurnTimer();
-
-        return [
-            'phase_name' => $currentPhaseConfig['name'],
-            'phase_index' => $this->currentTurnIndex,
-            'cycle_completed' => $turnInfo['cycle_completed'],
-            'duration' => $this->timeLimit,
-        ];
-    }
-
-    /**
-     * Override: Iniciar timer con configuración de evento.
-     *
-     * PhaseManager sobrescribe startTurnTimer() para configurar el timer
-     * con el evento PhaseTimerExpiredEvent que se emitirá al expirar.
-     *
-     * @return bool True si se inició el timer
-     */
-    public function startTurnTimer(): bool
-    {
-        if ($this->timeLimit === null || $this->timerService === null) {
+        if (!$this->match) {
+            \Log::warning("⚠️ [PhaseManager] Cannot start phase - match not set");
             return false;
         }
 
-        $phaseName = $this->getCurrentPhaseName();
-        $currentPhaseConfig = $this->phases[$this->currentTurnIndex] ?? null;
+        $currentPhaseConfig = $this->getCurrentPhase();
+        $phaseName = $currentPhaseConfig['name'];
+        $duration = $currentPhaseConfig['duration'] ?? null;
 
-        // Emitir evento on_start ANTES de iniciar el timer (si está configurado)
-        if ($currentPhaseConfig && isset($currentPhaseConfig['on_start']) && $this->match) {
+        // Stack trace para debug
+        $trace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 5);
+        $caller = isset($trace[1]) ? ($trace[1]['class'] ?? 'unknown') . '::' . ($trace[1]['function'] ?? 'unknown') : 'unknown';
+
+        \Log::info("🎬 [PhaseManager] Starting phase", [
+            'phase' => $phaseName,
+            'duration' => $duration,
+            'match_id' => $this->match->id,
+            'called_from' => $caller
+        ]);
+
+        // HOOK 1: on_start (opcional)
+        if (isset($currentPhaseConfig['on_start'])) {
             $onStartEvent = $currentPhaseConfig['on_start'];
-            if ($onStartEvent && class_exists($onStartEvent)) {
+            if (class_exists($onStartEvent)) {
                 \Log::info("🎯 [PhaseManager] Emitting on_start event", [
                     'event' => $onStartEvent,
-                    'phase' => $phaseName,
-                    'match_id' => $this->match->id
+                    'phase' => $phaseName
                 ]);
-
                 event(new $onStartEvent($this->match, $currentPhaseConfig));
             }
+        }
+
+        // Si no hay duración, no hay timer
+        if ($duration === null || $this->timerService === null) {
+            \Log::info("⏭️ [PhaseManager] Phase has no timer", ['phase' => $phaseName]);
+            return true;
         }
 
         // Cancelar timer anterior si existe
@@ -121,48 +115,69 @@ class PhaseManager extends TurnManager
             $this->timerService->cancelTimer($phaseName);
         }
 
-        // Obtener el evento on_end configurado para esta fase (puede ser null)
-        $onEndEvent = $currentPhaseConfig['on_end'] ?? null;
+        // HOOK 2: on_end (con fallback a PhaseEndedEvent)
+        $onEndEvent = $currentPhaseConfig['on_end'] ?? \App\Events\Game\PhaseEndedEvent::class;
 
-        // Si hay evento on_end configurado, crear timer que lo emita cuando expire
-        if ($onEndEvent && class_exists($onEndEvent)) {
-            // Preparar datos del evento
-            // IMPORTANTE: No podemos pasar el objeto GameMatch completo porque no se serializa
-            // En su lugar, pasamos el match_id y el TimerService lo reconstruirá
-            $eventData = [
-                'match_id' => $this->match ? $this->match->id : null,
-                'phaseConfig' => $currentPhaseConfig
-            ];
+        $eventData = [
+            'match_id' => $this->match->id,
+            'phaseConfig' => $currentPhaseConfig
+        ];
 
-            \Log::info("⏱️ [PhaseManager] Creating timer with on_end event", [
-                'phase' => $phaseName,
-                'duration' => $this->timeLimit,
-                'event_to_emit' => $onEndEvent,
-                'match_id' => $eventData['match_id']
-            ]);
+        \Log::info("⏱️ [PhaseManager] Creating phase timer", [
+            'phase' => $phaseName,
+            'duration' => $duration,
+            'event_to_emit' => $onEndEvent
+        ]);
 
-            // Crear timer con el evento on_end directamente configurado
-            $this->timerService->startTimer(
-                timerName: $phaseName,
-                durationSeconds: $this->timeLimit,
-                eventToEmit: $onEndEvent,
-                eventData: $eventData
-            );
+        $this->timerService->startTimer(
+            timerName: $phaseName,
+            durationSeconds: $duration,
+            eventToEmit: $onEndEvent,
+            eventData: $eventData
+        );
+
+        return true;
+    }
+
+    /**
+     * Avanzar a la siguiente fase.
+     *
+     * @return array ['phase_name', 'phase_index', 'cycle_completed', 'duration']
+     */
+    public function nextPhase(): array
+    {
+        // Avanzar al siguiente índice
+        $turnInfo = parent::nextTurn();
+        $currentPhaseConfig = $this->getCurrentPhase();
+
+        // Si el ciclo se completó, NO iniciar la fase (la ronda va a terminar)
+        if (!$turnInfo['cycle_completed']) {
+            $this->startPhase();
         } else {
-            // Fase sin evento on_end: crear timer sin evento (solo para tracking de tiempo)
-            \Log::info("⏱️ [PhaseManager] Creating timer without on_end event (passive phase)", [
-                'phase' => $phaseName,
-                'duration' => $this->timeLimit
+            \Log::info("🔄 [PhaseManager] Cycle completed - NOT starting phase (round will end)", [
+                'phase' => $currentPhaseConfig['name'],
+                'match_id' => $this->match ? $this->match->id : null
             ]);
-
-            $this->timerService->startTimer(
-                timerName: $phaseName,
-                durationSeconds: $this->timeLimit,
-                eventToEmit: null,  // Sin evento
-                eventData: []
-            );
         }
 
+        return [
+            'phase_name' => $currentPhaseConfig['name'],
+            'phase_index' => $this->currentTurnIndex,
+            'cycle_completed' => $turnInfo['cycle_completed'],
+            'duration' => $currentPhaseConfig['duration'] ?? null,
+        ];
+    }
+
+    /**
+     * LEGACY: Override para mantener compatibilidad.
+     * ELIMINADO - ahora solo existe startPhase() como punto único de entrada.
+     *
+     * @deprecated No usar - usar startPhase() directamente
+     */
+    public function startTurnTimer(): bool
+    {
+        // NO hacer nada - startPhase() ya fue llamado
+        // Este método solo existe por compatibilidad con TurnManager padre
         return true;
     }
 
@@ -240,28 +255,41 @@ class PhaseManager extends TurnManager
      *
      * @return bool True si se ejecutó callback o emitió evento, false si no hay nada
      */
+    /**
+     * DEPRECATED: Este método es obsoleto con el nuevo flujo.
+     * Ahora startPhase() configura el timer con el evento correcto directamente.
+     *
+     * @deprecated Mantener por compatibilidad temporal
+     */
     public function triggerPhaseExpired(): bool
     {
         $currentPhaseName = $this->getCurrentPhaseName();
         $currentPhaseConfig = $this->phases[$this->currentTurnIndex] ?? null;
         $hasCallback = isset($this->phaseCallbacks[$currentPhaseName]);
 
-        // Emitir evento on_end PERSONALIZADO (si está configurado)
+        // Emitir SOLO evento personalizado si existe, SINO emitir genérico
         if ($currentPhaseConfig && isset($currentPhaseConfig['on_end']) && $this->match) {
             $onEndEvent = $currentPhaseConfig['on_end'];
             if ($onEndEvent && class_exists($onEndEvent)) {
-                \Log::info("🏁 [PhaseManager] Emitting on_end event", [
+                \Log::info("🏁 [PhaseManager] Emitting CUSTOM on_end event", [
                     'event' => $onEndEvent,
                     'phase' => $currentPhaseName,
                     'match_id' => $this->match->id
                 ]);
 
                 event(new $onEndEvent($this->match, $currentPhaseConfig));
+
+                // NO emitir evento genérico si hay personalizado
+                return true;
             }
         }
 
-        // Emitir evento GENÉRICO si tenemos el match
+        // Si NO hay evento personalizado, emitir genérico
         if ($this->match !== null) {
+            \Log::info("🏁 [PhaseManager] Emitting GENERIC PhaseTimerExpiredEvent", [
+                'phase' => $currentPhaseName
+            ]);
+
             event(new \App\Events\Game\PhaseTimerExpiredEvent(
                 $this->match,
                 $currentPhaseName,

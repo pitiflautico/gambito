@@ -49,6 +49,11 @@
         "name": "mockup.phase1.ended",
         "description": "Mockup: Fase 1 terminada",
         "handler": "handlePhase1Ended"
+      },
+      "PhaseStartedEvent": {
+        "name": "game.phase.started",
+        "description": "Sistema: Fase genérica iniciada",
+        "handler": "handlePhaseStarted"
       }
     }
   }

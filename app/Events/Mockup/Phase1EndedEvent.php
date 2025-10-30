@@ -45,6 +45,23 @@ class Phase1EndedEvent implements ShouldBroadcastNow
         $this->phase = 'phase1';
         $this->completedAt = now()->toDateTimeString();
         $this->phaseData = $phaseData;
+
+        // Obtener engine y ejecutar callback directamente
+        $engine = $match->getEngine();
+
+        if ($engine && method_exists($engine, 'handlePhase1Ended')) {
+            \Log::info("🎯 [Phase1EndedEvent] Ejecutando handlePhase1Ended del engine", [
+                'match_id' => $match->id,
+                'engine_class' => get_class($engine)
+            ]);
+
+            // Llamar directamente al método handlePhase1Ended del engine
+            $engine->handlePhase1Ended($match, $phaseData);
+        } else {
+            \Log::warning("[Phase1EndedEvent] handlePhase1Ended no encontrado en el engine", [
+                'engine_class' => get_class($engine ?? null)
+            ]);
+        }
     }
 
     /**

@@ -11,7 +11,7 @@
   "timing": {
     "round_ended": {
       "type": "countdown",
-      "message": "Siguiente ronda",
+      "message": "Siguiente ronda en",
       "delay": 3,
       "auto_next": true
     }
@@ -35,6 +35,14 @@
       "Phase1EndedEvent": {
         "name": ".mockup.phase1.ended",
         "handler": "handlePhase1Ended"
+      },
+      "PhaseStartedEvent": {
+        "name": ".game.phase.started",
+        "handler": "handlePhaseStarted"
+      },
+      "PhaseEndedEvent": {
+        "name": ".game.phase.ended",
+        "handler": "handlePhaseEnded"
       }
     }
   },
@@ -59,15 +67,18 @@
       "phases": [
         {
           "name": "phase1",
-          "duration": 5,
+          "duration": 3,
           "on_start": "App\\Events\\Mockup\\Phase1StartedEvent",
-          "on_end": "App\\Events\\Mockup\\Phase1EndedEvent"
+          "on_end": "App\\Events\\Game\\PhaseEndedEvent",
+          "on_end_callback": "handlePhase1Ended"
         },
         {
           "name": "phase2",
-          "duration": 5,
-          "on_start": null,
-          "on_end": null
+          "duration": 3,
+          "on_start": "App\\Events\\Game\\PhaseStartedEvent",
+          "on_start_callback": "handlePhase2Started",
+          "on_end": "App\\Events\\Game\\PhaseEndedEvent",
+          "on_end_callback": "handlePhase2Ended"
         }
       ]
     },

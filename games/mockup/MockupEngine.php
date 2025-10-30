@@ -400,10 +400,141 @@ class MockupEngine extends BaseGameEngine
     // ========================================================================
 
     /**
+     * Callback cuando inicia la fase 2.
+     */
+    public function handlePhase2Started(GameMatch $match, array $phaseData): void
+    {
+        Log::info("🎬 [Mockup] FASE 2 INICIADA", [
+            'match_id' => $match->id,
+            'phase_data' => $phaseData
+        ]);
+
+        // Aquí puedes hacer lógica específica cuando comienza phase2
+        // Por ejemplo: preparar datos, notificar jugadores, etc.
+    }
+
+    /**
      * Callback cuando expira la fase 1.
      *
      * Avanza a la fase 2.
      */
+    public function handlePhase1Ended(GameMatch $match, array $phaseData): void
+    {
+        Log::info("🏁 [Mockup] FASE 1 FINALIZADA - Ejecutando callback", [
+            'match_id' => $match->id,
+            'phase_data' => $phaseData
+        ]);
+
+        // Obtener PhaseManager a través del RoundManager
+        $roundManager = $this->getRoundManager($match);
+        $phaseManager = $roundManager->getTurnManager();
+
+        if (!$phaseManager) {
+            Log::warning("[Mockup] PhaseManager no encontrado");
+            return;
+        }
+
+        // IMPORTANTE: Asignar el match al PhaseManager
+        // Sin esto, no puede emitir eventos on_start
+        $phaseManager->setMatch($match);
+
+        // Avanzar a la siguiente fase
+        $nextPhaseInfo = $phaseManager->nextPhase();
+
+        Log::info("➡️  [Mockup] Avanzando a siguiente fase", [
+            'phase_name' => $nextPhaseInfo['phase_name'],
+            'phase_index' => $nextPhaseInfo['phase_index'],
+            'duration' => $nextPhaseInfo['duration']
+        ]);
+
+        // Guardar RoundManager actualizado (que contiene el PhaseManager)
+        $this->saveRoundManager($match, $roundManager);
+
+        // Emitir evento de cambio de fase
+        event(new \App\Events\Game\PhaseChangedEvent(
+            match: $match,
+            newPhase: $nextPhaseInfo['phase_name'],
+            previousPhase: $phaseData['name'] ?? 'phase1',
+            additionalData: [
+                'phase_index' => $nextPhaseInfo['phase_index'],
+                'duration' => $nextPhaseInfo['duration'],
+                'phase_name' => $nextPhaseInfo['phase_name']
+            ]
+        ));
+    }
+
+    /**
+     * Callback cuando expira la fase 2.
+     *
+     * Llama a nextPhase() y verifica cycle_completed para decidir si terminar la ronda.
+     */
+    public function handlePhase2Ended(GameMatch $match, array $phaseData): void
+    {
+        Log::info("🏁 [Mockup] FASE 2 FINALIZADA - Ejecutando callback", [
+            'match_id' => $match->id,
+            'phase_data' => $phaseData
+        ]);
+
+        // Obtener PhaseManager
+        $roundManager = $this->getRoundManager($match);
+        $phaseManager = $roundManager->getTurnManager();
+
+        if (!$phaseManager) {
+            Log::warning("[Mockup] PhaseManager no encontrado");
+            return;
+        }
+
+        // Asignar el match al PhaseManager
+        $phaseManager->setMatch($match);
+
+        // SIEMPRE avanzar a la siguiente fase
+        Log::info("➡️  [Mockup] Avanzando a siguiente fase", [
+            'phase_name' => $phaseData['name'],
+            'match_id' => $match->id
+        ]);
+
+        $nextPhaseInfo = $phaseManager->nextPhase();
+
+        // Guardar RoundManager actualizado
+        $this->saveRoundManager($match, $roundManager);
+
+        // Verificar si completó el ciclo de fases
+        if ($nextPhaseInfo['cycle_completed']) {
+            Log::info("✅ [Mockup] Ciclo de fases completado - Finalizando ronda", [
+                'match_id' => $match->id,
+                'current_round' => $roundManager->getCurrentRound(),
+                'next_phase' => $nextPhaseInfo['phase_name']
+            ]);
+
+            // Finalizar ronda actual
+            // Esto emitirá RoundEndedEvent con countdown 3s automáticamente
+            $this->endCurrentRound($match);
+
+            Log::info("🎉 [Mockup] Ronda finalizada - El sistema manejará el countdown y siguiente ronda", [
+                'match_id' => $match->id
+            ]);
+        } else {
+            // Si no completó el ciclo (teóricamente no debería pasar en mockup con 2 fases)
+            Log::info("➡️  [Mockup] Avanzando a siguiente fase sin finalizar ronda", [
+                'from' => $phaseData['name'],
+                'to' => $nextPhaseInfo['phase_name'],
+                'cycle_completed' => false
+            ]);
+
+            // Emitir evento de cambio de fase
+            event(new \App\Events\Game\PhaseChangedEvent(
+                match: $match,
+                newPhase: $nextPhaseInfo['phase_name'],
+                previousPhase: $phaseData['name'],
+                additionalData: [
+                    'phase_index' => $nextPhaseInfo['phase_index'],
+                    'duration' => $nextPhaseInfo['duration'],
+                    'phase_name' => $nextPhaseInfo['phase_name']
+                ]
+            ));
+        }
+    }
+
     // ========================================================================
     // NOTAS SOBRE EVENTOS DE FASE
     // ========================================================================

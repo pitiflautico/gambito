@@ -26,6 +26,13 @@ export class MockupGameClient extends BaseGameClient {
             },
             handlePhase1Ended: (event) => {
                 console.log('🏁 [Mockup] FASE 1 FINALIZADA - Timer expirado correctamente', event);
+            },
+            handlePhaseStarted: (event) => {
+                console.log('🎬 [Mockup] FASE INICIADA', event);
+                // TimingModule detectará automáticamente el timer porque el evento tiene:
+                // - timer_id
+                // - duration
+                // - server_time
             }
         };
 
@@ -39,17 +46,22 @@ export class MockupGameClient extends BaseGameClient {
     handlePhaseChanged(event) {
         super.handlePhaseChanged(event);
 
+        // Obtener el nombre de la fase desde additional_data
+        const phaseName = event.additional_data?.phase_name || event.new_phase || 'unknown';
+
         // Actualizar display de fase en el DOM
         const phaseEl = document.getElementById('current-phase');
         if (phaseEl) {
-            phaseEl.textContent = event.phase || 'unknown';
+            phaseEl.textContent = phaseName;
         }
 
         // Actualizar descripción de fase
         const descEl = document.getElementById('phase-description');
         if (descEl) {
-            descEl.textContent = `Fase ${event.phase} en progreso...`;
+            descEl.textContent = `Fase ${phaseName} en progreso...`;
         }
+
+        console.log('📋 [Mockup] Fase actualizada:', phaseName, event);
     }
 
     /**

@@ -460,44 +460,45 @@ class PlayController extends Controller
         }
 
         try {
-            // NUEVO: Sistema modular con TimerService
+            // Sistema simplificado: Frontend envía todos los datos necesarios
             $timerName = $request->input('timer_name');
+            $eventClass = $request->input('event_class');
+            $eventData = $request->input('event_data', []);
 
-            if ($timerName) {
+            if ($timerName && $eventClass) {
                 \Log::info('⏰ [PlayController] Timer expiration notification received', [
                     'timer_name' => $timerName,
+                    'event_class' => $eventClass,
                     'match_id' => $match->id,
                     'room_code' => $code
                 ]);
 
-                // Obtener TimerService desde game_state
-                if (isset($match->game_state['timer_system'])) {
-                    $timerService = \App\Services\Modules\TimerSystem\TimerService::fromArray($match->game_state);
+                // Validar que la clase del evento existe
+                if (!class_exists($eventClass)) {
+                    \Log::error('❌ [PlayController] Event class not found', [
+                        'event_class' => $eventClass,
+                        'timer_name' => $timerName
+                    ]);
 
-                    if ($timerService->hasTimer($timerName)) {
-                        // Emitir el evento configurado para este timer
-                        $emitted = $timerService->emitTimerExpiredEvent($timerName);
-
-                        if ($emitted) {
-                            // Actualizar game_state sin el timer eliminado
-                            $timerData = $timerService->toArray();
-                            $gameState = $match->game_state;
-                            $gameState['timer_system'] = $timerData['timer_system'] ?? [];
-                            $match->game_state = $gameState;
-                            $match->save();
-
-                            return response()->json([
-                                'success' => true,
-                                'message' => "Timer '{$timerName}' expired and event emitted",
-                            ], 200);
-                        }
-                    }
+                    return response()->json([
+                        'success' => false,
+                        'message' => "Event class '{$eventClass}' not found",
+                    ], 400);
                 }
 
-                \Log::warning('⚠️ [PlayController] Timer not found or no event configured', [
-                    'timer_name' => $timerName,
-                    'match_id' => $match->id
+                // Emitir el evento con los datos que envió el frontend
+                \Log::info('✅ [PlayController] Emitting timer event', [
+                    'event_class' => $eventClass,
+                    'timer_name' => $timerName
                 ]);
+
+                // El evento recibe el match y los datos adicionales
+                event(new $eventClass($match, $eventData));
+
+                return response()->json([
+                    'success' => true,
+                    'message' => "Timer '{$timerName}' expired and event emitted",
+                ], 200);
             }
 
             // Obtener el engine del juego

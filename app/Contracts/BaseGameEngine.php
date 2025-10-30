@@ -574,6 +574,97 @@ abstract class BaseGameEngine implements GameEngineInterface
         // Los juegos específicos pueden sobrescribir este método
     }
 
+    // ========================================================================
+    // PHASE LIFECYCLE HOOKS
+    // ========================================================================
+
+    /**
+     * Manejar el fin de una fase (llamado por PhaseEndedEvent).
+     *
+     * FLUJO AUTOMÁTICO:
+     * 1. Llama al hook onPhaseEnded() (puede ser override por engines locales)
+     * 2. Si onPhaseEnded() retorna true o no está override → auto-avanza a siguiente fase
+     * 3. Si onPhaseEnded() retorna false → el engine local se encarga del avance
+     *
+     * @param GameMatch $match
+     * @param array $phaseConfig Configuración de la fase que terminó
+     * @return void
+     */
+    public function handlePhaseEnded(GameMatch $match, array $phaseConfig): void
+    {
+        $phaseName = $phaseConfig['name'] ?? 'unknown';
+
+        \Log::info("🎬 [BaseGameEngine] handlePhaseEnded()", [
+            'phase' => $phaseName,
+            'match_id' => $match->id,
+            'engine' => get_class($this)
+        ]);
+
+        // HOOK: Permitir que el engine local maneje el fin de fase
+        $shouldAutoAdvance = $this->onPhaseEnded($match, $phaseConfig);
+
+        // Si el hook no maneja el avance, hacerlo automáticamente
+        if ($shouldAutoAdvance !== false) {
+            \Log::info("🔄 [BaseGameEngine] Auto-advancing to next phase", [
+                'phase' => $phaseName
+            ]);
+
+            // Obtener PhaseManager y avanzar
+            if ($this->isModuleEnabled($match, 'phase_system')) {
+                $roundManager = $this->getRoundManager($match);
+                $phaseManager = $roundManager->getTurnManager();
+
+                if ($phaseManager && $phaseManager instanceof \App\Services\Modules\TurnSystem\PhaseManager) {
+                    $nextPhaseInfo = $phaseManager->nextPhase();
+
+                    // Si el ciclo se completó, la ronda terminó
+                    if ($nextPhaseInfo['cycle_completed']) {
+                        \Log::info("🏁 [BaseGameEngine] Phase cycle completed - ending round", [
+                            'current_round' => $roundManager->getCurrentRound()
+                        ]);
+
+                        // Finalizar ronda actual
+                        $this->endCurrentRound($match);
+                    }
+
+                    // Guardar estado actualizado
+                    $this->saveRoundManager($match, $roundManager);
+                } else {
+                    \Log::warning("⚠️ [BaseGameEngine] PhaseManager not available for auto-advance");
+                }
+            }
+        }
+    }
+
+    /**
+     * Hook: Cuando termina una fase.
+     *
+     * Los engines locales pueden override este método para ejecutar lógica específica.
+     *
+     * @param GameMatch $match
+     * @param array $phaseConfig Configuración de la fase que terminó
+     * @return bool|null Retornar false para prevenir auto-avance, true/null para permitirlo
+     */
+    protected function onPhaseEnded(GameMatch $match, array $phaseConfig): ?bool
+    {
+        // Implementación vacía por defecto - permite auto-avance
+        return true;
+    }
+
+    /**
+     * Hook: Cuando inicia una fase.
+     *
+     * Los engines locales pueden override este método para ejecutar lógica específica.
+     *
+     * @param GameMatch $match
+     * @param array $phaseConfig Configuración de la fase que inicia
+     * @return void
+     */
+    protected function onPhaseStarted(GameMatch $match, array $phaseConfig): void
+    {
+        // Implementación vacía por defecto
+    }
+
     /**
      * Obtener timing metadata para el inicio de ronda.
      *
@@ -1259,9 +1350,14 @@ abstract class BaseGameEngine implements GameEngineInterface
     protected function getScoreManager(GameMatch $match, ?ScoreCalculatorInterface $calculator = null): ScoreManager
     {
         $gameState = $match->game_state;
-        
+
         // Obtener player IDs desde el match directamente (no desde scores, que pueden estar vacíos)
         $playerIds = $match->players->pluck('id')->toArray();
+
+        // Si no se pasó calculator, usar SimpleScoreCalculator por defecto
+        if ($calculator === null) {
+            $calculator = new \App\Services\Modules\ScoringSystem\SimpleScoreCalculator();
+        }
 
         return ScoreManager::fromArray(
             playerIds: $playerIds,

@@ -598,25 +598,18 @@ class RoundManager
             timing: $timing
         ));
 
-        // Configurar PhaseManager con match y arrancar timer
+        // Iniciar la primera fase inmediatamente (sin countdown adicional)
+        // FLUJO ÚNICO: Configurar PhaseManager con match y usar startPhase()
         if ($this->turnManager && $this->turnManager instanceof \App\Services\Modules\TurnSystem\PhaseManager) {
             $this->turnManager->setMatch($match);
-            $this->turnManager->startTurnTimer();
 
-            // Guardar el game_state actualizado con PhaseManager Y TimerService
-            $gameState = $match->game_state;
-            $gameState['turn_system'] = $this->turnManager->toArray();
+            // startPhase() es el ÚNICO punto de entrada para iniciar una fase
+            $this->turnManager->startPhase();
 
-            // IMPORTANTE: También guardar el TimerService actualizado con el timer nuevo
-            $timerService = $this->turnManager->getTimerService();
-            if ($timerService) {
-                $timerData = $timerService->toArray();
-                // toArray() devuelve ['timer_system' => ...], extraer solo la parte interna
-                $gameState['timer_system'] = $timerData['timer_system'] ?? [];
-            }
-
-            $match->game_state = $gameState;
-            $match->save();
+            \Log::info("🎯 [RoundManager] First phase started automatically", [
+                'phase' => $this->turnManager->getCurrentPhaseName(),
+                'match_id' => $match->id
+            ]);
         }
     }
 

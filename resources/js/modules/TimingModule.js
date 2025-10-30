@@ -189,9 +189,11 @@ class TimingModule {
         const onExpiredCallback = () => {
             console.log('⏰ [TimingModule] Timer expirado, notificando al backend', {
                 timer_name: timerName,
-                room_code: roomCode
+                room_code: roomCode,
+                event_class: event.event_class,
+                phase_data: event.phase_data
             });
-            this.notifyTimerExpired(timerName, roomCode);
+            this.notifyTimerExpired(timerName, roomCode, event.event_class, event.phase_data);
         };
 
         // Iniciar countdown visual sincronizado con callback
@@ -212,8 +214,10 @@ class TimingModule {
      *
      * @param {string} timerName - Nombre del timer que expiró
      * @param {string} roomCode - Código de la sala
+     * @param {string} eventClass - Clase del evento a emitir cuando expire
+     * @param {Object} eventData - Datos adicionales para el evento
      */
-    async notifyTimerExpired(timerName, roomCode) {
+    async notifyTimerExpired(timerName, roomCode, eventClass = null, eventData = null) {
         if (!roomCode) {
             console.error('❌ [TimingModule] No room code available for timer notification');
             return;
@@ -221,19 +225,31 @@ class TimingModule {
 
         this.log(`⏰ Notifying backend: timer expired`, {
             timer_name: timerName,
-            room_code: roomCode
+            room_code: roomCode,
+            event_class: eventClass,
+            event_data: eventData
         });
 
         try {
+            const payload = {
+                timer_name: timerName
+            };
+
+            // Incluir event_class y event_data si están disponibles
+            if (eventClass) {
+                payload.event_class = eventClass;
+            }
+            if (eventData) {
+                payload.event_data = eventData;
+            }
+
             const response = await fetch(`/api/rooms/${roomCode}/check-timer`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || ''
                 },
-                body: JSON.stringify({
-                    timer_name: timerName
-                })
+                body: JSON.stringify(payload)
             });
 
             if (!response.ok) {

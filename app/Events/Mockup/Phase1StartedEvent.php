@@ -25,6 +25,7 @@ class Phase1StartedEvent implements ShouldBroadcastNow
     public ?int $duration;
     public string $timerId;
     public int $serverTime;
+    public array $phaseData;
 
     /**
      * Create a new event instance.
@@ -37,6 +38,7 @@ class Phase1StartedEvent implements ShouldBroadcastNow
         $this->duration = $phaseConfig['duration'] ?? null;
         $this->timerId = 'timer'; // ID del elemento HTML donde se muestra el countdown
         $this->serverTime = now()->timestamp; // Timestamp del servidor para sincronización
+        $this->phaseData = $phaseConfig;
     }
 
     /**
@@ -64,9 +66,15 @@ class Phase1StartedEvent implements ShouldBroadcastNow
             'room_code' => $this->roomCode,
             'match_id' => $this->matchId,
             'phase' => $this->phase,
+            'phase_name' => $this->phase,
             'duration' => $this->duration,
             'timer_id' => $this->timerId,
+            'timer_name' => $this->phase, // Para que el frontend sepa qué timer es
             'server_time' => $this->serverTime,
+            'phase_data' => $this->phaseData,
+            // Evento a emitir cuando expire (para que el frontend lo reenvíe)
+            // Si no hay on_end configurado, usar PhaseTimerExpiredEvent por defecto (avance automático)
+            'event_class' => $this->phaseData['on_end'] ?? 'App\\Events\\Game\\PhaseTimerExpiredEvent',
         ];
     }
 }
