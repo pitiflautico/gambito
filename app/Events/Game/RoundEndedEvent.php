@@ -29,13 +29,15 @@ class RoundEndedEvent implements ShouldBroadcast
     public array $results;
     public array $scores;
     public ?array $timing;
+    public bool $isLastRound;
 
     public function __construct(
         GameMatch $match,
         int $roundNumber,
         array $results = [],
         array $scores = [],
-        ?array $timing = null
+        ?array $timing = null,
+        bool $isLastRound = false
     ) {
         $this->match = $match;
         $this->roomCode = $match->room->code;
@@ -43,6 +45,7 @@ class RoundEndedEvent implements ShouldBroadcast
         $this->results = $results;
         $this->scores = $scores;
         $this->timing = $timing;
+        $this->isLastRound = $isLastRound;
     }
 
     public function broadcastOn(): PresenceChannel
@@ -61,6 +64,7 @@ class RoundEndedEvent implements ShouldBroadcast
             'round_number' => $this->roundNumber,
             'results' => $this->results,
             'scores' => $this->scores,
+            'is_last_round' => $this->isLastRound,
         ];
 
         // Añadir timing metadata si está presente
@@ -68,7 +72,9 @@ class RoundEndedEvent implements ShouldBroadcast
             $data['timing'] = $this->timing;
 
             // Si el timing es de tipo countdown, incluir datos para TimingModule
-            if (($this->timing['type'] ?? null) === 'countdown' &&
+            // PERO solo si NO es la última ronda (en la última ronda no hay countdown)
+            if (!$this->isLastRound &&
+                ($this->timing['type'] ?? null) === 'countdown' &&
                 ($this->timing['auto_next'] ?? false) === true) {
 
                 $data['timer_id'] = 'timer'; // Reutilizar mismo elemento que fases

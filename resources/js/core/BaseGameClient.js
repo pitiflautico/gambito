@@ -50,8 +50,9 @@ export class BaseGameClient {
             this.emitDomLoaded();
         });
 
-        // Cargar plantilla de popup de fin de ronda
+        // Cargar plantillas de popups
         this.loadRoundEndPopup();
+        this.loadGameEndPopup();
     }
 
     /**
@@ -219,6 +220,13 @@ export class BaseGameClient {
         this.lastResults = event.results;
         this.lastRoundNumber = event.round_number;
 
+        // ✅ Si es la última ronda, NO mostrar popup de round end
+        // El popup de game end se mostrará cuando llegue el evento game.finished
+        if (event.is_last_round) {
+            console.log('🏁 [BaseGameClient] Last round ended, waiting for game.finished event');
+            return;
+        }
+
         // ✅ Mostrar popup de fin de ronda por defecto
         // Los juegos pueden sobrescribir este método para personalizar el contenido
         this.showRoundEndPopup(event);
@@ -295,7 +303,10 @@ export class BaseGameClient {
             this.presenceMonitor.stop();
         }
 
-        // Los juegos específicos sobrescriben este método para mostrar pantalla de resultados finales
+        // Mostrar popup de fin de partida con resultados finales
+        this.showGameEndPopup(event);
+
+        // Los juegos específicos pueden sobrescribir showGameEndPopup() para personalizar
     }
 
     /**
@@ -880,55 +891,12 @@ export class BaseGameClient {
     // ========================================================================
 
     /**
-     * Cargar plantilla HTML de popup de fin de ronda
-     * Se ejecuta automáticamente en el constructor
+     * Inicializar popup de fin de ronda
+     * El template HTML ya está cargado en el blade del juego.
      */
     async loadRoundEndPopup() {
-        try {
-            // Plantilla HTML inline
-            const html = `
-                <!-- Round End Popup Template -->
-                <div id="round-end-popup" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50" style="display: none;">
-                    <div class="bg-gray-800 rounded-lg p-8 max-w-2xl w-full mx-4 shadow-2xl border-4 border-yellow-500">
-                        <!-- Header -->
-                        <div class="text-center mb-6">
-                            <h2 class="text-4xl font-bold text-yellow-400 mb-2">
-                                🏁 Ronda <span id="popup-round-number">1</span> Finalizada
-                            </h2>
-                            <p class="text-gray-400 text-lg" id="popup-subtitle">Resultados de la ronda</p>
-                        </div>
-
-                        <!-- Results Section -->
-                        <div id="popup-results" class="mb-6">
-                            <!-- Los juegos específicos pueden sobrescribir esto -->
-                            <div class="bg-gray-900 rounded-lg p-6">
-                                <h3 class="text-xl font-bold text-white mb-4 text-center">Puntuaciones</h3>
-                                <div id="popup-scores-list" class="space-y-2">
-                                    <!-- Scores will be populated dynamically -->
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Timer Section -->
-                        <div class="text-center bg-gray-900 rounded-lg p-6">
-                            <p id="popup-timer-message" class="text-sm text-gray-400 mb-2">Siguiente ronda en</p>
-                            <p id="popup-timer" class="text-6xl font-bold text-green-400 font-mono">3</p>
-                        </div>
-                    </div>
-                </div>
-            `;
-
-            // Crear contenedor temporal para parsear el HTML
-            const temp = document.createElement('div');
-            temp.innerHTML = html;
-
-            // Añadir al body
-            document.body.appendChild(temp.firstElementChild);
-
-            console.log('✅ [BaseGameClient] Round end popup template loaded');
-        } catch (error) {
-            console.error('❌ [BaseGameClient] Error loading round end popup template:', error);
-        }
+        // El template ya está en el blade, solo confirmamos que existe
+        console.log('✅ [BaseGameClient] Round end popup initialized');
     }
 
     /**
@@ -994,6 +962,110 @@ export class BaseGameClient {
         if (popup) {
             popup.style.display = 'none';
             console.log('🔒 [BaseGameClient] Round end popup hidden');
+        }
+    }
+
+    // ========================================================================
+    // GAME END POPUP - Sistema de popup por defecto para fin de partida
+    // ========================================================================
+
+    /**
+     * Inicializar popup de fin de partida
+     * El template HTML ya está cargado en el blade del juego.
+     * Solo necesitamos registrar el evento del botón.
+     */
+    async loadGameEndPopup() {
+        try {
+            // Registrar evento del botón "Volver al Lobby"
+            const backToLobbyBtn = document.getElementById('back-to-lobby-btn');
+            if (backToLobbyBtn) {
+                backToLobbyBtn.addEventListener('click', () => {
+                    window.location.href = '/lobby';
+                });
+            }
+
+            console.log('✅ [BaseGameClient] Game end popup initialized');
+        } catch (error) {
+            console.error('❌ [BaseGameClient] Error initializing game end popup:', error);
+        }
+    }
+
+    /**
+     * Mostrar popup de fin de partida con resultados finales
+     * Los juegos pueden sobrescribir este método para personalizar el contenido
+     *
+     * Estructura del evento GameEndedEvent:
+     * - winner: int (player ID)
+     * - ranking: array (lista de player IDs ordenados por posición)
+     * - scores: object {player_id: score}
+     */
+    showGameEndPopup(event) {
+        const popup = document.getElementById('game-end-popup');
+        if (!popup) {
+            console.warn('⚠️ [BaseGameClient] Game end popup not found');
+            return;
+        }
+
+        // Actualizar winner info si existe
+        if (event.winner) {
+            const winnerName = document.getElementById('winner-name');
+            const winnerScore = document.getElementById('winner-score');
+
+            if (winnerName) {
+                const player = this.getPlayer(event.winner);
+                winnerName.textContent = player ? player.name : `Player ${event.winner}`;
+            }
+
+            if (winnerScore && event.scores && event.scores[event.winner] !== undefined) {
+                winnerScore.textContent = `${event.scores[event.winner]} puntos`;
+            }
+        }
+
+        // Actualizar rankings finales
+        const rankingsList = document.getElementById('game-end-rankings-list');
+        if (rankingsList && event.ranking) {
+            rankingsList.innerHTML = '';
+
+            event.ranking.forEach((playerId, index) => {
+                const player = this.getPlayer(playerId);
+                const playerName = player ? player.name : `Player ${playerId}`;
+                const score = event.scores ? (event.scores[playerId] || 0) : 0;
+
+                // Clase de medalla para top 3
+                let medal = '';
+                if (index === 0) medal = '🥇';
+                else if (index === 1) medal = '🥈';
+                else if (index === 2) medal = '🥉';
+                else medal = `${index + 1}.`;
+
+                const rankingItem = document.createElement('div');
+                rankingItem.className = 'flex justify-between items-center bg-gray-800 px-4 py-3 rounded';
+                rankingItem.innerHTML = `
+                    <span class="text-white text-lg">${medal} ${playerName}</span>
+                    <span class="text-yellow-400 font-bold text-lg">${score} pts</span>
+                `;
+                rankingsList.appendChild(rankingItem);
+            });
+        }
+
+        // Mostrar popup
+        popup.style.display = 'flex';
+
+        console.log('🏆 [BaseGameClient] Game end popup shown', {
+            winner: event.winner,
+            ranking: event.ranking,
+            scores: event.scores
+        });
+    }
+
+    /**
+     * Ocultar popup de fin de partida
+     */
+    hideGameEndPopup() {
+        const popup = document.getElementById('game-end-popup');
+        if (popup) {
+            popup.style.display = 'none';
+            console.log('🔒 [BaseGameClient] Game end popup hidden');
         }
     }
 }

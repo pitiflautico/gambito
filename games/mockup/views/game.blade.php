@@ -112,5 +112,8 @@
     </script>
 
     @stack('scripts')
+
+    @include('mockup::partials.round_end_popup')
+    @include('mockup::partials.game_end_popup')
 </body>
 </html>

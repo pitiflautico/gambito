@@ -468,15 +468,19 @@ class RoundManager
             ]);
 
             // 2. Emitir evento RoundEndedEvent con timing metadata
+            $isLastRound = $this->currentRound >= $this->totalRounds;
             \Log::info("🏁 [BACKEND] Emitiendo RoundEndedEvent - Round: {$this->currentRound}");
             event(new \App\Events\Game\RoundEndedEvent(
                 match: $match,
                 roundNumber: $this->currentRound,
                 results: $results,
                 scores: $scores,
-                timing: $timingConfig
+                timing: $timingConfig,
+                isLastRound: $isLastRound
             ));
-            \Log::info('[RoundManager] RoundEndedEvent emitted');
+            \Log::info('[RoundManager] RoundEndedEvent emitted', [
+                'is_last_round' => $isLastRound
+            ]);
 
             // 3. Crear timer para countdown si está configurado
             if ($timingConfig &&
