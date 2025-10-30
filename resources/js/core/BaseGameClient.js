@@ -49,6 +49,9 @@ export class BaseGameClient {
             // Channel conectado - ahora sí emitir DomLoaded
             this.emitDomLoaded();
         });
+
+        // Cargar plantilla de popup de fin de ronda
+        this.loadRoundEndPopup();
     }
 
     /**
@@ -171,6 +174,9 @@ export class BaseGameClient {
      * Los juegos específicos pueden sobrescribirlo para añadir lógica custom.
      */
     async handleRoundStarted(event) {
+        // Ocultar popup de fin de ronda anterior (si estaba visible)
+        this.hideRoundEndPopup();
+
         // Actualizar información de ronda
         this.currentRound = event.current_round;
         this.totalRounds = event.total_rounds;
@@ -179,6 +185,11 @@ export class BaseGameClient {
         if (this.presenceMonitor && this.currentRound === 1) {
             this.presenceMonitor.setPhase('playing');
         }
+
+        // Emitir evento para que TimingModule limpie timers notificados de la ronda anterior
+        window.dispatchEvent(new CustomEvent('game:round:started', {
+            detail: event
+        }));
 
         // NOTA: El timer ya NO se inicia aquí, se inicia en handlePhaseChanged()
         // cuando llega PhaseChangedEvent después de RoundStartedEvent.
@@ -208,21 +219,16 @@ export class BaseGameClient {
         this.lastResults = event.results;
         this.lastRoundNumber = event.round_number;
 
-        // 🔥 RACE CONDITION FIX: Capturar currentRound AHORA
-        // Durante el countdown, otro jugador puede avanzar la ronda y actualizar this.currentRound
-        // Por eso capturamos el valor aquí y lo usamos en el callback
-        const fromRound = this.currentRound;
+        // ✅ Mostrar popup de fin de ronda por defecto
+        // Los juegos pueden sobrescribir este método para personalizar el contenido
+        this.showRoundEndPopup(event);
 
-        // Procesar timing metadata si existe
-        if (event.timing) {
-            await this.timing.processTimingPoint(
-                event.timing,
-                () => this.notifyReadyForNextRound(fromRound),
-                this.getCountdownElement()
-            );
-        }
-
-        // Los juegos específicos sobrescriben este método para mostrar resultados
+        // ✅ EventManager ya llama a TimingModule.autoProcessEvent() automáticamente
+        // El countdown se mostrará automáticamente en #popup-timer y cuando expire:
+        // 1. TimingModule llama a /check-timer
+        // 2. Backend emite StartNewRoundEvent (no broadcast)
+        // 3. HandleStartNewRound listener avanza la ronda
+        // 4. hideRoundEndPopup() se llama automáticamente en handleRoundStarted()
     }
 
     /**
@@ -866,6 +872,128 @@ export class BaseGameClient {
         const element = document.getElementById(id);
         if (element) {
             element.textContent = content;
+        }
+    }
+
+    // ========================================================================
+    // ROUND END POPUP - Sistema de popup por defecto para fin de ronda
+    // ========================================================================
+
+    /**
+     * Cargar plantilla HTML de popup de fin de ronda
+     * Se ejecuta automáticamente en el constructor
+     */
+    async loadRoundEndPopup() {
+        try {
+            // Plantilla HTML inline
+            const html = `
+                <!-- Round End Popup Template -->
+                <div id="round-end-popup" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50" style="display: none;">
+                    <div class="bg-gray-800 rounded-lg p-8 max-w-2xl w-full mx-4 shadow-2xl border-4 border-yellow-500">
+                        <!-- Header -->
+                        <div class="text-center mb-6">
+                            <h2 class="text-4xl font-bold text-yellow-400 mb-2">
+                                🏁 Ronda <span id="popup-round-number">1</span> Finalizada
+                            </h2>
+                            <p class="text-gray-400 text-lg" id="popup-subtitle">Resultados de la ronda</p>
+                        </div>
+
+                        <!-- Results Section -->
+                        <div id="popup-results" class="mb-6">
+                            <!-- Los juegos específicos pueden sobrescribir esto -->
+                            <div class="bg-gray-900 rounded-lg p-6">
+                                <h3 class="text-xl font-bold text-white mb-4 text-center">Puntuaciones</h3>
+                                <div id="popup-scores-list" class="space-y-2">
+                                    <!-- Scores will be populated dynamically -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Timer Section -->
+                        <div class="text-center bg-gray-900 rounded-lg p-6">
+                            <p id="popup-timer-message" class="text-sm text-gray-400 mb-2">Siguiente ronda en</p>
+                            <p id="popup-timer" class="text-6xl font-bold text-green-400 font-mono">3</p>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // Crear contenedor temporal para parsear el HTML
+            const temp = document.createElement('div');
+            temp.innerHTML = html;
+
+            // Añadir al body
+            document.body.appendChild(temp.firstElementChild);
+
+            console.log('✅ [BaseGameClient] Round end popup template loaded');
+        } catch (error) {
+            console.error('❌ [BaseGameClient] Error loading round end popup template:', error);
+        }
+    }
+
+    /**
+     * Mostrar popup de fin de ronda con resultados y countdown
+     * Los juegos pueden sobrescribir este método para personalizar el contenido
+     */
+    showRoundEndPopup(event) {
+        const popup = document.getElementById('round-end-popup');
+        if (!popup) {
+            console.warn('⚠️ [BaseGameClient] Round end popup not found');
+            return;
+        }
+
+        // Actualizar número de ronda
+        const roundNumber = document.getElementById('popup-round-number');
+        if (roundNumber) {
+            roundNumber.textContent = event.round_number;
+        }
+
+        // Actualizar scores
+        const scoresList = document.getElementById('popup-scores-list');
+        if (scoresList && event.scores) {
+            scoresList.innerHTML = '';
+
+            // Convertir scores a array y ordenar por puntuación (mayor a menor)
+            const sortedScores = Object.entries(event.scores)
+                .sort(([, scoreA], [, scoreB]) => scoreB - scoreA);
+
+            sortedScores.forEach(([playerId, score], index) => {
+                const player = this.getPlayer(playerId);
+                const playerName = player ? player.name : `Player ${playerId}`;
+
+                // Clase de medalla para top 3
+                let medal = '';
+                if (index === 0) medal = '🥇';
+                else if (index === 1) medal = '🥈';
+                else if (index === 2) medal = '🥉';
+
+                const scoreItem = document.createElement('div');
+                scoreItem.className = 'flex justify-between items-center bg-gray-800 px-4 py-2 rounded';
+                scoreItem.innerHTML = `
+                    <span class="text-white">${medal} ${playerName}</span>
+                    <span class="text-yellow-400 font-bold">${score} pts</span>
+                `;
+                scoresList.appendChild(scoreItem);
+            });
+        }
+
+        // Mostrar popup
+        popup.style.display = 'flex';
+
+        console.log('🎉 [BaseGameClient] Round end popup shown', {
+            round: event.round_number,
+            scores: event.scores
+        });
+    }
+
+    /**
+     * Ocultar popup de fin de ronda
+     */
+    hideRoundEndPopup() {
+        const popup = document.getElementById('round-end-popup');
+        if (popup) {
+            popup.style.display = 'none';
+            console.log('🔒 [BaseGameClient] Round end popup hidden');
         }
     }
 }

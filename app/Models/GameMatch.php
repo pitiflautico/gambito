@@ -391,9 +391,9 @@ class GameMatch extends Model
             data: $data
         );
 
-        // Verificar si el timer expiró y auto-advance si es necesario
-        // Esto se ejecuta después de cada acción para detectar timeouts
-        $engine->checkTimerAndAutoAdvance($this);
+        // ELIMINADO: checkTimerAndAutoAdvance() call
+        // El sistema de round timer ha sido eliminado.
+        // La duración de ronda es la suma de las duraciones de las fases.
 
         return $result;
     }

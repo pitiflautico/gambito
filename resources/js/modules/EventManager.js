@@ -153,14 +153,15 @@ class EventManager {
                 try {
                     console.log(`📩 [EventManager] Evento recibido: ${name}`, event);
 
-                    // PRIMERO: Procesamiento automático de timers (si TimingModule está disponible)
+                    // PRIMERO: Ejecutar handler del juego
+                    // Esto permite que el handler prepare la UI (ej: mostrar popup) ANTES de iniciar timers
+                    this.handlers[handler](event);
+
+                    // DESPUÉS: Procesamiento automático de timers (si TimingModule está disponible)
                     // TimingModule solo muestra countdown visual, el backend maneja la expiración
                     if (this.timingModule && typeof this.timingModule.autoProcessEvent === 'function') {
                         this.timingModule.autoProcessEvent(event, this.roomCode);
                     }
-
-                    // DESPUÉS: Ejecutar handler del juego
-                    this.handlers[handler](event);
                 } catch (error) {
                     console.error(`❌ [EventManager] Error handling ${name}:`, error);
                     if (this.handlers.onError) {

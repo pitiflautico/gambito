@@ -81,15 +81,10 @@ class PhaseManager extends TurnManager
         $phaseName = $currentPhaseConfig['name'];
         $duration = $currentPhaseConfig['duration'] ?? null;
 
-        // Stack trace para debug
-        $trace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 5);
-        $caller = isset($trace[1]) ? ($trace[1]['class'] ?? 'unknown') . '::' . ($trace[1]['function'] ?? 'unknown') : 'unknown';
-
         \Log::info("🎬 [PhaseManager] Starting phase", [
             'phase' => $phaseName,
             'duration' => $duration,
-            'match_id' => $this->match->id,
-            'called_from' => $caller
+            'match_id' => $this->match->id
         ]);
 
         // HOOK 1: on_start (opcional)

@@ -120,67 +120,8 @@ abstract class BaseGameEngine implements GameEngineInterface
      */
     abstract protected function onGameStart(GameMatch $match): void;
 
-    /**
-     * Hook cuando el timer de ronda expira.
-     *
-     * IMPLEMENTACIÓN POR DEFECTO:
-     * - Llama a hook opcional beforeTimerExpiredAdvance() para lógica específica del juego
-     * - Completa la ronda actual (completeRound)
-     * - El timer se limpia automáticamente al avanzar
-     *
-     * Los juegos pueden:
-     * 1. Usar implementación por defecto (no hacer nada)
-     * 2. Sobrescribir beforeTimerExpiredAdvance() para lógica específica
-     * 3. Sobrescribir completamente onRoundTimerExpired() si necesitan otro comportamiento
-     *    (ej: Pictionary puede pasar turno en lugar de completar ronda)
-     *
-     * @param GameMatch $match
-     * @param string $timerName Nombre del timer que expiró (ej: 'round', 'turn')
-     * @return void
-     */
-    protected function onRoundTimerExpired(GameMatch $match, string $timerName = 'round'): void
-    {
-        Log::info("[{$this->getGameSlug()}] Timer expired - default handler", [
-            'match_id' => $match->id,
-            'timer_name' => $timerName
-        ]);
-
-        // 1. Hook opcional para lógica específica del juego antes de avanzar
-        $this->beforeTimerExpiredAdvance($match, $timerName);
-
-        // 2. Comportamiento por defecto: completar ronda y avanzar
-        // El timer se limpia automáticamente en completeRound → handleNewRound
-        $results = [
-            'reason' => 'timer_expired',
-            'message' => '¡Tiempo agotado!'
-        ];
-
-        $this->completeRound($match, $results);
-
-        Log::info("[{$this->getGameSlug()}] Round completed due to timer expiration", [
-            'match_id' => $match->id
-        ]);
-    }
-
-    /**
-     * Hook opcional ejecutado ANTES de completar ronda por timer expiration.
-     *
-     * Los juegos pueden sobrescribir este método para:
-     * - Registrar estadísticas específicas
-     * - Modificar puntuación por timeout
-     * - Emitir eventos custom
-     * - Etc.
-     *
-     * NO debe avanzar la ronda, solo preparar o modificar estado.
-     *
-     * @param GameMatch $match
-     * @param string $timerName
-     * @return void
-     */
-    protected function beforeTimerExpiredAdvance(GameMatch $match, string $timerName = 'round'): void
-    {
-        // Implementación vacía por defecto - juegos la sobrescriben si necesitan
-    }
+    // ELIMINADO: onRoundTimerExpired() y beforeTimerExpiredAdvance()
+    // La duración de una ronda es la suma de la duración de sus fases.
 
     /**
      * Hook cuando un jugador se desconecta DURANTE la partida.
@@ -487,17 +428,8 @@ abstract class BaseGameEngine implements GameEngineInterface
 
         // 3.1. Iniciar timer de ronda automáticamente (si está configurado)
         // DELEGADO A ROUNDMANAGER: Los módulos gestionan sus propios timers
-        if ($this->isModuleEnabled($match, 'round_system') && $this->isModuleEnabled($match, 'timer_system')) {
-            $roundManager = $this->getRoundManager($match);
-            $timerService = $this->getTimerService($match);
-            $config = $match->game_state['_config'] ?? [];
-
-            if ($roundManager->startRoundTimer($match, $timerService, $config)) {
-                // Timer iniciado, guardar en game_state
-                $this->saveTimerService($match, $timerService);
-                Log::info("[{$this->getGameSlug()}] Round timer started by RoundManager");
-            }
-        }
+        // ELIMINADO: Round timer
+        // La duración de una ronda es la suma de la duración de sus fases.
 
         // 4. Filtrar game_state para remover información sensible
         $filteredGameState = $this->filterGameStateForBroadcast($match->game_state, $match);
@@ -932,16 +864,25 @@ abstract class BaseGameEngine implements GameEngineInterface
         ]);
 
         // 2. Delegar a RoundManager para completar la ronda
-        // RoundManager maneja: emitir evento, avanzar, programar backup, etc.
-        $roundManager->completeRound($match, $results, $scores);
+        // RoundManager maneja: emitir evento, crear timer countdown, etc.
+        $timerService = $this->isModuleEnabled($match, 'timer_system')
+            ? $this->getTimerService($match)
+            : null;
+
+        $roundManager->completeRound($match, $results, $scores, $timerService);
 
         Log::info("[{$this->getGameSlug()}] roundManager->completeRound() finished");
 
-        // 3. Llamar al hook para que el juego ejecute lógica custom después del evento
+        // 3. Guardar TimerService si se creó un timer
+        if ($timerService !== null) {
+            $this->saveTimerService($match, $timerService);
+        }
+
+        // 4. Llamar al hook para que el juego ejecute lógica custom después del evento
         $currentRound = $roundManager->getCurrentRound();
         $this->onRoundEnded($match, $currentRound, $results, $scores);
 
-        // 4. Guardar estado actualizado
+        // 5. Guardar estado actualizado
         $this->saveRoundManager($match, $roundManager);
 
         // 5. Verificar si el juego terminó
@@ -1729,51 +1670,9 @@ abstract class BaseGameEngine implements GameEngineInterface
         $this->saveTimerService($match, $timerService);
     }
 
-    /**
-     * Iniciar timer de ronda automáticamente si está configurado.
-     *
-     * @deprecated Este método está DEPRECADO. Usa RoundManager::startRoundTimer() en su lugar.
-     *
-     * RAZÓN: Los módulos deben gestionar sus propios timers y eventos.
-     * RoundManager es responsable de los timers de ronda, no BaseGameEngine.
-     *
-     * Este método se mantiene por compatibilidad pero ya no se usa internamente.
-     * handleNewRound() ahora delega a RoundManager::startRoundTimer().
-     *
-     * @param GameMatch $match
-     * @param string $timerName Nombre del timer (default: 'round')
-     * @return bool True si se inició timer, false si no está configurado
-     */
-    protected function startRoundTimer(GameMatch $match, string $timerName = 'round'): bool
-    {
-        $config = $this->getGameConfig();
-
-        // Buscar duración del timer en configuración
-        $duration = $config['modules']['timer_system']['round_duration'] ?? null;
-
-        if ($duration === null || $duration <= 0) {
-            return false;
-        }
-
-        Log::info("[{$this->getGameSlug()}] Starting round timer", [
-            'match_id' => $match->id,
-            'timer_name' => $timerName,
-            'duration' => $duration
-        ]);
-
-        // Configurar timer para emitir RoundTimerExpiredEvent cuando expire
-        $currentRound = $match->game_state['round_system']['current_round'] ?? 1;
-        $this->createTimer(
-            match: $match,
-            name: $timerName,
-            seconds: $duration,
-            eventToEmit: \App\Events\Game\RoundTimerExpiredEvent::class,
-            eventData: [$match, $currentRound, $timerName],
-            restart: true
-        );
-
-        return true;
-    }
+    // ELIMINADO: startRoundTimer() method
+    // La duración de una ronda es la suma de la duración de sus fases.
+    // No necesitamos un timer separado para la ronda completa.
 
     /**
      * Verificar si timer expiró.
@@ -1813,57 +1712,9 @@ abstract class BaseGameEngine implements GameEngineInterface
         return $this->getTimerService($match)->getElapsedTime($name);
     }
 
-    /**
-     * Verificar timer y finalizar ronda si expiró.
-     *
-     * Este método verifica si el timer de ronda ha expirado y, si es así,
-     * finaliza la ronda actual con resultados de timeout (todos los que no
-     * respondieron obtienen 0 puntos).
-     *
-     * Se debe llamar después de procesar acciones de jugadores.
-     *
-     * @param GameMatch $match
-     * @return bool True si se finalizó la ronda por timeout
-     */
-    public function checkTimerAndAutoAdvance(GameMatch $match): bool
-    {
-        $gameState = $match->game_state;
-
-        // Verificar si hay un timer de ronda activo
-        if (!isset($gameState['timer_system']['timers']['round'])) {
-            return false;
-        }
-
-        // Verificar si el timer ha expirado
-        try {
-            $isExpired = $this->isTimerExpired($match, 'round');
-        } catch (\Exception $e) {
-            Log::debug("[{$this->getGameSlug()}] Timer check failed: {$e->getMessage()}");
-            return false;
-        }
-
-        if (!$isExpired) {
-            return false;
-        }
-
-        $currentRound = $gameState['round_system']['current_round'] ?? null;
-
-        Log::info("[{$this->getGameSlug()}] Round timer expired", [
-            'match_id' => $match->id,
-            'current_round' => $currentRound
-        ]);
-
-        // Obtener TimerService y delegar emisión del evento
-        $timerService = $this->getTimerService($match);
-        $timerService->emitTimerExpiredEvent($match, 'round', $currentRound);
-
-        // Delegar al juego específico para que decida qué hacer
-        // Trivia: completará la ronda
-        // Otro juego: puede hacer algo diferente (pasar turno, penalizar, etc.)
-        $this->onRoundTimerExpired($match, 'round');
-
-        return true;
-    }
+    // ELIMINADO: checkTimerAndAutoAdvance() method
+    // Este método era parte del sistema de round timer que ha sido eliminado.
+    // La duración de una ronda es la suma de la duración de sus fases.
 
     // ========================================================================
     // TURN MANAGEMENT: Automatic Role Rotation

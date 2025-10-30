@@ -433,10 +433,8 @@ class PlayController extends Controller
     /**
      * API: Verificar si el timer expiró y ejecutar acción correspondiente.
      *
-     * Legacy mode (sin timer_type): checkTimerAndAutoAdvance() → completa ronda
-     * New mode (con timer_type): onTimerExpired() → maneja timers específicos
-     *
-     * Backward compatible con juegos existentes.
+     * Requiere timer_type parameter para especificar el tipo de timer a verificar.
+     * Ejemplos: 'phase', 'turn', 'round_countdown'
      */
     public function apiCheckTimer(Request $request, string $code)
     {
@@ -464,9 +462,20 @@ class PlayController extends Controller
             $timerName = $request->input('timer_name');
             $eventClass = $request->input('event_class');
             $eventData = $request->input('event_data', []);
+            $frontendCallId = $request->input('frontend_call_id', 'unknown');
 
             if ($timerName && $eventClass) {
+                \Log::warning('🔥 [PlayController] API CALLED FROM FRONTEND', [
+                    'frontend_call_id' => $frontendCallId,
+                    'timer_name' => $timerName,
+                    'event_class' => $eventClass,
+                    'match_id' => $match->id,
+                    'room_code' => $code,
+                    'request_time' => now()->toISOString()
+                ]);
+
                 \Log::info('⏰ [PlayController] Timer expiration notification received', [
+                    'frontend_call_id' => $frontendCallId,
                     'timer_name' => $timerName,
                     'event_class' => $eventClass,
                     'match_id' => $match->id,
@@ -489,11 +498,49 @@ class PlayController extends Controller
                 // Emitir el evento con los datos que envió el frontend
                 \Log::info('✅ [PlayController] Emitting timer event', [
                     'event_class' => $eventClass,
-                    'timer_name' => $timerName
+                    'timer_name' => $timerName,
+                    'event_data' => $eventData
                 ]);
 
-                // El evento recibe el match y los datos adicionales
-                event(new $eventClass($match, $eventData));
+                // Manejar diferentes tipos de eventos según su firma
+                if ($eventClass === \App\Events\Game\StartNewRoundEvent::class) {
+                    // StartNewRoundEvent espera: (int $matchId, string $roomCode)
+                    if (!isset($eventData['matchId']) || !isset($eventData['roomCode'])) {
+                        \Log::error('❌ [PlayController] Missing required data for StartNewRoundEvent', [
+                            'event_data' => $eventData
+                        ]);
+                        return response()->json([
+                            'success' => false,
+                            'message' => 'Missing required data for StartNewRoundEvent'
+                        ], 400);
+                    }
+
+                    $dispatchId = uniqid('dispatch_', true);
+                    \Log::warning('🚀 [PlayController] ABOUT TO EMIT StartNewRoundEvent', [
+                        'frontend_call_id' => $frontendCallId,
+                        'dispatch_id' => $dispatchId,
+                        'matchId' => $eventData['matchId'],
+                        'roomCode' => $eventData['roomCode'],
+                        'timestamp' => now()->toISOString()
+                    ]);
+
+                    event(new $eventClass(
+                        $eventData['matchId'],
+                        $eventData['roomCode']
+                    ));
+
+                    \Log::warning('✅ [PlayController] EMITTED StartNewRoundEvent', [
+                        'frontend_call_id' => $frontendCallId,
+                        'dispatch_id' => $dispatchId,
+                        'timestamp' => now()->toISOString()
+                    ]);
+                } elseif ($eventClass === \App\Events\Game\PhaseEndedEvent::class) {
+                    // PhaseEndedEvent espera: (GameMatch $match, array $phaseConfig)
+                    event(new $eventClass($match, $eventData));
+                } else {
+                    // Fallback genérico: pasar match y datos
+                    event(new $eventClass($match, $eventData));
+                }
 
                 return response()->json([
                     'success' => true,
@@ -518,22 +565,13 @@ class PlayController extends Controller
                 ], 200);
             }
 
-            // Fallback: comportamiento legacy (timer de ronda)
-            $wasCompleted = $engine->checkTimerAndAutoAdvance($match);
-
-            if ($wasCompleted) {
-                return response()->json([
-                    'success' => true,
-                    'message' => 'Round completed due to timer expiration',
-                    'completed' => true,
-                ], 200);
-            }
-
+            // ELIMINADO: Legacy fallback (timer de ronda)
+            // El sistema de round timer ha sido eliminado.
+            // Ahora solo se manejan timers específicos (phase, turn, etc.) con timer_type.
             return response()->json([
-                'success' => true,
-                'message' => 'Timer not expired or already processed',
-                'completed' => false,
-            ], 200);
+                'success' => false,
+                'message' => 'No timer_type provided. Use timer_type parameter to check specific timers.',
+            ], 400);
 
         } catch (\Exception $e) {
             \Log::error('[PlayController] Error checking timer', [

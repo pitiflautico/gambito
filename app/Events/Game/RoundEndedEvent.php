@@ -66,6 +66,23 @@ class RoundEndedEvent implements ShouldBroadcast
         // Añadir timing metadata si está presente
         if ($this->timing !== null) {
             $data['timing'] = $this->timing;
+
+            // Si el timing es de tipo countdown, incluir datos para TimingModule
+            if (($this->timing['type'] ?? null) === 'countdown' &&
+                ($this->timing['auto_next'] ?? false) === true) {
+
+                $data['timer_id'] = 'timer'; // Reutilizar mismo elemento que fases
+                $data['timer_name'] = 'round_ended_countdown_' . $this->roundNumber;
+                $data['server_time'] = now()->timestamp; // Timestamp actual para sincronización
+                $data['duration'] = $this->timing['delay'] ?? 3;
+                $data['event_class'] = \App\Events\Game\StartNewRoundEvent::class;
+
+                // Incluir los datos que StartNewRoundEvent necesita
+                $data['event_data'] = [
+                    'matchId' => $this->match->id,
+                    'roomCode' => $this->roomCode
+                ];
+            }
         }
 
         return $data;

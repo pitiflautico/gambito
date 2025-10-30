@@ -19,6 +19,7 @@
 class TimingModule {
     constructor() {
         this.activeCountdowns = new Map();
+        this.notifiedTimers = new Set(); // 🔒 RACE CONTROL: Track timers that already notified backend
         this.config = {
             countdownWarningThreshold: 3, // Segundos para cambiar a warning
             debug: false                   // Logging detallado (desactivado por defecto)
@@ -32,6 +33,12 @@ class TimingModule {
      * Suscribirse a eventos del juego para gestión automática de timers
      */
     subscribeToGameEvents() {
+        // ROUND STARTED: Limpiar notificaciones de timers anteriores (nueva ronda = timers nuevos)
+        window.addEventListener('game:round:started', (e) => {
+            this.log('Round started - clearing notified timers from previous round');
+            this.clearNotifiedTimers();
+        });
+
         // ROUND ENDED: Cancelar timers de fase/juego (NO el countdown de siguiente ronda)
         window.addEventListener('game:round:ended', (e) => {
             this.log('Round ended - cancelling game/phase timers');
@@ -153,8 +160,16 @@ class TimingModule {
      * @param {string} roomCode - Código de la sala
      */
     autoProcessEvent(event, roomCode) {
+        console.log('🔍 [TimingModule] autoProcessEvent called', {
+            has_timer_id: !!event.timer_id,
+            has_server_time: !!event.server_time,
+            has_duration: !!event.duration,
+            event
+        });
+
         // Detectar si el evento tiene datos de timer
         if (!event.timer_id || !event.server_time || !event.duration) {
+            console.log('⚠️ [TimingModule] Event does not have timer data, skipping');
             return; // No es un evento con timer
         }
 
@@ -165,9 +180,25 @@ class TimingModule {
             server_time: event.server_time
         });
 
-        const timerElement = document.getElementById(event.timer_id);
+        // Buscar elemento timer - priorizar popup-timer si existe y está visible
+        let timerElement = document.getElementById('popup-timer');
+        if (timerElement) {
+            const popup = document.getElementById('round-end-popup');
+            const isPopupVisible = popup && popup.style.display !== 'none';
+
+            if (!isPopupVisible) {
+                // Popup no visible, usar timer normal
+                timerElement = document.getElementById(event.timer_id);
+            } else {
+                console.log('⏱️ [TimingModule] Using popup-timer element');
+            }
+        } else {
+            // No hay popup-timer, usar el ID del evento
+            timerElement = document.getElementById(event.timer_id);
+        }
+
         if (!timerElement) {
-            this.log(`Timer element not found: #${event.timer_id}`);
+            this.log(`Timer element not found: #${event.timer_id} or #popup-timer`);
             return;
         }
 
@@ -187,13 +218,16 @@ class TimingModule {
 
         // Callback cuando el timer expira: notificar al backend con race control
         const onExpiredCallback = () => {
+            // Priorizar event_data genérico, luego phase_data (legacy)
+            const eventData = event.event_data || event.phase_data;
+
             console.log('⏰ [TimingModule] Timer expirado, notificando al backend', {
                 timer_name: timerName,
                 room_code: roomCode,
                 event_class: event.event_class,
-                phase_data: event.phase_data
+                event_data: eventData
             });
-            this.notifyTimerExpired(timerName, roomCode, event.event_class, event.phase_data);
+            this.notifyTimerExpired(timerName, roomCode, event.event_class, eventData);
         };
 
         // Iniciar countdown visual sincronizado con callback
@@ -223,7 +257,31 @@ class TimingModule {
             return;
         }
 
+        // 🔒 RACE CONTROL: Prevenir notificaciones duplicadas del mismo timer
+        if (this.notifiedTimers.has(timerName)) {
+            console.warn('⚠️ [TimingModule] Timer already notified, skipping duplicate', {
+                timer_name: timerName,
+                room_code: roomCode
+            });
+            return;
+        }
+
+        // Marcar como notificado ANTES de hacer la llamada (fail-fast)
+        this.notifiedTimers.add(timerName);
+
+        const frontendCallId = `frontend_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+        console.warn('🔥 [TimingModule] FRONTEND CALLING API', {
+            frontend_call_id: frontendCallId,
+            timer_name: timerName,
+            room_code: roomCode,
+            event_class: eventClass,
+            event_data: eventData,
+            timestamp: new Date().toISOString()
+        });
+
         this.log(`⏰ Notifying backend: timer expired`, {
+            frontend_call_id: frontendCallId,
             timer_name: timerName,
             room_code: roomCode,
             event_class: eventClass,
@@ -232,7 +290,8 @@ class TimingModule {
 
         try {
             const payload = {
-                timer_name: timerName
+                timer_name: timerName,
+                frontend_call_id: frontendCallId
             };
 
             // Incluir event_class y event_data si están disponibles
@@ -285,6 +344,10 @@ class TimingModule {
         if (this.activeCountdowns.has(name)) {
             this.cancelCountdown(name);
         }
+
+        // 🔥 CLEANUP: Limpiar notificación anterior con el mismo nombre
+        // Esto permite re-usar nombres de timer (ej: "phase1" en cada ronda)
+        this.notifiedTimers.delete(name);
 
         // Timestamps en milisegundos
         const startTime = serverTime * 1000;
@@ -531,7 +594,19 @@ class TimingModule {
         }
 
         this.activeCountdowns.delete(name);
+        // 🔥 CLEANUP: También eliminar del Set de notificados para permitir re-uso del nombre
+        this.notifiedTimers.delete(name);
         this.log(`Countdown ${name} cancelled`);
+    }
+
+    /**
+     * Limpiar todos los timers notificados
+     * Usado al empezar una nueva ronda para permitir re-usar nombres de timers
+     */
+    clearNotifiedTimers() {
+        const count = this.notifiedTimers.size;
+        this.notifiedTimers.clear();
+        this.log(`Cleared ${count} notified timers`);
     }
 
     /**

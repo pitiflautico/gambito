@@ -305,11 +305,11 @@ class MockupEngine extends BaseGameEngine
         $scores = $scoreManager->getScores();
         $results = [
             'actions' => $allActions,
-            'round_scores' => $scores,
         ];
 
         // Completar ronda (esto emite RoundEndedEvent y maneja timing)
-        $this->completeRound($match, $results);
+        // Los scores se pasan como segundo parámetro para que aparezcan separados en el evento
+        $this->completeRound($match, $results, $scores);
 
         Log::info("[Mockup] Round ended successfully");
     }
