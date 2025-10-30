@@ -1,6 +1,7 @@
 <?php
 
 // use App\Http\Controllers\GameController;
+use App\Http\Controllers\HealthController;
 use App\Http\Controllers\PlayController;
 use App\Http\Controllers\RoomController;
 use App\Http\Controllers\TeamController;
@@ -16,6 +17,9 @@ use Illuminate\Support\Facades\Route;
 | games/{slug}/routes.php por el GameServiceProvider.
 |
 */
+
+// Health Check (público, sin autenticación)
+Route::get('/health', [HealthController::class, 'index'])->name('api.health');
 
 // API de Juegos
 // Route::prefix('games')->name('api.games.')->group(function () {

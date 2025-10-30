@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\Game\PerformActionRequest;
 use App\Models\Room;
 use App\Services\Core\PlayerSessionService;
 use App\Services\Core\RoomService;
@@ -311,15 +312,12 @@ class PlayController extends Controller
     /**
      * API: Procesar una acción del juego.
      */
-    public function apiProcessAction(Request $request, string $code)
+    public function apiProcessAction(PerformActionRequest $request, string $code)
     {
         $code = strtoupper($code);
-        
-        // 1. Validar request
-        $validated = $request->validate([
-            'action' => 'required|string',
-            'data' => 'sometimes|array',
-        ]);
+
+        // 1. Validar request (usando FormRequest)
+        $validated = $request->validated();
 
         // 2. Buscar sala usando RoomService (sin consultas directas)
         $room = $this->roomService->findRoomByCode($code);
@@ -333,9 +331,33 @@ class PlayController extends Controller
 
         // 3. Verificar que la sala esté en juego
         if ($room->status !== Room::STATUS_PLAYING || !$room->match) {
+            \Log::warning('[PlayController] Action rejected - room not playing', [
+                'room_code' => $code,
+                'room_status' => $room->status,
+                'has_match' => !empty($room->match)
+            ]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'La sala no está en juego',
+            ], 400);
+        }
+
+        $match = $room->match;
+
+        // 3.3 - Validar que el match esté activo (in_progress)
+        if (!$match->isInProgress()) {
+            \Log::warning('[PlayController] Action rejected - match not active', [
+                'room_code' => $code,
+                'match_id' => $match->id,
+                'started_at' => $match->started_at,
+                'finished_at' => $match->finished_at
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Match not active',
+                'message' => 'La partida no está activa',
             ], 400);
         }
 
@@ -343,19 +365,46 @@ class PlayController extends Controller
         $userId = Auth::id();
 
         if (!$userId) {
+            \Log::warning('[PlayController] Action rejected - not authenticated', [
+                'room_code' => $code
+            ]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'No estás autenticado',
             ], 401);
         }
 
-        $match = $room->match;
         $player = $match->players->firstWhere('user_id', $userId);
 
+        // 3.4 - Validar que el jugador exista en el match y no esté desconectado
         if (!$player) {
+            \Log::warning('[PlayController] Action rejected - player not in match', [
+                'room_code' => $code,
+                'user_id' => $userId,
+                'match_id' => $match->id
+            ]);
+
             return response()->json([
                 'success' => false,
-                'message' => 'No estás registrado en esta sala',
+                'error' => 'Player not in match',
+                'message' => 'No estás registrado en esta partida',
+            ], 403);
+        }
+
+        // Verificar que el jugador no esté desconectado
+        if (isset($match->game_state['disconnected_players']) &&
+            in_array($player->id, $match->game_state['disconnected_players'])) {
+            \Log::warning('[PlayController] Action rejected - player disconnected', [
+                'room_code' => $code,
+                'player_id' => $player->id,
+                'match_id' => $match->id
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Player disconnected',
+                'message' => 'Estás desconectado de la partida',
             ], 403);
         }
 

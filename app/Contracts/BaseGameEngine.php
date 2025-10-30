@@ -57,6 +57,20 @@ use Illuminate\Support\Facades\Log;
 abstract class BaseGameEngine implements GameEngineInterface
 {
     // ========================================================================
+    // PROPIEDADES
+    // ========================================================================
+
+    /**
+     * Snapshot del game_state para rollback en caso de error.
+     *
+     * Almacena una copia del game_state antes de operaciones críticas
+     * para permitir rollback si algo sale mal.
+     *
+     * @var array|null
+     */
+    protected ?array $gameStateSnapshot = null;
+
+    // ========================================================================
     // MÉTODOS ABSTRACTOS: Cada juego debe implementar su lógica específica
     // ========================================================================
 
@@ -306,25 +320,26 @@ abstract class BaseGameEngine implements GameEngineInterface
      */
     public function startGame(GameMatch $match): void
     {
-        Log::info("[{$this->getGameSlug()}] Starting game (resetting modules + calling onGameStart)", [
-            'match_id' => $match->id
-        ]);
+        $playerIds = $match->players->pluck('id')->toArray();
+        $roundManager = $this->isModuleEnabled($match, 'round_system')
+            ? $this->getRoundManager($match)
+            : null;
+
+        Log::info("[{$this->getGameSlug()}] ===== PARTIDA INICIADA ===== | match_id: {$match->id} | players: " . count($playerIds) . " | rounds: " . ($roundManager ? $roundManager->getTotalRounds() : 'N/A'));
 
         // 1. Resetear módulos automáticamente según config.json
         $this->resetModules($match);
 
-        Log::info("[{$this->getGameSlug()}] Modules reset complete", [
-            'match_id' => $match->id
-        ]);
+        Log::info("[{$this->getGameSlug()}] Modules reset complete | match_id: {$match->id}");
 
         // 2. Llamar al hook específico del juego
         // onGameStart() debe setear estado inicial y emitir la primera ronda
         $this->onGameStart($match);
 
-        Log::info("[{$this->getGameSlug()}] onGameStart() completed", [
-            'match_id' => $match->id,
-            'phase' => $match->game_state['phase'] ?? 'unknown'
-        ]);
+        // Refrescar match para obtener estado actualizado después de onGameStart()
+        $match->refresh();
+
+        Log::info("[{$this->getGameSlug()}] onGameStart() completed | match_id: {$match->id} | phase: " . ($match->game_state['phase'] ?? 'unknown'));
     }
 
     /**
@@ -359,12 +374,15 @@ abstract class BaseGameEngine implements GameEngineInterface
         $match->refresh();
 
         $currentRound = $match->game_state['round_system']['current_round'] ?? 1;
+        $roundManager = $this->isModuleEnabled($match, 'round_system')
+            ? $this->getRoundManager($match)
+            : null;
+        $totalRounds = $roundManager ? $roundManager->getTotalRounds() : 'N/A';
 
-        Log::info("[{$this->getGameSlug()}] Handling new round", [
-            'match_id' => $match->id,
-            'current_round' => $currentRound,
-            'advance_round' => $advanceRound
-        ]);
+        Log::info("[{$this->getGameSlug()}] Starting new round | round: {$currentRound}/{$totalRounds} | advance: " . ($advanceRound ? 'yes' : 'no') . " | match_id: {$match->id}");
+
+        // Tomar snapshot del game_state antes de modificar
+        $this->takeSnapshot($match);
 
         // 0. VERIFICAR SI EL JUEGO YA TERMINÓ (antes de avanzar)
         if ($this->isModuleEnabled($match, 'round_system') && $advanceRound) {
@@ -413,18 +431,52 @@ abstract class BaseGameEngine implements GameEngineInterface
         // Esto debe hacerse ANTES de onRoundStarting() para que los juegos ya tengan
         // los jugadores listos para la nueva ronda
         if ($this->isModuleEnabled($match, 'player_system')) {
-            $playerManager = $this->getPlayerManager($match, $this->scoreCalculator ?? null);
-            $playerManager->reset($match);  // Emite PlayersUnlockedEvent automáticamente
-            $this->savePlayerManager($match, $playerManager);
+            try {
+                $playerManager = $this->getPlayerManager($match, $this->scoreCalculator ?? null);
+                $playerManager->reset($match);  // Emite PlayersUnlockedEvent automáticamente
+                $this->savePlayerManager($match, $playerManager);
 
-            Log::info("[{$this->getGameSlug()}] PlayerManager reset - players unlocked", [
-                'match_id' => $match->id
-            ]);
+                Log::info("[{$this->getGameSlug()}] Players unlocked | players_unlocked: " . count($playerManager->getPlayerIds()) . " | match_id: {$match->id}");
+            } catch (\Exception $e) {
+                Log::error("[{$this->getGameSlug()}] Failed to reset PlayerManager", [
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
+                    'match_id' => $match->id
+                ]);
+
+                // Intentar rollback automático
+                if ($this->restoreSnapshot($match)) {
+                    Log::warning("[{$this->getGameSlug()}] Rolling back to snapshot | reason: player_reset_error");
+                } else {
+                    // Si no hay snapshot, intentar forzar estado limpio mínimo
+                    $gameState = $match->game_state;
+                    if (isset($gameState['player_system'])) {
+                        $gameState['player_system']['locks'] = [];
+                        $match->game_state = $gameState;
+                        $match->save();
+                        Log::info("[{$this->getGameSlug()}] Forced clean state for players");
+                    }
+                }
+
+                // Si no podemos resetear players, emitir evento de error
+                event(new \App\Events\Game\GameErrorEvent($match, 'Failed to reset players'));
+            }
         }
 
         // 3. HOOK: Permitir al juego preparar datos específicos (ej: cargar pregunta)
         // Este es un hook OPCIONAL, no todos los juegos necesitan usarlo
-        $this->onRoundStarting($match);
+        try {
+            $this->onRoundStarting($match);
+        } catch (\Exception $e) {
+            Log::error("[{$this->getGameSlug()}] onRoundStarting hook failed", [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'match_id' => $match->id
+            ]);
+
+            // Continuar con el flujo aunque el hook falle
+            // El juego decide si puede continuar sin datos del hook
+        }
 
         // 3.1. Iniciar timer de ronda automáticamente (si está configurado)
         // DELEGADO A ROUNDMANAGER: Los módulos gestionan sus propios timers
@@ -525,46 +577,63 @@ abstract class BaseGameEngine implements GameEngineInterface
     public function handlePhaseEnded(GameMatch $match, array $phaseConfig): void
     {
         $phaseName = $phaseConfig['name'] ?? 'unknown';
+        $currentRound = $match->game_state['round_system']['current_round'] ?? 'N/A';
 
-        \Log::info("🎬 [BaseGameEngine] handlePhaseEnded()", [
-            'phase' => $phaseName,
-            'match_id' => $match->id,
-            'engine' => get_class($this)
-        ]);
+        Log::info("[{$this->getGameSlug()}] FASE {$phaseName} ENDED | callback: handlePhaseEnded | round: {$currentRound} | match_id: {$match->id}");
 
-        // HOOK: Permitir que el engine local maneje el fin de fase
-        $shouldAutoAdvance = $this->onPhaseEnded($match, $phaseConfig);
+        try {
+            // HOOK: Permitir que el engine local maneje el fin de fase
+            $shouldAutoAdvance = $this->onPhaseEnded($match, $phaseConfig);
 
-        // Si el hook no maneja el avance, hacerlo automáticamente
-        if ($shouldAutoAdvance !== false) {
-            \Log::info("🔄 [BaseGameEngine] Auto-advancing to next phase", [
-                'phase' => $phaseName
-            ]);
+            // Si el hook no maneja el avance, hacerlo automáticamente
+            if ($shouldAutoAdvance !== false) {
+                Log::info("[{$this->getGameSlug()}] Auto-advancing to next phase from {$phaseName}");
 
-            // Obtener PhaseManager y avanzar
-            if ($this->isModuleEnabled($match, 'phase_system')) {
-                $roundManager = $this->getRoundManager($match);
-                $phaseManager = $roundManager->getTurnManager();
+                // Obtener PhaseManager y avanzar
+                if ($this->isModuleEnabled($match, 'phase_system')) {
+                    $roundManager = $this->getRoundManager($match);
+                    $phaseManager = $roundManager->getTurnManager();
 
-                if ($phaseManager && $phaseManager instanceof \App\Services\Modules\TurnSystem\PhaseManager) {
-                    $nextPhaseInfo = $phaseManager->nextPhase();
+                    if ($phaseManager && $phaseManager instanceof \App\Services\Modules\TurnSystem\PhaseManager) {
+                        // Tomar snapshot antes de avanzar fase
+                        $this->takeSnapshot($match);
 
-                    // Si el ciclo se completó, la ronda terminó
-                    if ($nextPhaseInfo['cycle_completed']) {
-                        \Log::info("🏁 [BaseGameEngine] Phase cycle completed - ending round", [
-                            'current_round' => $roundManager->getCurrentRound()
-                        ]);
+                        // ⚠️ CRÍTICO: setMatch() antes de nextPhase()
+                        $phaseManager->setMatch($match);
 
-                        // Finalizar ronda actual
-                        $this->endCurrentRound($match);
+                        $nextPhaseInfo = $phaseManager->nextPhase();
+                        $nextPhaseName = $nextPhaseInfo['next_phase'] ?? 'unknown';
+                        $cycleCompleted = $nextPhaseInfo['cycle_completed'] ?? false;
+
+                        Log::info("[{$this->getGameSlug()}] Phase transition | from: {$phaseName} | to: {$nextPhaseName} | cycle_completed: " . ($cycleCompleted ? 'true' : 'false'));
+
+                        // Si el ciclo se completó, la ronda terminó
+                        if ($cycleCompleted) {
+                            Log::info("[{$this->getGameSlug()}] Phase cycle completed - ending round | round: " . $roundManager->getCurrentRound());
+
+                            // Finalizar ronda actual
+                            $this->endCurrentRound($match);
+                        }
+
+                        // Guardar estado actualizado
+                        $this->saveRoundManager($match, $roundManager);
+                    } else {
+                        Log::warning("[{$this->getGameSlug()}] PhaseManager not available for auto-advance");
                     }
-
-                    // Guardar estado actualizado
-                    $this->saveRoundManager($match, $roundManager);
-                } else {
-                    \Log::warning("⚠️ [BaseGameEngine] PhaseManager not available for auto-advance");
                 }
             }
+        } catch (\Exception $e) {
+            Log::error("[{$this->getGameSlug()}] Phase callback failed", [
+                'callback' => 'handlePhaseEnded',
+                'phase' => $phaseName,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'match_id' => $match->id
+            ]);
+
+            // Forzar fin de ronda por error
+            $this->forceEndRound($match, reason: 'phase_error');
+            return;
         }
     }
 
@@ -735,52 +804,84 @@ abstract class BaseGameEngine implements GameEngineInterface
      */
     public function processAction(GameMatch $match, Player $player, string $action, array $data): array
     {
-        Log::info("[{$this->getGameSlug()}] Processing action", [
+        $gameState = $match->game_state;
+        $currentRound = $gameState['round_system']['current_round'] ?? 'N/A';
+        $currentPhase = $gameState['phase'] ?? 'unknown';
+
+        Log::info("[{$this->getGameSlug()}] Action received | player_id: {$player->id} | action: {$action} | round: {$currentRound} | phase: {$currentPhase} | state: " . json_encode([
             'match_id' => $match->id,
-            'player_id' => $player->id,
-            'action' => $action
-        ]);
+            'data_keys' => array_keys($data)
+        ]));
 
-        // 1. Procesar acción específica del juego
-        $data['action'] = $action;
-        $actionResult = $this->processRoundAction($match, $player, $data);
+        try {
+            // 1. Procesar acción específica del juego
+            $data['action'] = $action;
+            $actionResult = $this->processRoundAction($match, $player, $data);
 
-        // 2. Obtener RoundManager y detectar modo
-        $roundManager = $this->getRoundManager($match);
-        $turnMode = $roundManager->getTurnManager()->getMode();
+            // Log resultado
+            $success = $actionResult['success'] ?? false;
+            $pointsAwarded = $actionResult['points_awarded'] ?? 0;
+            $playerLocked = $actionResult['player_locked'] ?? false;
 
-        // 3. Obtener estrategia de finalización según modo
-        $strategy = $this->getEndRoundStrategy($turnMode);
+            Log::info("[{$this->getGameSlug()}] Action processed | player_id: {$player->id} | success: " . ($success ? 'true' : 'false') . " | points: {$pointsAwarded} | locked: " . ($playerLocked ? 'true' : 'false'));
 
-        // 4. Consultar a la estrategia si debe terminar
-        $roundStatus = $strategy->shouldEnd(
-            $match,
-            $actionResult,
-            $roundManager,
-            fn($match) => $this->getAllPlayerResults($match)
-        );
+            // 2. Obtener RoundManager y detectar modo
+            $roundManager = $this->getRoundManager($match);
+            $turnMode = $roundManager->getTurnManager()->getMode();
 
-        // 5. Actuar según decisión de la estrategia
-        if ($roundStatus['should_end']) {
-            Log::info("[{$this->getGameSlug()}] Round/Turn ending", [
-                'match_id' => $match->id,
-                'mode' => $turnMode,
-                'reason' => $roundStatus['reason'] ?? 'strategy_decided'
+            // 3. Obtener estrategia de finalización según modo
+            $strategy = $this->getEndRoundStrategy($turnMode);
+
+            // 4. Consultar a la estrategia si debe terminar
+            $roundStatus = $strategy->shouldEnd(
+                $match,
+                $actionResult,
+                $roundManager,
+                fn($match) => $this->getAllPlayerResults($match)
+            );
+
+            // 5. Actuar según decisión de la estrategia
+            if ($roundStatus['should_end']) {
+                Log::info("[{$this->getGameSlug()}] Round/Turn ending", [
+                    'match_id' => $match->id,
+                    'mode' => $turnMode,
+                    'reason' => $roundStatus['reason'] ?? 'strategy_decided'
+                ]);
+
+                // Finalizar ronda/turno actual
+                $this->endCurrentRound($match);
+
+                // NOTA: No programamos automáticamente la siguiente ronda aquí.
+                // Cada juego decide cómo avanzar (algunos usan delay en backend, otros en frontend).
+                // Los juegos pueden sobrescribir processAction para custom behavior.
+            }
+
+            // 6. Retornar resultado con información adicional
+            return array_merge($actionResult, [
+                'round_status' => $roundStatus,
+                'turn_mode' => $turnMode,
+            ]);
+        } catch (\Exception $e) {
+            Log::error("[{$this->getGameSlug()}] Action processing failed", [
+                'player_id' => $player->id,
+                'action' => $action,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'match_id' => $match->id
             ]);
 
-            // Finalizar ronda/turno actual
-            $this->endCurrentRound($match);
+            // Intentar rollback automático
+            if ($this->restoreSnapshot($match)) {
+                Log::warning("[{$this->getGameSlug()}] Rolling back to snapshot | reason: action_error | player_id: {$player->id} | action: {$action}");
+            }
 
-            // NOTA: No programamos automáticamente la siguiente ronda aquí.
-            // Cada juego decide cómo avanzar (algunos usan delay en backend, otros en frontend).
-            // Los juegos pueden sobrescribir processAction para custom behavior.
+            // NO crash del match, solo fallo de acción individual
+            return [
+                'success' => false,
+                'error' => 'Action processing failed: ' . $e->getMessage(),
+                'player_id' => $player->id
+            ];
         }
-
-        // 6. Retornar resultado con información adicional
-        return array_merge($actionResult, [
-            'round_status' => $roundStatus,
-            'turn_mode' => $turnMode,
-        ]);
     }
 
 
@@ -798,7 +899,9 @@ abstract class BaseGameEngine implements GameEngineInterface
      */
     public function endCurrentRound(GameMatch $match): void
     {
-        Log::info("[{$this->getGameSlug()}] Ending current round", ['match_id' => $match->id]);
+        $currentRound = $match->game_state['round_system']['current_round'] ?? 'N/A';
+
+        Log::info("[{$this->getGameSlug()}] Ending current round | round: {$currentRound} | match_id: {$match->id}");
 
         // 1. Obtener resultados del juego (cada juego implementa su propia lógica)
         $results = $this->getRoundResults($match);
@@ -806,10 +909,14 @@ abstract class BaseGameEngine implements GameEngineInterface
         // 2. Completar ronda (emitir eventos, avanzar, etc.)
         $this->completeRound($match, $results);
 
-        Log::info("[{$this->getGameSlug()}] Round ended", [
-            'match_id' => $match->id,
-            'winner_id' => $results['winner_id'] ?? null
-        ]);
+        // Refrescar match para obtener scores actualizados
+        $match->refresh();
+        $scores = $this->getScores($match->game_state);
+
+        Log::info("[{$this->getGameSlug()}] Round ended successfully | round: {$currentRound} | results: " . json_encode([
+            'winner_id' => $results['winner_id'] ?? null,
+            'match_id' => $match->id
+        ]) . " | scores: " . json_encode($scores));
     }
 
     /**
@@ -825,6 +932,115 @@ abstract class BaseGameEngine implements GameEngineInterface
      * @return array Resultados de la ronda
      */
     abstract protected function getRoundResults(GameMatch $match): array;
+
+    /**
+     * Forzar fin de ronda por error.
+     *
+     * Este método se usa cuando ocurre un error crítico y necesitamos
+     * terminar la ronda de forma controlada.
+     *
+     * @param GameMatch $match
+     * @param string $reason Razón del fin forzado
+     * @return void
+     */
+    protected function forceEndRound(GameMatch $match, string $reason): void
+    {
+        $currentRound = $match->game_state['round_system']['current_round'] ?? 'N/A';
+
+        Log::warning("[{$this->getGameSlug()}] Force ending round | reason: {$reason} | round: {$currentRound} | match_id: {$match->id}");
+
+        try {
+            // Calcular scores actuales
+            $scores = $this->getScores($match->game_state);
+
+            // Crear resultados con información del error
+            $results = [
+                'forced' => true,
+                'reason' => $reason,
+                'winner_id' => null, // Sin ganador en fin forzado
+                'scores' => $scores,
+                'timestamp' => now()->toDateTimeString()
+            ];
+
+            // Completar ronda normalmente con flag de error
+            $this->completeRound($match, $results);
+
+            Log::info("[{$this->getGameSlug()}] Round force-ended successfully | reason: {$reason}");
+        } catch (\Exception $e) {
+            Log::error("[{$this->getGameSlug()}] Failed to force end round", [
+                'reason' => $reason,
+                'error' => $e->getMessage(),
+                'match_id' => $match->id
+            ]);
+
+            // Último recurso: marcar partida como error y finalizar
+            $match->status = 'error';
+            $match->save();
+
+            event(new \App\Events\Game\GameErrorEvent($match, "Critical error: {$reason}"));
+        }
+    }
+
+    /**
+     * Tomar snapshot del game_state actual para posible rollback.
+     *
+     * Guarda una copia profunda del game_state antes de operaciones críticas
+     * para permitir restaurarlo en caso de error.
+     *
+     * @param GameMatch $match
+     * @return void
+     */
+    protected function takeSnapshot(GameMatch $match): void
+    {
+        // Hacer copia profunda del game_state usando json encode/decode
+        $this->gameStateSnapshot = json_decode(json_encode($match->game_state), true);
+
+        // Guardar también en Redis para rollback manual (TTL: 1 hora)
+        try {
+            $snapshotKey = "game:snapshot:{$match->id}";
+            $snapshotData = [
+                'game_state' => $this->gameStateSnapshot,
+                'timestamp' => now()->toDateTimeString(),
+                'round' => $match->game_state['round_system']['current_round'] ?? 'N/A',
+            ];
+            \Illuminate\Support\Facades\Redis::setex($snapshotKey, 3600, json_encode($snapshotData));
+        } catch (\Exception $e) {
+            Log::warning("[{$this->getGameSlug()}] Failed to persist snapshot to Redis", [
+                'error' => $e->getMessage(),
+                'match_id' => $match->id
+            ]);
+        }
+
+        Log::info("[{$this->getGameSlug()}] Snapshot taken | match_id: {$match->id} | round: " . ($match->game_state['round_system']['current_round'] ?? 'N/A'));
+    }
+
+    /**
+     * Restaurar game_state desde el snapshot.
+     *
+     * Restaura el game_state desde el último snapshot tomado.
+     * Se usa cuando una operación falla y necesitamos revertir cambios.
+     *
+     * @param GameMatch $match
+     * @return bool True si se restauró, false si no había snapshot
+     */
+    protected function restoreSnapshot(GameMatch $match): bool
+    {
+        if ($this->gameStateSnapshot === null) {
+            Log::warning("[{$this->getGameSlug()}] Cannot restore snapshot - no snapshot available | match_id: {$match->id}");
+            return false;
+        }
+
+        // Restaurar desde snapshot
+        $match->game_state = $this->gameStateSnapshot;
+        $match->save();
+
+        Log::warning("[{$this->getGameSlug()}] Snapshot restored | match_id: {$match->id} | round: " . ($match->game_state['round_system']['current_round'] ?? 'N/A'));
+
+        // Limpiar snapshot después de restaurar
+        $this->gameStateSnapshot = null;
+
+        return true;
+    }
 
     /**
      * Completar la ronda actual y avanzar a la siguiente.
@@ -925,11 +1141,11 @@ abstract class BaseGameEngine implements GameEngineInterface
         $modules = $gameConfig['modules'] ?? [];
         $playerIds = $match->players->pluck('id')->toArray();
 
-        Log::info("Initializing modules for game", [
-            'match_id' => $match->id,
-            'game' => $gameSlug,
-            'enabled_modules' => array_keys(array_filter($modules, fn($m) => $m['enabled'] ?? false))
-        ]);
+        Log::info("[{$this->getGameSlug()}] Initializing modules | match_id: {$match->id} | game: {$gameSlug} | config: " . json_encode([
+            'enabled_modules' => array_keys(array_filter($modules, fn($m) => $m['enabled'] ?? false)),
+            'player_count' => count($playerIds),
+            'overrides' => !empty($moduleOverrides) ? array_keys($moduleOverrides) : []
+        ]));
 
         $gameState = [];
 
@@ -1016,10 +1232,12 @@ abstract class BaseGameEngine implements GameEngineInterface
         $match->game_state = array_merge($match->game_state ?? [], $gameState);
         $match->save();
 
-        Log::info("Modules initialized successfully", [
-            'match_id' => $match->id,
-            'game' => $gameSlug
-        ]);
+        Log::info("[{$this->getGameSlug()}] Modules initialized successfully | match_id: {$match->id} | modules: " . json_encode([
+            'timer_system' => isset($timerService),
+            'round_system' => isset($roundManager),
+            'scoring_system' => isset($scoreManager),
+            'teams_system' => ($modules['teams_system']['enabled'] ?? false)
+        ]));
     }
 
     /**
@@ -2106,8 +2324,6 @@ abstract class BaseGameEngine implements GameEngineInterface
             'ranking' => $ranking,
             'winner' => $winner,
         ]);
-
-        $match->save();
 
         // 5. Emitir evento de juego terminado
         event(new \App\Events\Game\GameEndedEvent(
