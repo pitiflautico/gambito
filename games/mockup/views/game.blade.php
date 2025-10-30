@@ -61,11 +61,11 @@
                 </div>
             </div>
 
-            <!-- Mensaje de bloqueado -->
-            <div id="locked-message" class="bg-red-900/30 border-2 border-red-500 rounded-lg p-6 mb-4 text-center" style="display: none;">
-                <p class="text-3xl mb-2">🔒</p>
-                <p class="text-xl font-bold text-red-400">Bloqueado</p>
-                <p class="text-sm text-gray-400 mt-2">Has fallado la pregunta. Espera a que termine la ronda.</p>
+            <!-- Mensaje de votado -->
+            <div id="locked-message" class="bg-blue-900/30 border-2 border-blue-500 rounded-lg p-6 mb-4 text-center" style="display: none;">
+                <p class="text-3xl mb-2">✅</p>
+                <p class="text-xl font-bold text-blue-400">Ya has votado</p>
+                <p class="text-sm text-gray-400 mt-2">Esperando a que los demás jugadores voten...</p>
             </div>
 
             <!-- Mensaje de Fase 3 (usando evento genérico) -->
@@ -118,6 +118,7 @@
             gameSlug: 'mockup',
             players: [],
             scores: {},
+            gameState: @json($match->game_state ?? null),
             eventConfig: @json($eventConfig ?? null),
         };
 

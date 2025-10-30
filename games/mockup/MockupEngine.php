@@ -280,8 +280,8 @@ class MockupEngine extends BaseGameEngine
                 'player_id' => $player->id,
             ]);
 
-            // Bloquear jugador usando PlayerManager
-            $playerManager->lockPlayer($player->id, $match);
+            // Bloquear jugador usando PlayerManager (con Player para emitir evento)
+            $playerManager->lockPlayer($player->id, $match, $player);
             $this->savePlayerManager($match, $playerManager);
 
             // Guardar acción (necesario obtener, modificar, reasignar para JSON cast)

@@ -52,6 +52,10 @@
         "name": ".game.phase.ended",
         "handler": "handlePhaseEnded"
       },
+      "PlayerLockedEvent": {
+        "name": ".game.player.locked",
+        "handler": "handlePlayerLocked"
+      },
       "PlayersUnlockedEvent": {
         "name": ".players.unlocked",
         "handler": "handlePlayersUnlocked"
@@ -86,7 +90,7 @@
         },
         {
           "name": "phase2",
-          "duration": 6,
+          "duration": 12,
           "on_start": "App\\Events\\Mockup\\Phase2StartedEvent",
           "on_end": "App\\Events\\Game\\PhaseEndedEvent",
           "on_end_callback": "handlePhase2Ended"

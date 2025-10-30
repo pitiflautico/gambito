@@ -4,7 +4,7 @@ namespace App\Events\Game;
 
 use App\Models\GameMatch;
 use App\Models\Player;
-use Illuminate\Broadcasting\Channel;
+use Illuminate\Broadcasting\PresenceChannel;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
 use Illuminate\Foundation\Events\Dispatchable;
@@ -36,9 +36,9 @@ class PlayerLockedEvent implements ShouldBroadcast
         $this->additionalData = $additionalData;
     }
 
-    public function broadcastOn(): Channel
+    public function broadcastOn(): PresenceChannel
     {
-        return new Channel("room.{$this->roomCode}");
+        return new PresenceChannel("room.{$this->roomCode}");
     }
 
     public function broadcastAs(): string

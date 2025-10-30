@@ -423,7 +423,18 @@ class PlayerManager
 
         // Emitir evento PlayerLockedEvent si hay match
         if ($match && $player) {
+            \Log::info('🔒 [PlayerManager] Emitting PlayerLockedEvent', [
+                'player_id' => $playerId,
+                'player_name' => $player->name,
+                'room_code' => $match->room->code,
+            ]);
             event(new \App\Events\Game\PlayerLockedEvent($match, $player, $metadata));
+        } else {
+            \Log::warning('⚠️ [PlayerManager] Cannot emit PlayerLockedEvent - missing match or player', [
+                'player_id' => $playerId,
+                'has_match' => $match !== null,
+                'has_player' => $player !== null,
+            ]);
         }
 
         return [

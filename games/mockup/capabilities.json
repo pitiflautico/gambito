@@ -60,6 +60,16 @@
         "name": "game.phase.started",
         "description": "Sistema: Fase genérica iniciada",
         "handler": "handlePhaseStarted"
+      },
+      "PlayerLockedEvent": {
+        "name": "game.player.locked",
+        "description": "Sistema: Jugador bloqueado",
+        "handler": "handlePlayerLocked"
+      },
+      "PlayersUnlockedEvent": {
+        "name": "players.unlocked",
+        "description": "Sistema: Jugadores desbloqueados",
+        "handler": "handlePlayersUnlocked"
       }
     }
   }

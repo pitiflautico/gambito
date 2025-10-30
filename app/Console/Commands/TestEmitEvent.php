@@ -5,6 +5,8 @@ namespace App\Console\Commands;
 use Illuminate\Console\Command;
 use App\Models\Room;
 use App\Events\Game\GameStartedEvent;
+use App\Events\Game\PlayerLockedEvent;
+use App\Events\Game\PlayersUnlockedEvent;
 use App\Events\Mockup\Phase1StartedEvent;
 use App\Events\Mockup\Phase1EndedEvent;
 
@@ -62,6 +64,19 @@ class TestEmitEvent extends Command
                 $this->info("🏁 Emitting Phase1EndedEvent for room {$match->room->code}");
                 $phaseData = ['name' => 'phase1'];
                 event(new Phase1EndedEvent($match, $phaseData));
+            },
+            'PlayerLocked' => function() use ($match) {
+                $player = $match->players->first();
+                if (!$player) {
+                    $this->error("❌ No players found in match");
+                    return;
+                }
+                $this->info("🔒 Emitting PlayerLockedEvent for room {$match->room->code} and player {$player->name}");
+                event(new PlayerLockedEvent($match, $player, []));
+            },
+            'PlayersUnlocked' => function() use ($match) {
+                $this->info("🔓 Emitting PlayersUnlockedEvent for room {$match->room->code}");
+                event(new PlayersUnlockedEvent($match, []));
             },
         ];
 

@@ -108,8 +108,8 @@ export class BaseGameClient {
             handlePlayerDisconnected: (event) => this.handlePlayerDisconnected(event),
             handlePlayerReconnected: (event) => this.handlePlayerReconnected(event),
             handlePlayerScoreUpdated: (event) => this.handlePlayerScoreUpdated(event),
-            handlePlayerLocked: (event) => this.handlePlayerLocked(event),
-            handlePlayersUnlocked: (event) => this.handlePlayersUnlocked(event),
+            handlePlayerLocked: (event) => this.onPlayerLocked(event),
+            handlePlayersUnlocked: (event) => this.onPlayerUnlocked(event),
             handlePhaseStarted: (event) => this.handlePhaseStarted(event),
         };
 
@@ -390,7 +390,7 @@ export class BaseGameClient {
      * Se ejecuta cuando un jugador es bloqueado (no puede actuar más en la ronda).
      * Los juegos específicos deben sobrescribir este método para manejar el bloqueo.
      */
-    handlePlayerLocked(event) {
+    onPlayerLocked(event) {
         // Stub method - los juegos específicos lo sobrescriben
         // Por defecto no hace nada
     }
@@ -401,7 +401,7 @@ export class BaseGameClient {
      * Se ejecuta cuando los jugadores son desbloqueados (nueva ronda).
      * Los juegos específicos deben sobrescribir este método para manejar el desbloqueo.
      */
-    handlePlayersUnlocked(event) {
+    onPlayerUnlocked(event) {
         // Stub method - los juegos específicos lo sobrescriben
         // Por defecto no hace nada
     }
@@ -1068,10 +1068,13 @@ export class BaseGameClient {
         if (rankingsList && event.ranking) {
             rankingsList.innerHTML = '';
 
-            event.ranking.forEach((playerId, index) => {
+            event.ranking.forEach((rankingEntry, index) => {
+                // Soportar tanto ranking como array de objetos {player_id, score} o array de IDs
+                const playerId = rankingEntry.player_id || rankingEntry;
+                const score = rankingEntry.score !== undefined ? rankingEntry.score : (event.scores ? (event.scores[playerId] || 0) : 0);
+
                 const player = this.getPlayer(playerId);
                 const playerName = player ? player.name : `Player ${playerId}`;
-                const score = event.scores ? (event.scores[playerId] || 0) : 0;
 
                 // Clase de medalla para top 3
                 let medal = '';

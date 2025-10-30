@@ -154,12 +154,15 @@ export class MockupGameClient extends BaseGameClient {
                 // Llamar al handler del padre primero
                 super.handleDomLoaded(event);
                 this.setupTestControls(); // Configurar botones de test
+
+                // Restaurar estado de jugador bloqueado al cargar/reconectar
+                this.restorePlayerLockedState();
             },
             handlePlayerLocked: (event) => {
-                this.handlePlayerLocked(event);
+                this.onPlayerLocked(event);
             },
             handlePlayersUnlocked: (event) => {
-                this.handlePlayersUnlocked(event);
+                this.onPlayerUnlocked(event);
             },
             handleGameStarted: (event) => {
                 console.log('🎮 [Mockup] JUEGO INICIADO', event);
@@ -176,6 +179,9 @@ export class MockupGameClient extends BaseGameClient {
                 console.log('🎯 [Mockup] FASE 2 INICIADA - Mostrando botones de respuesta', event);
                 // Mostrar botones en fase 2
                 this.showAnswerButtons();
+
+                // Si el jugador ya votó, restaurar estado de bloqueado
+                this.restorePlayerLockedState();
             },
             handlePhaseStarted: (event) => {
                 console.log('🎬 [Mockup] FASE INICIADA (GENERIC HANDLER)', event);
@@ -297,9 +303,22 @@ export class MockupGameClient extends BaseGameClient {
     }
 
     /**
+     * Override: Handler de reconexión de jugador
+     */
+    handlePlayerReconnected(event) {
+        console.log('🔌 [Mockup] Player reconnected event:', event);
+
+        // Llamar al handler del padre
+        super.handlePlayerReconnected(event);
+
+        // Restaurar estado de jugador bloqueado
+        this.restorePlayerLockedState();
+    }
+
+    /**
      * Handler cuando un jugador es bloqueado
      */
-    handlePlayerLocked(event) {
+    onPlayerLocked(event) {
         console.log('🔒 [Mockup] Player locked event:', event);
 
         // Solo procesar si es el jugador actual
@@ -326,7 +345,7 @@ export class MockupGameClient extends BaseGameClient {
     /**
      * Handler cuando los jugadores son desbloqueados (nueva ronda)
      */
-    handlePlayersUnlocked(event) {
+    onPlayerUnlocked(event) {
         console.log('🔓 [Mockup] Players unlocked event:', event);
 
         // Restaurar botones
@@ -342,6 +361,43 @@ export class MockupGameClient extends BaseGameClient {
         }
 
         console.log('🔓 [Mockup] Players unlocked - buttons restored');
+    }
+
+    /**
+     * Restaurar estado de jugador bloqueado al reconectar
+     */
+    restorePlayerLockedState() {
+        console.log('🔄 [Mockup] Checking if need to restore locked state...', {
+            hasGameState: !!this.gameState,
+            gameState: this.gameState,
+            playerId: this.config.playerId
+        });
+
+        // Verificar si tenemos gameState
+        if (!this.gameState || !this.gameState.player_system) {
+            console.log('⚠️ [Mockup] No player_system in gameState, skipping restore');
+            return;
+        }
+
+        const playerSystem = this.gameState.player_system;
+        const lockedPlayers = playerSystem.locked_players || [];
+
+        console.log('🔍 [Mockup] Locked players:', lockedPlayers);
+
+        // Verificar si el jugador actual está bloqueado
+        const isLocked = lockedPlayers.includes(this.config.playerId);
+
+        if (isLocked) {
+            console.log('🔄 [Mockup] Restoring locked state for player', this.config.playerId);
+
+            // Simular evento PlayerLockedEvent para restaurar UI
+            this.onPlayerLocked({
+                player_id: this.config.playerId,
+                player_name: 'Current Player'
+            });
+        } else {
+            console.log('✅ [Mockup] Player is not locked, no need to restore');
+        }
     }
 }
 
