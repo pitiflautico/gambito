@@ -57,7 +57,7 @@ class MockupEngine extends BaseGameEngine
                 'timing' => $gameConfig['timing'] ?? null,
                 'modules' => $gameConfig['modules'] ?? [],
             ],
-            'phase' => 'waiting',
+            'phase' => 'starting', // Fase inicial - esperando a que todos los jugadores carguen
             'actions' => [], // Acciones de cada ronda
         ];
 
@@ -73,12 +73,13 @@ class MockupEngine extends BaseGameEngine
             ]
         ]);
 
-        // Inicializar PlayerStateManager
+        // Inicializar PlayerManager (sin scoreCalculator porque usamos ScoreManager directamente)
         $playerIds = $match->players->pluck('id')->toArray();
-        $playerState = new \App\Services\Modules\PlayerStateSystem\PlayerStateManager(
-            playerIds: $playerIds
+        $playerManager = new \App\Services\Modules\PlayerSystem\PlayerManager(
+            playerIds: $playerIds,
+            scoreCalculator: null
         );
-        $this->savePlayerStateManager($match, $playerState);
+        $this->savePlayerManager($match, $playerManager);
 
         Log::info("[Mockup] Initialized successfully", [
             'match_id' => $match->id,
@@ -191,10 +192,10 @@ class MockupEngine extends BaseGameEngine
             'round' => $currentRound,
         ]);
 
-        // Desbloquear todos los jugadores para la nueva ronda
-        $playerState = $this->getPlayerStateManager($match);
-        $playerState->reset();
-        $this->savePlayerStateManager($match, $playerState);
+        // Desbloquear todos los jugadores para la nueva ronda usando PlayerManager
+        $playerManager = $this->getPlayerManager($match);
+        $playerManager->unlockAllPlayers($match);
+        $this->savePlayerManager($match, $playerManager);
 
         // Emitir evento de jugadores desbloqueados
         event(new \App\Events\Game\PlayersUnlockedEvent(
@@ -203,11 +204,13 @@ class MockupEngine extends BaseGameEngine
         ));
 
         // Limpiar acciones de la ronda anterior
-        $match->game_state['actions'] = [];
-        $match->game_state['phase'] = 'playing';
+        $gameState = $match->game_state;
+        $gameState['actions'] = [];
+        $gameState['phase'] = 'playing';
+        $match->game_state = $gameState;
         $match->save();
 
-        Log::info("[Mockup] Round started - players unlocked");
+        Log::info("[Mockup] Round started - players unlocked via PlayerManager");
     }
 
     /**
@@ -224,16 +227,19 @@ class MockupEngine extends BaseGameEngine
      */
     protected function processRoundAction(GameMatch $match, Player $player, array $data): array
     {
+        $action = $data['action'] ?? 'default_action';
+
         Log::info("[Mockup] Processing action", [
             'match_id' => $match->id,
             'player_id' => $player->id,
-            'action' => $data,
+            'action' => $action,
         ]);
 
-        // Validar que el jugador no esté bloqueado
-        $playerState = $this->getPlayerStateManager($match);
+        // Obtener PlayerManager
+        $playerManager = $this->getPlayerManager($match);
 
-        if ($playerState->isPlayerLocked($player->id)) {
+        // Validar que el jugador no esté bloqueado
+        if ($playerManager->isPlayerLocked($player->id)) {
             return [
                 'success' => false,
                 'message' => 'Ya realizaste tu acción en esta ronda',
@@ -241,37 +247,97 @@ class MockupEngine extends BaseGameEngine
             ];
         }
 
-        // Procesar acción (mockup: simplemente registrarla)
+        // Handler para GOOD ANSWER - finaliza ronda inmediatamente y da puntos
+        if ($action === 'good_answer') {
+            Log::info("✅ [Mockup] Good Answer - awarding points and ending round", [
+                'player_id' => $player->id,
+            ]);
+
+            // Otorgar 10 puntos al jugador
+            $scoreManager = $this->getScoreManager($match);
+            $scoreManager->awardPoints($player->id, 'good_answer', ['points' => 10]);
+            $this->saveScoreManager($match, $scoreManager);
+
+            // Guardar acción
+            $gameState = $match->game_state;
+            $gameState['actions'][$player->id] = 'good_answer';
+            $match->game_state = $gameState;
+            $match->save();
+
+            // Retornar forzando el fin de ronda
+            return [
+                'success' => true,
+                'player_id' => $player->id,
+                'data' => ['action' => 'good_answer', 'points_awarded' => 10],
+                'force_end' => true,
+                'end_reason' => 'good_answer',
+            ];
+        }
+
+        // Handler para BAD ANSWER - bloquea al jugador
+        if ($action === 'bad_answer') {
+            Log::info("❌ [Mockup] Bad Answer - locking player", [
+                'player_id' => $player->id,
+            ]);
+
+            // Bloquear jugador usando PlayerManager
+            $playerManager->lockPlayer($player->id, $match);
+            $this->savePlayerManager($match, $playerManager);
+
+            // Guardar acción (necesario obtener, modificar, reasignar para JSON cast)
+            $gameState = $match->game_state;
+            $gameState['actions'][$player->id] = 'bad_answer';
+            $match->game_state = $gameState;
+            $match->save();
+
+            // Verificar si todos los jugadores están bloqueados
+            $allLocked = $playerManager->areAllPlayersLocked();
+
+            Log::info("[Mockup] Player locked", [
+                'player_id' => $player->id,
+                'all_players_locked' => $allLocked,
+            ]);
+
+            // Si todos los jugadores están bloqueados, forzar fin de ronda
+            if ($allLocked) {
+                Log::info("🔒 [Mockup] All players locked - forcing round end");
+
+                return [
+                    'success' => true,
+                    'player_id' => $player->id,
+                    'data' => ['action' => 'bad_answer'],
+                    'force_end' => true,
+                    'end_reason' => 'all_players_locked',
+                ];
+            }
+
+            return [
+                'success' => true,
+                'player_id' => $player->id,
+                'data' => ['action' => 'bad_answer'],
+                'force_end' => false,
+            ];
+        }
+
+        // Acción por defecto (para compatibilidad)
         $actionValue = $data['value'] ?? 'default_action';
 
-        // Registrar acción
-        $playerState->setPlayerAction($player->id, [
-            'type' => 'mockup_action',
-            'value' => $actionValue,
-            'timestamp' => now()->toDateTimeString(),
-        ]);
-
-        // Bloquear jugador (retorna si todos están bloqueados)
-        $allLocked = $playerState->lockPlayer($player->id, $match, $player);
-
-        $this->savePlayerStateManager($match, $playerState);
-
-        // Guardar acción en game_state
-        $match->game_state['actions'][$player->id] = $actionValue;
+        // Registrar acción por defecto
+        $gameState = $match->game_state;
+        $gameState['actions'][$player->id] = $actionValue;
+        $match->game_state = $gameState;
         $match->save();
 
-        Log::info("[Mockup] Action processed", [
+        Log::info("[Mockup] Default action processed", [
             'player_id' => $player->id,
-            'all_locked' => $allLocked,
+            'action' => $actionValue,
         ]);
 
-        // DECISIÓN DE FIN DE RONDA: En mockup, termina cuando todos actúan
         return [
             'success' => true,
             'player_id' => $player->id,
             'data' => ['action' => $actionValue],
-            'force_end' => $allLocked, // Terminar cuando todos actuaron
-            'end_reason' => $allLocked ? 'all_players_acted' : null,
+            'force_end' => false,
         ];
     }
 
@@ -284,25 +350,17 @@ class MockupEngine extends BaseGameEngine
     {
         Log::info("[Mockup] Ending current round", ['match_id' => $match->id]);
 
-        // Obtener todas las acciones de la ronda
-        $playerState = $this->getPlayerStateManager($match);
-        $allActions = $playerState->getAllActions();
+        // Obtener acciones de game_state
+        $allActions = $match->game_state['actions'] ?? [];
 
-        // Calcular puntos (mockup: 10 puntos por participar)
+        // Los puntos ya fueron otorgados en processRoundAction() para 'good_answer'
+        // Aquí podríamos dar puntos a otros jugadores si fuera necesario
+        // (por ejemplo, puntos de participación)
+
         $scoreManager = $this->getScoreManager($match);
-
-        foreach ($allActions as $playerId => $action) {
-            $scoreManager->addPoints($playerId, 10);
-            Log::info("[Mockup] Points awarded", [
-                'player_id' => $playerId,
-                'points' => 10,
-            ]);
-        }
-
-        $this->saveScoreManager($match, $scoreManager);
+        $scores = $scoreManager->getScores();
 
         // Recopilar resultados de la ronda
-        $scores = $scoreManager->getScores();
         $results = [
             'actions' => $allActions,
         ];
@@ -321,8 +379,7 @@ class MockupEngine extends BaseGameEngine
      */
     protected function getAllPlayerResults(GameMatch $match): array
     {
-        $playerState = $this->getPlayerStateManager($match);
-        return $playerState->getAllActions();
+        return $match->game_state['actions'] ?? [];
     }
 
     /**
@@ -332,8 +389,7 @@ class MockupEngine extends BaseGameEngine
      */
     protected function getRoundResults(GameMatch $match): array
     {
-        $playerState = $this->getPlayerStateManager($match);
-        $allActions = $playerState->getAllActions();
+        $allActions = $match->game_state['actions'] ?? [];
 
         $scoreManager = $this->getScoreManager($match);
         $scores = $scoreManager->getScores();
@@ -532,6 +588,68 @@ class MockupEngine extends BaseGameEngine
                     'phase_name' => $nextPhaseInfo['phase_name']
                 ]
             ));
+        }
+    }
+
+    /**
+     * Callback cuando expira la fase 3.
+     *
+     * Fase 3 usa el evento genérico PhaseStartedEvent para mostrar cómo
+     * usar eventos genéricos con lógica condicional en el frontend.
+     *
+     * Al finalizar fase 3, completamos el ciclo y finalizamos la ronda.
+     */
+    public function handlePhase3Ended(GameMatch $match, array $phaseData): void
+    {
+        Log::info("🏁 [Mockup] FASE 3 FINALIZADA - Ejecutando callback (evento genérico)", [
+            'match_id' => $match->id,
+            'phase_data' => $phaseData
+        ]);
+
+        // Obtener PhaseManager
+        $roundManager = $this->getRoundManager($match);
+        $phaseManager = $roundManager->getTurnManager();
+
+        if (!$phaseManager) {
+            Log::warning("[Mockup] PhaseManager no encontrado");
+            return;
+        }
+
+        // Asignar el match al PhaseManager
+        $phaseManager->setMatch($match);
+
+        // SIEMPRE avanzar a la siguiente fase (completará el ciclo)
+        Log::info("➡️  [Mockup] Avanzando desde fase 3 - debería completar ciclo", [
+            'phase_name' => $phaseData['name'],
+            'match_id' => $match->id
+        ]);
+
+        $nextPhaseInfo = $phaseManager->nextPhase();
+
+        // Guardar RoundManager actualizado
+        $this->saveRoundManager($match, $roundManager);
+
+        // Verificar si completó el ciclo de fases
+        if ($nextPhaseInfo['cycle_completed']) {
+            Log::info("✅ [Mockup] Ciclo de 3 fases completado - Finalizando ronda", [
+                'match_id' => $match->id,
+                'current_round' => $roundManager->getCurrentRound()
+            ]);
+
+            // Finalizar ronda actual
+            // Esto emitirá RoundEndedEvent con countdown 3s automáticamente
+            $this->endCurrentRound($match);
+
+            Log::info("🎉 [Mockup] Ronda finalizada tras fase 3 - El sistema manejará el countdown", [
+                'match_id' => $match->id
+            ]);
+        } else {
+            // No debería pasar con 3 fases configuradas
+            Log::warning("⚠️  [Mockup] Fase 3 terminó pero ciclo no completado (configuración incorrecta?)", [
+                'from' => $phaseData['name'],
+                'to' => $nextPhaseInfo['phase_name'],
+                'cycle_completed' => false
+            ]);
         }
     }
 

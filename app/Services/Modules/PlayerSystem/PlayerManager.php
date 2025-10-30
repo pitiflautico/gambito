@@ -467,6 +467,21 @@ class PlayerManager
         return $locked;
     }
 
+    /**
+     * Verificar si todos los jugadores están bloqueados.
+     *
+     * @return bool True si todos los jugadores están bloqueados
+     */
+    public function areAllPlayersLocked(): bool
+    {
+        foreach ($this->players as $player) {
+            if (!$player->locked) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     // ========================================================================
     // ACCIONES
     // ========================================================================
