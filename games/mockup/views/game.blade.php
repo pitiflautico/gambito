@@ -48,15 +48,39 @@
         <!-- Test Controls -->
         <div class="bg-gray-800 rounded-lg p-6 mb-6">
             <h2 class="text-xl font-bold mb-4">🧪 Controles de Testing</h2>
-            <div class="grid grid-cols-2 gap-4">
-                <button id="btn-next-phase" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition-colors">
-                    ⏭️ Next Phase (Manual)
-                </button>
+
+            <!-- Botones de respuesta (solo en fase 2) -->
+            <div id="answer-buttons" class="mb-4" style="display: none;">
+                <div class="grid grid-cols-2 gap-4 mb-4">
+                    <button id="btn-good-answer" class="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg transition-colors">
+                        ✅ Good Answer
+                    </button>
+                    <button id="btn-bad-answer" class="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-lg transition-colors">
+                        ❌ Bad Answer
+                    </button>
+                </div>
+            </div>
+
+            <!-- Mensaje de bloqueado -->
+            <div id="locked-message" class="bg-red-900/30 border-2 border-red-500 rounded-lg p-6 mb-4 text-center" style="display: none;">
+                <p class="text-3xl mb-2">🔒</p>
+                <p class="text-xl font-bold text-red-400">Bloqueado</p>
+                <p class="text-sm text-gray-400 mt-2">Has fallado la pregunta. Espera a que termine la ronda.</p>
+            </div>
+
+            <!-- Mensaje de Fase 3 (usando evento genérico) -->
+            <div id="phase3-message" class="bg-blue-900/30 border-2 border-blue-500 rounded-lg p-6 mb-4 text-center" style="display: none;">
+                <p class="text-3xl mb-2">📝</p>
+                <p class="text-xl font-bold text-blue-400">Test Phase 3 Using Generic Event</p>
+                <p class="text-sm text-gray-400 mt-2">Esta fase usa PhaseStartedEvent (evento genérico) con lógica condicional en el handler.</p>
+            </div>
+
+            <div class="grid grid-cols-1 gap-4">
                 <button id="btn-refresh-state" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-lg transition-colors">
                     🔄 Refresh State
                 </button>
             </div>
-            <p class="text-xs text-gray-500 mt-2">* Los timers avanzan automáticamente. El botón "Next Phase" es solo para testing manual.</p>
+            <p class="text-xs text-gray-500 mt-2">* Good Answer: Finaliza la ronda inmediatamente. Bad Answer: Bloquea al jugador (si todos bloqueados, avanza ronda).</p>
         </div>
 
         <!-- Event Log -->

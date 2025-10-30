@@ -108,6 +108,9 @@ export class BaseGameClient {
             handlePlayerDisconnected: (event) => this.handlePlayerDisconnected(event),
             handlePlayerReconnected: (event) => this.handlePlayerReconnected(event),
             handlePlayerScoreUpdated: (event) => this.handlePlayerScoreUpdated(event),
+            handlePlayerLocked: (event) => this.handlePlayerLocked(event),
+            handlePlayersUnlocked: (event) => this.handlePlayersUnlocked(event),
+            handlePhaseStarted: (event) => this.handlePhaseStarted(event),
         };
 
         // Combinar handlers por defecto con handlers custom del juego
@@ -379,6 +382,40 @@ export class BaseGameClient {
 
         // Los juegos específicos pueden sobrescribir este método para lógica custom
         // (ej: mostrar notificación, actualizar ranking, etc.)
+    }
+
+    /**
+     * Handler genérico: Jugador bloqueado
+     *
+     * Se ejecuta cuando un jugador es bloqueado (no puede actuar más en la ronda).
+     * Los juegos específicos deben sobrescribir este método para manejar el bloqueo.
+     */
+    handlePlayerLocked(event) {
+        // Stub method - los juegos específicos lo sobrescriben
+        // Por defecto no hace nada
+    }
+
+    /**
+     * Handler genérico: Jugadores desbloqueados
+     *
+     * Se ejecuta cuando los jugadores son desbloqueados (nueva ronda).
+     * Los juegos específicos deben sobrescribir este método para manejar el desbloqueo.
+     */
+    handlePlayersUnlocked(event) {
+        // Stub method - los juegos específicos lo sobrescriben
+        // Por defecto no hace nada
+    }
+
+    /**
+     * Handler genérico: Fase iniciada
+     *
+     * Se ejecuta cuando inicia una fase del juego.
+     * Los juegos específicos deben sobrescribir este método para manejar lógica específica de cada fase.
+     */
+    handlePhaseStarted(event) {
+        // Stub method - los juegos específicos lo sobrescriben
+        // Por defecto no hace nada
+        console.log('🎬 [BaseGameClient] Phase started (default handler)', event);
     }
 
     // ========================================================================

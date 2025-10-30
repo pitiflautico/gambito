@@ -10,7 +10,8 @@
   "provides": {
     "events": [
       "Phase1StartedEvent",
-      "Phase1EndedEvent"
+      "Phase1EndedEvent",
+      "Phase2StartedEvent"
     ],
     "routes": [],
     "views": [
@@ -49,6 +50,11 @@
         "name": "mockup.phase1.ended",
         "description": "Mockup: Fase 1 terminada",
         "handler": "handlePhase1Ended"
+      },
+      "Phase2StartedEvent": {
+        "name": "mockup.phase2.started",
+        "description": "Mockup: Fase 2 iniciada (evento custom)",
+        "handler": "handlePhase2Started"
       },
       "PhaseStartedEvent": {
         "name": "game.phase.started",

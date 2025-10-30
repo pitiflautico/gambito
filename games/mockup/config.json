@@ -3,7 +3,7 @@
   "name": "Mockup Game",
   "slug": "mockup",
   "version": "2.0.0",
-  "description": "Juego de prueba con 2 fases para validar sistema de eventos y timers",
+  "description": "Juego de prueba con 3 fases para validar sistema de eventos (custom y generic)",
   "minPlayers": 1,
   "maxPlayers": 4,
   "estimatedDuration": 10,
@@ -32,9 +32,17 @@
         "name": ".round.ended",
         "handler": "handleRoundEnded"
       },
+      "Phase1StartedEvent": {
+        "name": ".mockup.phase1.started",
+        "handler": "handlePhase1Started"
+      },
       "Phase1EndedEvent": {
         "name": ".mockup.phase1.ended",
         "handler": "handlePhase1Ended"
+      },
+      "Phase2StartedEvent": {
+        "name": ".mockup.phase2.started",
+        "handler": "handlePhase2Started"
       },
       "PhaseStartedEvent": {
         "name": ".game.phase.started",
@@ -43,6 +51,10 @@
       "PhaseEndedEvent": {
         "name": ".game.phase.ended",
         "handler": "handlePhaseEnded"
+      },
+      "PlayersUnlockedEvent": {
+        "name": ".players.unlocked",
+        "handler": "handlePlayersUnlocked"
       }
     }
   },
@@ -74,11 +86,17 @@
         },
         {
           "name": "phase2",
-          "duration": 3,
-          "on_start": "App\\Events\\Game\\PhaseStartedEvent",
-          "on_start_callback": "handlePhase2Started",
+          "duration": 6,
+          "on_start": "App\\Events\\Mockup\\Phase2StartedEvent",
           "on_end": "App\\Events\\Game\\PhaseEndedEvent",
           "on_end_callback": "handlePhase2Ended"
+        },
+        {
+          "name": "phase3",
+          "duration": 4,
+          "on_start": "App\\Events\\Game\\PhaseStartedEvent",
+          "on_end": "App\\Events\\Game\\PhaseEndedEvent",
+          "on_end_callback": "handlePhase3Ended"
         }
       ]
     },
@@ -86,7 +104,10 @@
       "enabled": true
     },
     "scoring_system": {
-      "enabled": false
+      "enabled": true
+    },
+    "player_system": {
+      "enabled": true
     },
     "real_time_sync": {
       "enabled": true

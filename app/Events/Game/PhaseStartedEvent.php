@@ -102,6 +102,13 @@ class PhaseStartedEvent implements ShouldBroadcastNow
      */
     public function broadcastAs(): string
     {
+        \Log::debug("[PhaseStartedEvent] Broadcasting", [
+            'room' => $this->roomCode,
+            'phase_name' => $this->phaseName,
+            'channel' => 'presence-room.' . $this->roomCode,
+            'event_name' => 'game.phase.started'
+        ]);
+
         return 'game.phase.started';
     }
 
