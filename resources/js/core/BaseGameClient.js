@@ -317,11 +317,13 @@ export class BaseGameClient {
      */
     handlePlayerDisconnected(event) {
 
-        // Emitir evento para que los módulos se encarguen (ej: TimingModule cancela sus timers)
-        // También usado por el Blade component para mostrar el popup de desconexión
+        // Emitir evento para que los módulos se encarguen (ej: TimingModule pausa sus timers)
         window.dispatchEvent(new CustomEvent('game:player:disconnected', {
             detail: event
         }));
+
+        // Mostrar popup de desconexión
+        this.showPlayerDisconnectedPopup(event);
 
         // Los juegos específicos pueden sobrescribir este método para lógica custom
     }
@@ -334,10 +336,13 @@ export class BaseGameClient {
      */
     handlePlayerReconnected(event) {
 
-        // Dispatch custom event para que el Blade component oculte el popup
+        // Dispatch custom event para que los módulos reanuden (ej: TimingModule reanuda timers)
         window.dispatchEvent(new CustomEvent('game:player:reconnected', {
             detail: event
         }));
+
+        // Ocultar popup de desconexión
+        this.hidePlayerDisconnectedPopup();
 
         // El backend se encarga de reiniciar la ronda automáticamente
         // handleRoundStarted() será llamado cuando llegue RoundStartedEvent
@@ -1066,6 +1071,47 @@ export class BaseGameClient {
         if (popup) {
             popup.style.display = 'none';
             console.log('🔒 [BaseGameClient] Game end popup hidden');
+        }
+    }
+
+    // ========================================================================
+    // PLAYER DISCONNECTED POPUP - Sistema de popup para desconexión de jugadores
+    // ========================================================================
+
+    /**
+     * Mostrar popup de jugador desconectado
+     * El template HTML ya está cargado en el blade del juego.
+     */
+    showPlayerDisconnectedPopup(event) {
+        const popup = document.getElementById('player-disconnected-popup');
+        if (!popup) {
+            console.warn('⚠️ [BaseGameClient] Player disconnected popup not found');
+            return;
+        }
+
+        // Actualizar nombre del jugador desconectado
+        const playerNameElement = document.getElementById('disconnected-player-name');
+        if (playerNameElement && event.player_id) {
+            const player = this.getPlayer(event.player_id);
+            playerNameElement.textContent = player ? player.name : `Player ${event.player_id}`;
+        }
+
+        // Mostrar popup
+        popup.style.display = 'flex';
+
+        console.log('⚠️ [BaseGameClient] Player disconnected popup shown', {
+            player_id: event.player_id
+        });
+    }
+
+    /**
+     * Ocultar popup de jugador desconectado
+     */
+    hidePlayerDisconnectedPopup() {
+        const popup = document.getElementById('player-disconnected-popup');
+        if (popup) {
+            popup.style.display = 'none';
+            console.log('✅ [BaseGameClient] Player disconnected popup hidden');
         }
     }
 }

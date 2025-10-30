@@ -115,5 +115,6 @@
 
     @include('mockup::partials.round_end_popup')
     @include('mockup::partials.game_end_popup')
+    @include('mockup::partials.player_disconnected_popup')
 </body>
 </html>
