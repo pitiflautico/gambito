@@ -9,12 +9,24 @@ Leer: `docs/CREAR_JUEGO_PASO_A_PASO.md` → FASE 5 (Pasos 5.2-5.3)
 **Convenciones**:
 - `initialize()`: Una sola vez al crear el juego
 - Patrón game_state: obtener → modificar → reasignar → guardar
-- Usar `initializeModules()`
+- Usar `initializeModules()` - inicializa TODOS los módulos automáticamente
 - Crear `PlayerManager` (NO PlayerStateManager)
+- **roles_system**: Se inicializa AUTOMÁTICAMENTE en `initializeModules()`
+
+**IMPORTANTE - Sistema de Roles**:
+- `BaseGameEngine::initializeModules()` inicializa `roles_system` automáticamente
+- Lee roles desde `config.json` → `modules.roles_system.roles`
+- Si no hay roles definidos, usa rol por defecto "player"
+- Crea `game_state['roles_system']` con `enabled: true`
+- **NO necesitas código manual** para inicializar roles
+- **SÍ necesitas asignar roles** iniciales a jugadores con `PlayerManager::autoAssignRolesFromConfig()`
 
 **Tareas**:
 1. Crear {GameName}Engine.php extendiendo BaseGameEngine
-2. Implementar initialize() con config inicial
+2. Implementar initialize() con:
+   - Llamar `initializeModules()` con configuración de módulos
+   - Crear PlayerManager y asignar roles con `autoAssignRolesFromConfig()`
+   - Guardar PlayerManager con `savePlayerManager()`
 3. Implementar onGameStart() llamando handleNewRound(advanceRound: false)
 
 ---
@@ -150,6 +162,13 @@ window.{GameName}Client = {GameName}Client;
 ### FASE 11: Frontend - UI y Vistas (game.blade.php + popups)
 
 Leer: `docs/CREAR_JUEGO_PASO_A_PASO.md` → FASE 7
+
+**⚠️ CRÍTICO - Nombre de Vista**:
+- **SIEMPRE usar**: `games/{slug}/views/game.blade.php`
+- **NUNCA usar**: `canvas.blade.php` o cualquier otro nombre
+- El controlador (`PlayController`) busca la vista como: `{slug}::game`
+- Laravel busca el archivo en: `games/{slug}/views/game.blade.php`
+- Si la vista no se llama exactamente `game.blade.php`, Laravel dará error 404
 
 **Convenciones game.blade.php**:
 - Incluir CSRF token en head

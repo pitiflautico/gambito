@@ -220,10 +220,63 @@ Crear `games/{slug}/config.json` con:
    - phase_system: enabled: true, phases: []
    - scoring_system: enabled: true
    - player_system: enabled: true
+   - roles_system: enabled: true, roles: [] (ver sección de Roles abajo)
    - timer_system: enabled: true
    - real_time_sync: enabled: true
 
-4. **phase_system.phases** - Para CADA fase:
+4. **roles_system.roles** - Sistema de Rotación de Roles:
+
+**IMPORTANTE**: Leer `docs/ROLE_ROTATION_TYPES.md` para detalles completos.
+
+El sistema detecta automáticamente el tipo de rotación desde la configuración:
+
+**Tipo Sequential** (1 rol principal que rota + resto con rol secundario):
+```json
+"roles_system": {
+  "enabled": true,
+  "roles": [
+    {
+      "name": "asker",
+      "count": 1,
+      "description": "El jugador que hace las preguntas",
+      "rotate_on_round_start": true
+    },
+    {
+      "name": "guesser",
+      "count": -1,
+      "description": "Los jugadores que adivinan",
+      "rotate_on_round_start": false
+    }
+  ]
+}
+```
+- **count: 1** → Rol principal (solo 1 jugador)
+- **count: -1** → Rol resto (todos los demás jugadores)
+- **rotate_on_round_start: true** → Rota automáticamente cada ronda
+- Rotación: secuencial circular (jugador 1 → 2 → 3 → 1...)
+
+**Tipo Single** (todos tienen mismo rol, sin rotación):
+```json
+"roles_system": {
+  "enabled": true,
+  "roles": [
+    {
+      "name": "player",
+      "count": -1,
+      "description": "Jugador regular",
+      "rotate_on_round_start": false
+    }
+  ]
+}
+```
+
+**Comportamiento automático**:
+- `BaseGameEngine::initializeModules()` inicializa roles_system (obligatorio)
+- Si no defines roles, usa rol por defecto "player"
+- Rotación ocurre automáticamente en `handleNewRound()` cuando `advanceRound=true`
+- NO necesitas código manual en el Engine
+
+5. **phase_system.phases** - Para CADA fase:
 ```json
 {
   "name": "fase1",  // lowercase, sin espacios
@@ -234,7 +287,7 @@ Crear `games/{slug}/config.json` con:
 }
 ```
 
-5. **event_config.events** - Para CADA evento custom:
+6. **event_config.events** - Para CADA evento custom:
 ```json
 "Fase1StartedEvent": {
   "name": ".{slug}.fase1.started",  // CON punto inicial
