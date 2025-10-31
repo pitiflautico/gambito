@@ -455,6 +455,42 @@ class PlayerManager
     }
 
     /**
+     * Desbloquear todos los jugadores (sin resetear acciones u otros estados).
+     * 
+     * Útil cuando solo necesitas desbloquear sin perder acciones/customStates.
+     * Si necesitas un reset completo, usa reset().
+     * 
+     * Usa internamente unlockPlayer() para mantener consistencia.
+     * 
+     * @param GameMatch|null $match Si se proporciona, emite PlayersUnlockedEvent
+     * @param array $additionalData Datos adicionales para el evento
+     */
+    public function unlockAllPlayers(?GameMatch $match = null, array $additionalData = []): void
+    {
+        $hadLockedPlayers = false;
+
+        // Usar unlockPlayer() para cada jugador bloqueado (DRY principle)
+        foreach ($this->players as $playerId => $player) {
+            if ($player->locked) {
+                $hadLockedPlayers = true;
+                $this->unlockPlayer($playerId);
+            }
+        }
+
+        // Emitir evento de desbloqueo si había jugadores bloqueados
+        if ($hadLockedPlayers && $match) {
+            event(new \App\Events\Game\PlayersUnlockedEvent(
+                $match,
+                $additionalData
+            ));
+
+            \Log::info("[PlayerManager] All players unlocked event emitted", [
+                'match_id' => $match->id,
+            ]);
+        }
+    }
+
+    /**
      * Verificar si un jugador está bloqueado.
      */
     public function isPlayerLocked(int $playerId): bool

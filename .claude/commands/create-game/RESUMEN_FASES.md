@@ -21,6 +21,13 @@ Leer: `docs/CREAR_JUEGO_PASO_A_PASO.md` → FASE 5 (Pasos 5.2-5.3)
 - **NO necesitas código manual** para inicializar roles
 - **SÍ necesitas asignar roles** iniciales a jugadores con `PlayerManager::autoAssignRolesFromConfig()`
 
+**Hook opcional: onRoundStarting()**:
+- Se ejecuta ANTES de emitir eventos de fase (antes de `PhaseManager.startPhase()`)
+- Útil si necesitas establecer UI (`game_state['_ui']`) antes de que se emita el primer evento
+- Ejemplo Trivia: cargar pregunta en `onRoundStarting()` → `startNewRound()` → establecer UI → eventos ya tienen datos
+- Si NO necesitas preparar datos antes de eventos, NO necesitas implementar este hook
+- Ver `games/trivia/TriviaEngine.php::onRoundStarting()` para ejemplo
+
 **Tareas**:
 1. Crear {GameName}Engine.php extendiendo BaseGameEngine
 2. Implementar initialize() con:
@@ -28,6 +35,7 @@ Leer: `docs/CREAR_JUEGO_PASO_A_PASO.md` → FASE 5 (Pasos 5.2-5.3)
    - Crear PlayerManager y asignar roles con `autoAssignRolesFromConfig()`
    - Guardar PlayerManager con `savePlayerManager()`
 3. Implementar onGameStart() llamando handleNewRound(advanceRound: false)
+4. (Opcional) Implementar onRoundStarting() si necesitas preparar datos antes de eventos
 
 ---
 
@@ -36,9 +44,30 @@ Leer: `docs/CREAR_JUEGO_PASO_A_PASO.md` → FASE 5 (Pasos 5.2-5.3)
 Leer: `docs/CREAR_JUEGO_PASO_A_PASO.md` → FASE 5 (Pasos 5.4-5.6)
 
 **Convenciones startNewRound()**:
-- Desbloquear jugadores con `PlayerManager::unlockAllPlayers($match)`
-- Emitir `PlayersUnlockedEvent`
-- Limpiar estado anterior (actions, votes, etc.)
+- ⚠️ **IMPORTANTE**: `PlayerManager::reset()` ya se llama AUTOMÁTICAMENTE en `BaseGameEngine::handleNewRound()` (línea 452)
+- NO necesitas desbloquear jugadores manualmente - se hace automáticamente antes de `onRoundStarting()`
+- Solo hacer lógica específica del juego: cargar datos (preguntas, palabras, etc.), establecer UI, limpiar `game_state['actions']`
+- Ejemplo Trivia: seleccionar pregunta, establecer UI con `setUI()`, guardar `game_state`
+
+**Ejemplo correcto**:
+```php
+protected function startNewRound(GameMatch $match): void
+{
+    // NOTA: reset() ya se llama automáticamente en handleNewRound()
+    // Solo lógica específica del juego
+    
+    // Limpiar acciones del game_state
+    $gameState = $match->game_state;
+    $gameState['actions'] = [];
+    $match->game_state = $gameState;
+    $match->save();
+    
+    // Preparar datos específicos (ej: cargar pregunta)
+    $this->loadRoundData($match);
+}
+```
+
+**Referencia**: Ver `games/trivia/TriviaEngine.php::startNewRound()` y `games/mockup/MockupEngine.php::startNewRound()` para ejemplos correctos.
 
 **Convenciones processRoundAction()**:
 - Validar `isPlayerLocked()` ANTES de procesar

@@ -240,18 +240,10 @@ class MockupEngine extends BaseGameEngine
             'round' => $currentRound,
         ]);
 
-        // Desbloquear todos los jugadores para la nueva ronda usando PlayerManager
-        $playerManager = $this->getPlayerManager($match);
-        $playerManager->unlockAllPlayers($match);
-        $this->savePlayerManager($match, $playerManager);
-
-        // Emitir evento de jugadores desbloqueados
-        event(new \App\Events\Game\PlayersUnlockedEvent(
-            roomCode: $match->room->code,
-            fromNewRound: true
-        ));
-
-        // Limpiar acciones de la ronda anterior
+        // NOTA: PlayerManager.reset() ya se llama automáticamente en handleNewRound()
+        // Aquí solo hacemos la lógica específica del juego: limpiar game_state, etc.
+        
+        // Limpiar acciones del game_state
         $gameState = $match->game_state;
         $gameState['actions'] = [];
         $gameState['phase'] = 'playing';

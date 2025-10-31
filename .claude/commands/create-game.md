@@ -59,22 +59,53 @@ Cuando el usuario ejecute `/create-game`, seguir este flujo:
 
 ## 🔍 FASE 1: Lectura del Archivo de Diseño
 
-**Objetivo**: Leer y analizar el archivo DESIGN.md del juego.
+**Objetivo**: Leer y analizar el archivo DESIGN.md del juego, extrayendo información crítica.
+
+**Referencias**: Ver `games/mockup/config.json` como ejemplo de estructura completa.
 
 **Pasos**:
 
 1. Preguntar al usuario por el nombre/slug del juego
 2. Buscar archivo `games/{slug}/DESIGN.md`
 3. Si existe: Leer y analizar su contenido
-4. Si NO existe: Preguntar si quiere crear uno o modo interactivo
+4. Si NO existe: Modo interactivo con preguntas clave (ver abajo)
 
-**Análisis del DESIGN.md**:
-- Extraer: nombre, slug, descripción
-- Extraer: número de jugadores (min/max)
-- Extraer: fases del juego (nombre, duración, descripción)
-- Extraer: mecánicas (puntuación, bloqueos, roles, etc.)
-- Extraer: eventos custom necesarios vs genéricos
-- Identificar ambigüedades o información faltante
+**Análisis del DESIGN.md - Información Crítica a Extraer**:
+
+**1. Información Básica**:
+- Nombre del juego
+- Slug (sin espacios, lowercase)
+- Descripción breve
+- Jugadores: min/max
+- Rondas totales
+
+**2. Fases del Juego**:
+- Número de fases por ronda
+- Nombre de cada fase (ej: "phase1", "preparation", "drawing")
+- Duración de cada fase (segundos)
+- ¿Evento custom o genérico para cada fase?
+
+**3. Sistema de Roles** (si aplica):
+- ¿Hay roles específicos? (ej: "asker", "guesser", "drawer", "voter")
+- ¿Rotan automáticamente? (ver `docs/ROLE_ROTATION_TYPES.md`)
+- Tipo: Sequential (1 principal + resto) o Single (todos iguales)
+
+**4. Sistema de Puntuación**:
+- ¿Cómo se calculan los puntos? (ej: +10 por respuesta correcta)
+- ¿Hay bonus por velocidad? (ej: Trivia)
+- ¿Puntos negativos permitidos?
+
+**5. Sistema de Bloqueo**:
+- ¿Cuándo se bloquean jugadores? (ej: después de responder, al votar)
+- ¿Todos actúan simultáneamente o secuencialmente?
+
+**6. Modo de Juego**:
+- ¿Individual o por equipos? (ver `docs/TEAMS_SYSTEM_DESIGN.md`)
+- Si por equipos: ¿cuántos? ¿auto-selección?
+
+**7. UI/Plantillas**:
+- ¿Usa popups estándar? (round_end_popup, game_end_popup)
+- ¿UI completamente personalizada?
 
 **Output de esta fase**:
 ```
@@ -82,35 +113,62 @@ Cuando el usuario ejecute `/create-game`, seguir este flujo:
 ✅ Nombre: {nombre}
 ✅ Slug: {slug}
 ✅ Jugadores: {min}-{max}
+✅ Rondas: {N}
 ✅ Fases: {N} fases identificadas
-⚠️  Ambigüedades detectadas: {lista}
+✅ Roles: {tipo} - {lista roles}
+✅ Puntuación: {sistema}
+✅ Bloqueo: {cuándo}
+✅ Modo: {individual/equipos}
+⚠️  Ambigüedades: {lista}
 ```
 
 ---
 
 ## ❓ FASE 2: Preguntas de Clarificación
 
-**Objetivo**: Resolver ambigüedades antes de generar código.
+**Objetivo**: Resolver ambigüedades críticas antes de generar código.
 
-**IMPORTANTE**: Solo preguntar sobre lo que NO esté claro. No preguntar obviedades.
+**IMPORTANTE**: Solo preguntar lo esencial. Si algo está claro en DESIGN.md, no repetir.
 
-**Preguntas típicas**:
-- ¿Cuántas rondas tiene el juego? (si no está en DESIGN.md)
-- ¿La fase X necesita evento custom o genérico?
-- ¿Cómo se calculan los puntos exactamente?
-- ¿Hay roles específicos? (dibujante, votante, etc.)
-- ¿Qué pasa si el timer expira en fase X?
-- ¿Los jugadores pueden realizar acciones simultáneas o secuenciales?
+**Preguntas por Categoría** (hacer solo si falta información):
+
+**1. Fases y Eventos**:
+- ¿La fase "{nombre}" necesita evento custom? (Si solo muestra UI básica → genérico, si lógica compleja → custom)
+- Ejemplo Mockup: `Phase1StartedEvent` (custom), `PhaseStartedEvent` para phase3 (genérico)
+
+**2. Sistema de Puntuación**:
+- Fórmula exacta de puntos (ej: "base: 10, bonus velocidad: hasta +10 según tiempo restante")
+- Referencia: `games/trivia/TriviaScoreCalculator.php` para ejemplos
+
+**3. Sistema de Roles**:
+- Si hay roles: ¿cuántos de cada tipo? ¿cuál rota?
+- Ejemplo Mockup: `asker: count: 1, rotate_on_round_start: true` + `guesser: count: -1`
+- Referencia: `docs/ROLE_ROTATION_TYPES.md`
+
+**4. Acciones y Bloqueo**:
+- ¿Acciones simultáneas o turnos? (afecta `EndRoundStrategy`: `SimultaneousEndStrategy` vs `SequentialEndStrategy`)
+- ¿Qué acción bloquea al jugador? (ej: responder pregunta, enviar dibujo)
+
+**5. Fin de Ronda**:
+- ¿Cuándo termina la ronda? (timer expira, todos bloqueados, condición específica)
+- Ejemplo: Trivia termina con respuesta correcta o todos bloqueados
+
+**6. Modo Equipos** (si aplica):
+- ¿Cuántos equipos? ¿cómo se asignan? ¿hay límite por equipo?
+- Referencia: `docs/TEAMS_SYSTEM_DESIGN.md`
 
 **Output de esta fase**:
 ```
-✅ Configuración Completa:
-- Total de rondas: 5
-- Fase 1 (preparation): 10s, evento custom
-- Fase 2 (playing): 60s, evento custom
-- Fase 3 (voting): 15s, evento custom
-- Puntos: +10 por voto positivo
-- Sin roles específicos
+✅ Configuración Completa Validada:
+📐 Fases: {N} fases
+   - {fase1}: {duración}s, evento {custom/genérico}
+   - {fase2}: {duración}s, evento {custom/genérico}
+🎭 Roles: {tipo} - {detalles}
+💰 Puntuación: {fórmula}
+🔒 Bloqueo: {cuándo/condición}
+⚙️ Acciones: {simultáneas/secuenciales}
+🏁 Fin ronda: {condición}
+👥 Modo: {individual/equipos}
 ```
 
 ---

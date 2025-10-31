@@ -148,11 +148,10 @@ class TriviaEngine extends BaseGameEngine
     protected function startNewRound(GameMatch $match): void
     {
         Log::info('[Trivia] startNewRound hook');
-        $playerManager = $this->getPlayerManager($match);
-        // reset() desbloquea todos los jugadores y emite PlayersUnlockedEvent automáticamente
-        $playerManager->reset($match, ['fromNewRound' => true]);
-        $this->savePlayerManager($match, $playerManager);
-
+        // NOTA: PlayerManager.reset() ya se llama automáticamente en handleNewRound()
+        // Aquí solo hacemos la lógica específica del juego: cargar pregunta, establecer UI, etc.
+        
+        // Limpiar acciones del game_state
         $gameState = $match->game_state;
         $gameState['actions'] = [];
         $gameState['phase'] = 'playing';
