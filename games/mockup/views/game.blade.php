@@ -15,6 +15,7 @@
                 <h1 class="text-3xl font-bold">🎮 Mockup Game</h1>
                 <p class="text-gray-400">Sala: <span class="font-mono text-yellow-400">{{ $room->code }}</span></p>
                 <p class="text-sm text-gray-500">Juego de prueba para validar sistema de eventos y timers</p>
+                <p class="text-xs text-purple-400 mt-2">Tu rol: <span id="player-role" class="font-bold">--</span></p>
             </div>
             <div id="round-info" class="text-right">
                 <p class="text-sm text-gray-400">Ronda</p>
@@ -66,6 +67,13 @@
                 <p class="text-3xl mb-2">✅</p>
                 <p class="text-xl font-bold text-blue-400">Ya has votado</p>
                 <p class="text-sm text-gray-400 mt-2">Esperando a que los demás jugadores voten...</p>
+            </div>
+
+            <!-- Mensaje de rol Asker -->
+            <div id="asker-message" class="bg-yellow-900/30 border-2 border-yellow-500 rounded-lg p-6 mb-4 text-center" style="display: none;">
+                <p class="text-3xl mb-2">🎯</p>
+                <p class="text-xl font-bold text-yellow-400" id="asker-phase-title">You are the Asker</p>
+                <p class="text-sm text-gray-400 mt-2">Observa mientras los otros jugadores responden...</p>
             </div>
 
             <!-- Mensaje de Fase 3 (usando evento genérico) -->

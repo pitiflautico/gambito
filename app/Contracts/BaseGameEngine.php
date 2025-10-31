@@ -210,48 +210,64 @@ abstract class BaseGameEngine implements GameEngineInterface
      */
     public function onPlayerReconnected(GameMatch $match, \App\Models\Player $player): void
     {
-        Log::info("[{$this->getGameSlug()}] Player reconnected - resuming game", [
-            'match_id' => $match->id,
-            'player_id' => $player->id,
-            'player_name' => $player->name,
-        ]);
+        // RACE CONDITION FIX: Usar lock distribuido para evitar múltiples reconexiones simultáneas
+        $lock = \Cache::lock("player_reconnected:{$match->id}:{$player->id}", 10);
 
-        // 1. Obtener game_state como array para modificarlo
-        $gameState = $match->game_state;
-
-        // 2. Marcar juego como activo (quitar pausa)
-        $gameState['paused'] = false;
-        unset($gameState['paused_reason']);
-        unset($gameState['disconnected_player_id']);
-        unset($gameState['paused_at']);
-
-        // 3. Asignar de vuelta y guardar
-        $match->game_state = $gameState;
-        $match->save();
-
-        // 2. Hook opcional después de reconectar
-        $this->afterPlayerReconnected($match, $player);
-
-        // 3. Comportamiento por defecto: Reiniciar ronda actual
-        // Esto garantiza que todos empiecen de cero con el jugador reconectado
-        $shouldRestartRound = true;
-
-        if ($shouldRestartRound) {
-            Log::info("[{$this->getGameSlug()}] Restarting current round", [
+        if (!$lock->get()) {
+            Log::warning('⚠️ [BaseGameEngine] Could not obtain reconnection lock - skipping duplicate', [
                 'match_id' => $match->id,
-                'round' => $match->game_state['round_system']['current_round'] ?? null,
+                'player_id' => $player->id,
             ]);
-
-            // Reiniciar ronda: llama startNewRound() del juego + inicia nuevo timer
-            $this->handleNewRound($match, advanceRound: false);
+            return;
         }
 
-        // 4. Emitir evento (broadcast a todos los clientes)
-        event(new \App\Events\Game\PlayerReconnectedEvent($match, $player, $shouldRestartRound));
+        try {
+            Log::info("[{$this->getGameSlug()}] Player reconnected - resuming game", [
+                'match_id' => $match->id,
+                'player_id' => $player->id,
+                'player_name' => $player->name,
+            ]);
 
-        Log::info("[{$this->getGameSlug()}] Game resumed after reconnection", [
-            'match_id' => $match->id,
-        ]);
+            // 1. Obtener game_state como array para modificarlo
+            $gameState = $match->game_state;
+
+            // 2. Marcar juego como activo (quitar pausa)
+            $gameState['paused'] = false;
+            unset($gameState['paused_reason']);
+            unset($gameState['disconnected_player_id']);
+            unset($gameState['paused_at']);
+
+            // 3. Asignar de vuelta y guardar
+            $match->game_state = $gameState;
+            $match->save();
+
+            // 2. Hook opcional después de reconectar
+            $this->afterPlayerReconnected($match, $player);
+
+            // 3. Comportamiento por defecto: Reiniciar ronda actual
+            // Esto garantiza que todos empiecen de cero con el jugador reconectado
+            $shouldRestartRound = true;
+
+            if ($shouldRestartRound) {
+                Log::info("[{$this->getGameSlug()}] Restarting current round", [
+                    'match_id' => $match->id,
+                    'round' => $match->game_state['round_system']['current_round'] ?? null,
+                ]);
+
+                // Reiniciar ronda: llama startNewRound() del juego + inicia nuevo timer
+                $this->handleNewRound($match, advanceRound: false);
+            }
+
+            // 4. Emitir evento (broadcast a todos los clientes)
+            event(new \App\Events\Game\PlayerReconnectedEvent($match, $player, $shouldRestartRound));
+
+            Log::info("[{$this->getGameSlug()}] Game resumed after reconnection", [
+                'match_id' => $match->id,
+            ]);
+        } finally {
+            // Siempre liberar el lock
+            $lock->release();
+        }
     }
 
     /**
@@ -460,6 +476,39 @@ abstract class BaseGameEngine implements GameEngineInterface
 
                 // Si no podemos resetear players, emitir evento de error
                 event(new \App\Events\Game\GameErrorEvent($match, 'Failed to reset players'));
+            }
+        }
+
+        // 2.2. LÓGICA BASE: Rotar roles automáticamente (si está configurado)
+        // Esto debe hacerse DESPUÉS de resetear jugadores y ANTES de onRoundStarting()
+        // para que los roles estén actualizados cuando el juego prepare datos específicos
+        // IMPORTANTE: Solo rotar si estamos avanzando la ronda (advanceRound = true)
+        $rolesEnabled = $this->isModuleEnabled($match, 'roles_system');
+        Log::debug("[{$this->getGameSlug()}] Role rotation check", [
+            'roles_enabled' => $rolesEnabled,
+            'advance_round' => $advanceRound,
+            'will_rotate' => ($rolesEnabled && $advanceRound)
+        ]);
+
+        if ($rolesEnabled && $advanceRound) {
+            try {
+                $currentRound = $match->game_state['round_system']['current_round'] ?? 1;
+                $rotatedRoles = $this->autoRotateRolesOnRoundStart($match, $currentRound);
+
+                if (!empty($rotatedRoles)) {
+                    Log::info("[{$this->getGameSlug()}] Roles auto-rotated", [
+                        'match_id' => $match->id,
+                        'round' => $currentRound,
+                        'rotated' => $rotatedRoles
+                    ]);
+                }
+            } catch (\Exception $e) {
+                Log::error("[{$this->getGameSlug()}] Failed to auto-rotate roles", [
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
+                    'match_id' => $match->id
+                ]);
+                // No interrumpir el flujo si falla la rotación
             }
         }
 
@@ -1235,6 +1284,34 @@ abstract class BaseGameEngine implements GameEngineInterface
             // Aquí solo registramos que está enabled
             Log::debug("Teams system enabled", ['config' => $modules['teams_system']]);
         }
+
+        // ========================================================================
+        // MÓDULO: Roles System
+        // ========================================================================
+        // SIEMPRE debe existir roles_system (es obligatorio para todos los juegos)
+        // Si no hay roles en config, usar rol por defecto "player"
+        $rolesFromConfig = $modules['roles_system']['roles'] ?? [];
+
+        if (empty($rolesFromConfig)) {
+            $rolesFromConfig = [
+                [
+                    'name' => 'player',
+                    'count' => -1,
+                    'description' => 'Jugador regular',
+                    'rotate_on_round_start' => false
+                ]
+            ];
+        }
+
+        $gameState['roles_system'] = [
+            'enabled' => true,
+            'roles' => $rolesFromConfig
+        ];
+
+        Log::debug("Roles system initialized", [
+            'roles_count' => count($rolesFromConfig),
+            'role_names' => array_column($rolesFromConfig, 'name')
+        ]);
 
         // Guardar módulos inicializados
         $match->game_state = array_merge($match->game_state ?? [], $gameState);
@@ -2519,6 +2596,95 @@ abstract class BaseGameEngine implements GameEngineInterface
         $playerManager = $this->getPlayerManager($match, $calculator);
 
         return $playerManager->getScores();
+    }
+
+    // ========================================================================
+    // ROLES SYSTEM HELPERS
+    // ========================================================================
+
+    /**
+     * Auto-rotar roles al iniciar una ronda (si está configurado).
+     *
+     * Este método lee la configuración del juego y rota automáticamente
+     * los roles marcados con "rotate_on_round_start": true.
+     *
+     * Los juegos pueden llamar a este método en su handleRoundStarted()
+     * para rotación automática, o llamar a rotateRole() manualmente.
+     *
+     * @param GameMatch $match
+     * @param int $currentRound Número de ronda actual
+     * @return array Mapa de roles rotados [roleName => newPlayerId]
+     */
+    protected function autoRotateRolesOnRoundStart(GameMatch $match, int $currentRound): array
+    {
+        // No rotar en la primera ronda (roles ya asignados)
+        if ($currentRound <= 1) {
+            return [];
+        }
+
+        $rolesConfig = $match->game_state['_config']['modules']['roles_system'] ?? null;
+
+        if (!$rolesConfig || !($rolesConfig['enabled'] ?? false)) {
+            return [];
+        }
+
+        $rotatedRoles = [];
+        $roles = $rolesConfig['roles'] ?? [];
+
+        foreach ($roles as $roleConfig) {
+            $roleName = $roleConfig['name'];
+            $shouldRotate = $roleConfig['rotate_on_round_start'] ?? false;
+
+            if ($shouldRotate) {
+                // Delegar al método rotateRole() que maneja los tipos automáticamente
+                $newPlayerId = $this->rotateRole($match, $roleName);
+
+                // Solo registrar si realmente rotó (sequential mode)
+                if ($newPlayerId !== null) {
+                    $rotatedRoles[$roleName] = $newPlayerId;
+
+                    Log::info("[{$this->getGameSlug()}] Auto-rotated role", [
+                        'match_id' => $match->id,
+                        'round' => $currentRound,
+                        'role' => $roleName,
+                        'new_player' => $newPlayerId
+                    ]);
+                }
+            }
+        }
+
+        return $rotatedRoles;
+    }
+
+    /**
+     * Rotar un rol al siguiente jugador según el tipo de rotación configurado.
+     *
+     * Helper method que delega a PlayerManager y maneja persistencia/logging.
+     * Detecta automáticamente el tipo de rotación (sequential, single) desde la configuración.
+     *
+     * @param GameMatch $match
+     * @param string $roleName Nombre del rol a rotar
+     * @return int|null Player ID del nuevo jugador con el rol, o null si no rotó (single mode)
+     */
+    protected function rotateRole(GameMatch $match, string $roleName): ?int
+    {
+        // Obtener configuración de roles desde game_state
+        $rolesConfig = $match->game_state['_config']['modules']['roles_system']['roles'] ?? [];
+
+        $playerManager = $this->getPlayerManager($match);
+        $nextPlayerId = $playerManager->rotateRole($roleName, $rolesConfig);
+        $this->savePlayerManager($match, $playerManager);
+
+        // Solo log si realmente rotó (nextPlayerId no es null)
+        if ($nextPlayerId !== null) {
+            Log::info("[{$this->getGameSlug()}] Role rotated", [
+                'match_id' => $match->id,
+                'role' => $roleName,
+                'new_player' => $nextPlayerId,
+            ]);
+        }
+
+        return $nextPlayerId;
     }
 
 }

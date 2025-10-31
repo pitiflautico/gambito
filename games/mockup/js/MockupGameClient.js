@@ -29,16 +29,12 @@ export class MockupGameClient extends BaseGameClient {
                 this.handleBadAnswer();
             });
         }
-
-        // console.log('🧪 [Mockup] Test controls setup complete');
     }
 
     /**
      * Handler para Good Answer - finaliza la ronda inmediatamente
      */
     async handleGoodAnswer() {
-        // console.log('✅ [Mockup] Good Answer clicked - ending round immediately');
-
         try {
             const response = await fetch(`/api/rooms/${this.config.roomCode}/action`, {
                 method: 'POST',
@@ -58,8 +54,6 @@ export class MockupGameClient extends BaseGameClient {
                 console.error('❌ [Mockup] Good Answer failed:', data);
                 return;
             }
-
-            // console.log('✅ [Mockup] Good Answer successful:', data);
         } catch (error) {
             console.error('❌ [Mockup] Error calling Good Answer:', error);
         }
@@ -69,8 +63,6 @@ export class MockupGameClient extends BaseGameClient {
      * Handler para Bad Answer - bloquea al jugador
      */
     async handleBadAnswer() {
-        // console.log('❌ [Mockup] Bad Answer clicked - blocking player');
-
         try {
             const response = await fetch(`/api/rooms/${this.config.roomCode}/action`, {
                 method: 'POST',
@@ -90,8 +82,6 @@ export class MockupGameClient extends BaseGameClient {
                 console.error('❌ [Mockup] Bad Answer failed:', data);
                 return;
             }
-
-            // console.log('❌ [Mockup] Bad Answer successful:', data);
         } catch (error) {
             console.error('❌ [Mockup] Error calling Bad Answer:', error);
         }
@@ -168,32 +158,24 @@ export class MockupGameClient extends BaseGameClient {
                 // Llamar al handler del padre PRIMERO para que actualice this.gameState
                 super.handleGameStarted(event);
 
+                // Actualizar indicador de rol
+                this.updateRoleDisplay();
+
                 // CONVENCIÓN: Usar updateUI() para renderizar todo desde gameState
                 this.updateUI();
             },
             handlePhase1Started: (event) => {
-                // CONVENCIÓN: Render específico de Phase1 (evento custom)
                 this.renderPhase1();
             },
             handlePhase1Ended: (event) => {
-                // console.log('🏁 [Mockup] FASE 1 FINALIZADA - Timer expirado correctamente', event);
             },
             handlePhase2Started: (event) => {
-                // CONVENCIÓN: Render específico de Phase2 (evento custom)
                 this.renderPhase2();
             },
             handlePhaseStarted: (event) => {
-                // CONVENCIÓN: Handler genérico para fases simples (sin evento custom)
-
-                // Fase 3 usa evento genérico porque es simple (solo ocultar botones + mensaje)
                 if (event.phase_name === 'phase3') {
                     this.renderPhase3Generic();
                 }
-
-                // TimingModule detectará automáticamente el timer porque el evento tiene:
-                // - timer_id
-                // - duration
-                // - server_time
             }
         };
 
@@ -221,8 +203,6 @@ export class MockupGameClient extends BaseGameClient {
         if (descEl) {
             descEl.textContent = `Fase ${phaseName} en progreso...`;
         }
-
-        // console.log('📋 [Mockup] Fase actualizada:', phaseName, event);
     }
 
     /**
@@ -240,9 +220,13 @@ export class MockupGameClient extends BaseGameClient {
         // Actualizar UI de contador de rondas
         this.updateRoundCounter(currentRound, totalRounds);
 
+        // Actualizar display del rol (puede haber rotado)
+        this.updateRoleDisplay();
+
         // Limpiar estado de ronda anterior
         this.hideLockedMessage();
         this.hidePhase3Message();
+        this.hideAskerMessage();
 
         // Los botones se ocultarán en fase 1 y se mostrarán en fase 2 automáticamente
     }
@@ -255,7 +239,6 @@ export class MockupGameClient extends BaseGameClient {
         if (answerButtons) {
             answerButtons.style.display = 'block';
         }
-        // console.log('👀 [Mockup] Botones de respuesta mostrados');
     }
 
     /**
@@ -266,7 +249,37 @@ export class MockupGameClient extends BaseGameClient {
         if (answerButtons) {
             answerButtons.style.display = 'none';
         }
-        // console.log('🙈 [Mockup] Botones de respuesta ocultados');
+    }
+
+    /**
+     * Mostrar mensaje de asker con título personalizado por fase
+     */
+    showAskerMessage(phaseName) {
+        const askerMessage = document.getElementById('asker-message');
+        const askerPhaseTitle = document.getElementById('asker-phase-title');
+
+        if (askerMessage) {
+            askerMessage.style.display = 'block';
+        }
+
+        if (askerPhaseTitle) {
+            const phaseLabels = {
+                'phase1': 'You are the Asker - Phase 1',
+                'phase2': 'You are the Asker - Phase 2',
+                'phase3': 'You are the Asker - Phase 3'
+            };
+            askerPhaseTitle.textContent = phaseLabels[phaseName] || 'You are the Asker';
+        }
+    }
+
+    /**
+     * Ocultar mensaje de asker
+     */
+    hideAskerMessage() {
+        const askerMessage = document.getElementById('asker-message');
+        if (askerMessage) {
+            askerMessage.style.display = 'none';
+        }
     }
 
     /**
@@ -277,7 +290,6 @@ export class MockupGameClient extends BaseGameClient {
         if (phase3Message) {
             phase3Message.style.display = 'block';
         }
-        // console.log('📝 [Mockup] Mensaje de fase 3 mostrado (usando evento genérico)');
     }
 
     /**
@@ -288,7 +300,6 @@ export class MockupGameClient extends BaseGameClient {
         if (phase3Message) {
             phase3Message.style.display = 'none';
         }
-        // console.log('🙈 [Mockup] Mensaje de fase 3 ocultado');
     }
 
     /**
@@ -297,12 +308,7 @@ export class MockupGameClient extends BaseGameClient {
      * CONVENCIÓN: Usar updateUI() para re-renderizar todo desde gameState
      */
     handlePlayerReconnected(event) {
-        // console.log('🔌 [Mockup] Player reconnected event:', event);
-
-        // Llamar al handler del padre (actualiza this.gameState)
         super.handlePlayerReconnected(event);
-
-        // CONVENCIÓN: Re-renderizar TODA la UI desde gameState actualizado
         this.updateUI();
     }
 
@@ -310,23 +316,15 @@ export class MockupGameClient extends BaseGameClient {
      * Handler cuando un jugador es bloqueado
      */
     onPlayerLocked(event) {
-        // console.log('🔒 [Mockup] Player locked event:', event);
-
-        // Solo procesar si es el jugador actual
         if (event.player_id !== this.config.playerId) {
-            // console.log('🔒 [Mockup] Not current player, ignoring');
             return;
         }
 
-        // console.log('🔒 [Mockup] Current player locked - hiding buttons');
-
-        // Ocultar botones
         const answerButtons = document.getElementById('answer-buttons');
         if (answerButtons) {
             answerButtons.style.display = 'none';
         }
 
-        // Mostrar mensaje de bloqueado
         const lockedMessage = document.getElementById('locked-message');
         if (lockedMessage) {
             lockedMessage.style.display = 'block';
@@ -337,58 +335,82 @@ export class MockupGameClient extends BaseGameClient {
      * Handler cuando los jugadores son desbloqueados (nueva ronda)
      */
     onPlayerUnlocked(event) {
-        // console.log('🔓 [Mockup] Players unlocked event:', event);
-
-        // Restaurar botones
         const answerButtons = document.getElementById('answer-buttons');
         if (answerButtons) {
             answerButtons.style.display = 'block';
         }
 
-        // Ocultar mensaje de bloqueado
         const lockedMessage = document.getElementById('locked-message');
         if (lockedMessage) {
             lockedMessage.style.display = 'none';
         }
-
-        // console.log('🔓 [Mockup] Players unlocked - buttons restored');
     }
 
     /**
      * Restaurar estado de jugador bloqueado al reconectar
      */
     restorePlayerLockedState() {
-        // // console.log('🔄 [Mockup] Checking if need to restore locked state...', {
-        //     hasGameState: !!this.gameState,
-        //     gameState: this.gameState,
-        //     playerId: this.config.playerId
-        // });
-
-        // Verificar si tenemos gameState
         if (!this.gameState || !this.gameState.player_system) {
-            // console.log('⚠️ [Mockup] No player_system in gameState, skipping restore');
             return;
         }
 
         const playerSystem = this.gameState.player_system;
         const lockedPlayers = playerSystem.locked_players || [];
-
-        // console.log('🔍 [Mockup] Locked players:', lockedPlayers);
-
-        // Verificar si el jugador actual está bloqueado
         const isLocked = lockedPlayers.includes(this.config.playerId);
 
         if (isLocked) {
-            // console.log('🔄 [Mockup] Restoring locked state for player', this.config.playerId);
-
-            // Simular evento PlayerLockedEvent para restaurar UI
             this.onPlayerLocked({
                 player_id: this.config.playerId,
                 player_name: 'Current Player'
             });
-        } else {
-            // console.log('✅ [Mockup] Player is not locked, no need to restore');
         }
+    }
+
+    // ========================================================================
+    // MÉTODOS DE ROLES - Detección de rol del jugador actual
+    // ========================================================================
+
+    /**
+     * Obtener el rol del jugador actual
+     *
+     * @returns {string|null} El rol del jugador actual ('asker', 'guesser', etc.) o null si no tiene rol
+     */
+    getPlayerRole() {
+        if (!this.gameState?.player_system?.persistent_roles) {
+            console.log('🎭 [Mockup] No persistent_roles in gameState', this.gameState);
+            return null;
+        }
+
+        const role = this.gameState.player_system.persistent_roles[this.config.playerId];
+        console.log('🎭 [Mockup] Player role:', {
+            playerId: this.config.playerId,
+            role: role,
+            allRoles: this.gameState.player_system.persistent_roles
+        });
+        return role || null;
+    }
+
+    /**
+     * Actualizar el indicador visual de rol en la UI
+     */
+    updateRoleDisplay() {
+        const roleEl = document.getElementById('player-role');
+        if (roleEl) {
+            const role = this.getPlayerRole();
+            roleEl.textContent = role ? role.toUpperCase() : 'NO ROLE';
+            roleEl.className = role === 'asker' ? 'font-bold text-yellow-400' : 'font-bold text-green-400';
+        }
+    }
+
+    /**
+     * Verificar si el jugador actual tiene un rol específico
+     *
+     * @param {string} roleName - Nombre del rol a verificar ('asker', 'guesser', etc.)
+     * @returns {boolean} true si el jugador tiene ese rol
+     */
+    hasRole(roleName) {
+        const currentRole = this.getPlayerRole();
+        return currentRole === roleName;
     }
 
     // ========================================================================
@@ -412,8 +434,6 @@ export class MockupGameClient extends BaseGameClient {
             return;
         }
 
-        // console.log('🎨 [Mockup] Updating complete UI from gameState');
-
         // 1. Render general (elementos comunes)
         this.renderGeneral();
 
@@ -430,12 +450,9 @@ export class MockupGameClient extends BaseGameClient {
         this.restorePlayerLockedState();
 
         // 5. IMPORTANTE: Restaurar popup de desconexión si hay jugadores desconectados
-        // Esto previene que el popup desaparezca al renderizar
         if (this.presenceMonitor?.hasDisconnectedPlayers() && this.lastDisconnectedPlayerEvent) {
             this.showPlayerDisconnectedPopup(this.lastDisconnectedPlayerEvent);
         }
-
-        // console.log('✅ [Mockup] UI update completed');
     }
 
     /**
@@ -454,7 +471,6 @@ export class MockupGameClient extends BaseGameClient {
         const currentPhase = this.gameState.phase || this.gameState.current_phase;
 
         if (!currentPhase) {
-            // console.log('⚠️ [Mockup] No phase detected in gameState');
             return;
         }
 
@@ -470,7 +486,6 @@ export class MockupGameClient extends BaseGameClient {
         const phaseConfig = phasesConfig.find(p => p.name === currentPhase);
 
         if (!phaseConfig) {
-            // console.log(`⚠️ [Mockup] Phase "${currentPhase}" not found in config, skipping render`);
             return;
         }
 
@@ -478,7 +493,6 @@ export class MockupGameClient extends BaseGameClient {
         const renderMethod = phaseConfig.render_method;
 
         if (!renderMethod) {
-            // console.log(`⚠️ [Mockup] No render_method defined for phase "${currentPhase}"`);
             return;
         }
 
@@ -488,7 +502,6 @@ export class MockupGameClient extends BaseGameClient {
             return;
         }
 
-        // console.log(`🎯 [Mockup] Rendering phase "${currentPhase}" using method "${renderMethod}"`);
 
         // Llamar dinámicamente al método de render
         this[renderMethod]();
@@ -522,61 +535,97 @@ export class MockupGameClient extends BaseGameClient {
             }
         }
 
-        // console.log('🎨 [Mockup] General render completed', ui);
     }
 
     /**
      * 2. RENDER POR FASE: Phase1
      *
      * Fase de countdown (3 segundos).
-     * - Oculta botones de respuesta
-     * - Muestra timer de cuenta regresiva
+     * - Asker: Muestra mensaje "You are the Asker - Phase 1"
+     * - Guesser: Solo oculta botones (no mensajes aún)
      */
     renderPhase1() {
         const phaseUI = this.gameState._ui?.phases?.phase1;
 
+        // Actualizar indicador de rol
+        this.updateRoleDisplay();
+
         // Ocultar botones de respuesta durante countdown
         this.hideAnswerButtons();
 
-        // console.log('🎨 [Mockup] Phase1 render completed', phaseUI);
+        // Verificar rol del jugador actual
+        const playerRole = this.getPlayerRole();
+
+        if (playerRole === 'asker') {
+            // Mostrar mensaje de asker
+            this.showAskerMessage('phase1');
+        } else {
+            // Guesser: ocultar mensaje de asker (por si estaba visible)
+            this.hideAskerMessage();
+        }
+
     }
 
     /**
      * 2. RENDER POR FASE: Phase2
      *
      * Fase de respuesta.
-     * - Muestra botones de respuesta
-     * - Restaura estado de jugador bloqueado si ya votó
+     * - Asker: Muestra mensaje "You are the Asker - Phase 2", sin botones
+     * - Guesser: Muestra botones de respuesta, restaura estado de bloqueado si ya votó
      */
     renderPhase2() {
         const phaseUI = this.gameState._ui?.phases?.phase2;
 
-        // Mostrar botones de respuesta
-        this.showAnswerButtons();
+        // Actualizar indicador de rol
+        this.updateRoleDisplay();
 
-        // Si el jugador ya votó, restaurar estado de bloqueado
-        this.restorePlayerLockedState();
+        // Verificar rol del jugador actual
+        const playerRole = this.getPlayerRole();
 
-        // console.log('🎨 [Mockup] Phase2 render completed', phaseUI);
+        if (playerRole === 'asker') {
+            // Asker: Mostrar mensaje y ocultar botones
+            this.showAskerMessage('phase2');
+            this.hideAnswerButtons();
+        } else {
+            // Guesser: Ocultar mensaje de asker y mostrar botones
+            this.hideAskerMessage();
+            this.showAnswerButtons();
+
+            // Si el jugador ya votó, restaurar estado de bloqueado
+            this.restorePlayerLockedState();
+        }
+
     }
 
     /**
      * 2. RENDER GENÉRICO: Phase3 (usando handler genérico)
      *
      * Fase de resultados.
-     * - Oculta botones
-     * - Muestra mensaje de resultados
+     * - Asker: Muestra mensaje "You are the Asker - Phase 3", sin botones
+     * - Guesser: Muestra mensaje de fase 3 (evento genérico)
      */
     renderPhase3Generic() {
         const phaseUI = this.gameState._ui?.phases?.phase3;
 
-        // Ocultar botones
+        // Actualizar indicador de rol
+        this.updateRoleDisplay();
+
+        // Ocultar botones siempre en fase 3
         this.hideAnswerButtons();
 
-        // Mostrar mensaje de fase 3
-        this.showPhase3Message();
+        // Verificar rol del jugador actual
+        const playerRole = this.getPlayerRole();
 
-        // console.log('🎨 [Mockup] Phase3 render completed (generic)', phaseUI);
+        if (playerRole === 'asker') {
+            // Asker: Mostrar mensaje de asker
+            this.showAskerMessage('phase3');
+            this.hidePhase3Message();
+        } else {
+            // Guesser: Mostrar mensaje de fase 3
+            this.hideAskerMessage();
+            this.showPhase3Message();
+        }
+
     }
 
     // ========================================================================
@@ -600,7 +649,6 @@ export class MockupGameClient extends BaseGameClient {
             totalEl.textContent = totalRounds;
         }
 
-        // console.log('🔄 [Mockup] Round counter updated:', currentRound, '/', totalRounds);
     }
 
     /**

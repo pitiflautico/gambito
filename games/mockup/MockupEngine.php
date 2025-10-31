@@ -90,17 +90,48 @@ class MockupEngine extends BaseGameEngine
             ]
         ]);
 
-        // Inicializar PlayerManager (sin scoreCalculator porque usamos ScoreManager directamente)
-        $playerIds = $match->players->pluck('id')->toArray();
-        $playerManager = new \App\Services\Modules\PlayerSystem\PlayerManager(
-            playerIds: $playerIds,
-            scoreCalculator: null
-        );
+        // Inicializar PlayerManager
+        // Si ya existe player_system en game_state (ej: al reconectar), restaurarlo
+        // Si no existe, crear uno nuevo y asignar roles
+        if (isset($match->game_state['player_system'])) {
+            // Restaurar PlayerManager existente desde game_state
+            $playerManager = \App\Services\Modules\PlayerSystem\PlayerManager::fromArray($match->game_state);
+
+            Log::info("[Mockup] Restored existing PlayerManager from game_state", [
+                'match_id' => $match->id,
+                'players_count' => count($playerManager->getPlayerIds()),
+            ]);
+        } else {
+            // Primera vez: Crear nuevo PlayerManager y asignar roles
+            $playerIds = $match->players->pluck('id')->toArray();
+
+            // Obtener configuración de roles desde config.json
+            $rolesConfig = $match->game_state['_config']['modules']['roles_system']['roles'] ?? [];
+            $availableRoles = array_map(fn($role) => $role['name'], $rolesConfig);
+
+            $playerManager = new \App\Services\Modules\PlayerSystem\PlayerManager(
+                playerIds: $playerIds,
+                scoreCalculator: null,
+                config: [
+                    'available_roles' => $availableRoles
+                ]
+            );
+
+            // Asignar roles automáticamente desde config.json
+            $assignedRoles = $playerManager->autoAssignRolesFromConfig($rolesConfig, shuffle: true);
+
+            Log::info("[Mockup] Roles assigned automatically", [
+                'match_id' => $match->id,
+                'assignments' => $assignedRoles,
+            ]);
+        }
+
+        // Guardar PlayerManager en game_state
         $this->savePlayerManager($match, $playerManager);
 
         Log::info("[Mockup] Initialized successfully", [
             'match_id' => $match->id,
-            'total_players' => count($playerIds),
+            'total_players' => count($playerManager->getPlayerIds()),
         ]);
     }
 
@@ -316,24 +347,37 @@ class MockupEngine extends BaseGameEngine
             $match->game_state = $gameState;
             $match->save();
 
-            // Verificar si todos los jugadores están bloqueados
-            $allLocked = $playerManager->areAllPlayersLocked();
+            // Verificar si todos los GUESSERS están bloqueados (ignorar asker)
+            $guessers = $playerManager->getPlayersWithPersistentRole('guesser');
+            $lockedPlayers = $playerManager->getLockedPlayers();
 
-            Log::info("[Mockup] Player locked", [
+            // Contar cuántos guessers han respondido
+            $lockedGuessers = array_intersect($guessers, $lockedPlayers);
+            $allGuessersLocked = count($lockedGuessers) === count($guessers);
+
+            Log::info("[Mockup] Player locked - checking guesser status", [
                 'player_id' => $player->id,
-                'all_players_locked' => $allLocked,
+                'guessers_ids' => $guessers,
+                'locked_players_ids' => $lockedPlayers,
+                'locked_guessers_ids' => $lockedGuessers,
+                'total_guessers' => count($guessers),
+                'locked_guessers' => count($lockedGuessers),
+                'all_guessers_locked' => $allGuessersLocked,
             ]);
 
-            // Si todos los jugadores están bloqueados, forzar fin de ronda
-            if ($allLocked) {
-                Log::info("🔒 [Mockup] All players locked - forcing round end");
+            // Si todos los guessers están bloqueados, forzar fin de ronda
+            if ($allGuessersLocked) {
+                Log::info("🔒 [Mockup] All guessers locked - forcing round end", [
+                    'total_guessers' => count($guessers),
+                    'locked_guessers' => count($lockedGuessers),
+                ]);
 
                 return [
                     'success' => true,
                     'player_id' => $player->id,
                     'data' => ['action' => 'bad_answer'],
                     'force_end' => true,
-                    'end_reason' => 'all_players_locked',
+                    'end_reason' => 'all_guessers_locked',
                 ];
             }
 
@@ -475,6 +519,27 @@ class MockupEngine extends BaseGameEngine
 
         $scoreManager = $this->getScoreManager($match);
         return $scoreManager->getScores();
+    }
+
+    // ========================================================================
+    // MÉTODOS DE EVENTO: Callbacks para eventos del sistema
+    // ========================================================================
+
+    /**
+     * Hook: Ejecutado después de emitir RoundStartedEvent.
+     *
+     * Usa auto-rotación de BaseGameEngine basada en config.json.
+     */
+    protected function onRoundStarted(GameMatch $match, int $currentRound, int $totalRounds): void
+    {
+        Log::info("🔄 [Mockup] ROUND STARTED", [
+            'match_id' => $match->id,
+            'round' => $currentRound,
+            'total_rounds' => $totalRounds
+        ]);
+
+        // NOTA: La rotación de roles es ahora automática en BaseGameEngine::handleNewRound()
+        // No es necesario llamarla manualmente aquí
     }
 
     // ========================================================================

@@ -24,10 +24,6 @@
         "name": ".phase.changed",
         "handler": "handlePhaseChanged"
       },
-      "RoundStartedEvent": {
-        "name": ".round.started",
-        "handler": "handleRoundStarted"
-      },
       "RoundEndedEvent": {
         "name": ".round.ended",
         "handler": "handleRoundEnded"
@@ -115,6 +111,23 @@
     },
     "player_system": {
       "enabled": true
+    },
+    "roles_system": {
+      "enabled": true,
+      "roles": [
+        {
+          "name": "asker",
+          "count": 1,
+          "description": "El jugador que hace las preguntas",
+          "rotate_on_round_start": true
+        },
+        {
+          "name": "guesser",
+          "count": -1,
+          "description": "Los jugadores que adivinan",
+          "rotate_on_round_start": false
+        }
+      ]
     },
     "real_time_sync": {
       "enabled": true

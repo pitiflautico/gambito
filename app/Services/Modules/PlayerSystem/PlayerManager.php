@@ -4,6 +4,7 @@ namespace App\Services\Modules\PlayerSystem;
 
 use App\Models\GameMatch;
 use App\Models\Player;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Gestor unificado de jugadores (scores + estado).
@@ -662,6 +663,238 @@ class PlayerManager
     // ========================================================================
 
     /**
+     * Asignar roles automáticamente desde configuración de roles.
+     *
+     * Lee un array de configuración de roles y asigna según el campo 'count':
+     * - count = N: Asigna a N jugadores
+     * - count = -1: Asigna a todos los jugadores restantes
+     *
+     * @param array $rolesConfig Array de configuración [['name' => 'role1', 'count' => 1], ...]
+     * @param bool $shuffle Si mezclar jugadores antes de asignar (default: true)
+     * @return array Mapa de asignaciones [playerId => roleName]
+     */
+    public function autoAssignRolesFromConfig(array $rolesConfig, bool $shuffle = true): array
+    {
+        if (empty($rolesConfig)) {
+            return [];
+        }
+
+        $playerIds = array_keys($this->players);
+
+        if ($shuffle) {
+            shuffle($playerIds);
+        }
+
+        $assignedPlayers = [];
+
+        // Primera pasada: Asignar roles con count específico
+        foreach ($rolesConfig as $roleConfig) {
+            $roleName = $roleConfig['name'];
+            $count = $roleConfig['count'];
+
+            if ($count === -1) {
+                continue; // Lo procesamos después
+            }
+
+            // Asignar N jugadores
+            for ($i = 0; $i < $count && count($playerIds) > 0; $i++) {
+                $playerId = array_shift($playerIds);
+                $this->assignPersistentRole($playerId, $roleName);
+                $assignedPlayers[$playerId] = $roleName;
+            }
+        }
+
+        // Segunda pasada: Asignar roles con count = -1 (todos los restantes)
+        foreach ($rolesConfig as $roleConfig) {
+            $roleName = $roleConfig['name'];
+            $count = $roleConfig['count'];
+
+            if ($count !== -1) {
+                continue;
+            }
+
+            // Asignar todos los jugadores restantes
+            while (count($playerIds) > 0) {
+                $playerId = array_shift($playerIds);
+                $this->assignPersistentRole($playerId, $roleName);
+                $assignedPlayers[$playerId] = $roleName;
+            }
+        }
+
+        return $assignedPlayers;
+    }
+
+    /**
+     * Rotar un rol al siguiente jugador según el tipo de rotación configurado.
+     *
+     * Detecta automáticamente el tipo de rotación basándose en la configuración:
+     * - Sequential: Un rol principal (count: 1) + rol resto (count: -1) - rota secuencialmente
+     * - Single Role: Todos tienen el mismo rol - no rota (retorna OK)
+     *
+     * @param string $roleName Nombre del rol a rotar
+     * @param array $rolesConfig Configuración completa de roles desde config.json
+     * @return int|null Player ID del nuevo jugador con el rol, o null si no rotó
+     */
+    public function rotateRole(string $roleName, array $rolesConfig): ?int
+    {
+        // Detectar tipo de rotación basándose en la configuración
+        $rotationType = $this->detectRotationType($rolesConfig);
+
+        switch ($rotationType) {
+            case 'sequential':
+                // Detectar rol alternativo (el rol con count: -1)
+                $alternativeRole = null;
+                foreach ($rolesConfig as $roleConfig) {
+                    if ($roleConfig['name'] !== $roleName && ($roleConfig['count'] ?? 0) === -1) {
+                        $alternativeRole = $roleConfig['name'];
+                        break;
+                    }
+                }
+                return $this->rotateSequentialRole($roleName, $alternativeRole);
+
+            case 'single':
+                return $this->rotateSingleRole($roleName);
+
+            default:
+                throw new \InvalidArgumentException("Unknown rotation type: {$rotationType}");
+        }
+    }
+
+    /**
+     * Detectar el tipo de rotación basándose en la configuración de roles.
+     *
+     * Tipos:
+     * - sequential: Hay un rol principal (count: 1) y un rol resto (count: -1)
+     * - single: Todos los jugadores tienen el mismo rol (solo un rol definido)
+     *
+     * @param array $rolesConfig Array de configuración de roles
+     * @return string Tipo de rotación: 'sequential' o 'single'
+     */
+    private function detectRotationType(array $rolesConfig): string
+    {
+        $roleCount = count($rolesConfig);
+
+        // Si solo hay un rol definido, es modo "single role"
+        if ($roleCount === 1) {
+            return 'single';
+        }
+
+        // Si hay múltiples roles, buscar patrón sequential (main + rest)
+        $hasMainRole = false;
+        $hasRestRole = false;
+
+        foreach ($rolesConfig as $roleConfig) {
+            $count = $roleConfig['count'] ?? 0;
+
+            if ($count === 1) {
+                $hasMainRole = true;
+            } elseif ($count === -1) {
+                $hasRestRole = true;
+            }
+        }
+
+        // Si hay un rol main (count: 1) y un rol rest (count: -1), es sequential
+        if ($hasMainRole && $hasRestRole) {
+            return 'sequential';
+        }
+
+        // Por defecto, asumir sequential si no está claro
+        return 'sequential';
+    }
+
+    /**
+     * Rotar un rol específico al siguiente jugador (modo sequential).
+     *
+     * Modo Sequential: Un rol principal (count: 1) + un rol resto (count: -1).
+     * El rol principal rota secuencialmente, y el jugador anterior obtiene el rol resto.
+     *
+     * Ejemplo: 1 asker + rest guessers
+     * - Jugador 1 (asker) → Jugador 2 (asker)
+     * - Jugador 1 → guesser
+     *
+     * @param string $roleName Nombre del rol principal a rotar
+     * @param string|null $alternativeRole Rol resto (count: -1) para jugador que deja el rol
+     * @return int Player ID del nuevo jugador con el rol
+     */
+    private function rotateSequentialRole(string $roleName, ?string $alternativeRole = null): int
+    {
+        $allPlayerIds = array_keys($this->players);
+
+        // Obtener jugador actual con el rol
+        $currentPlayers = $this->getPlayersWithPersistentRole($roleName);
+        $currentPlayerId = !empty($currentPlayers) ? $currentPlayers[0] : null;
+
+        // Encontrar siguiente jugador en la lista (secuencial, no aleatorio)
+        if ($currentPlayerId === null) {
+            // Nadie tiene el rol, asignar al primero
+            $nextPlayerId = $allPlayerIds[0];
+        } else {
+            $currentIndex = array_search($currentPlayerId, $allPlayerIds);
+            $nextIndex = ($currentIndex + 1) % count($allPlayerIds); // Rotar circularmente
+            $nextPlayerId = $allPlayerIds[$nextIndex];
+
+            // Remover el rol del jugador actual
+            $this->removePersistentRole($currentPlayerId, $roleName);
+
+            // Si hay un rol alternativo, asignarlo al jugador que dejó el rol
+            if ($alternativeRole !== null) {
+                $this->assignPersistentRole($currentPlayerId, $alternativeRole);
+            }
+        }
+
+        // Asignar rol al siguiente jugador
+        $this->assignPersistentRole($nextPlayerId, $roleName);
+
+        return $nextPlayerId;
+    }
+
+    /**
+     * Rotar roles en modo "single role" (no rotación real).
+     *
+     * Modo Single Role: Todos los jugadores tienen el mismo rol, no hay rotación.
+     * Este método simplemente valida y retorna null (no hay cambio).
+     *
+     * Ejemplo: Todos son "player"
+     * - No cambia nada, todos siguen siendo "player"
+     *
+     * @param string $roleName Nombre del rol (todos tienen el mismo)
+     * @return null Siempre retorna null (no hay cambio)
+     */
+    private function rotateSingleRole(string $roleName): ?int
+    {
+        // En modo single role, todos tienen el mismo rol
+        // No hay rotación, simplemente retornar null indicando que no hay cambio
+        Log::info("[PlayerManager] Single role mode - No rotation needed", [
+            'role' => $roleName,
+            'message' => 'All players have the same role, no rotation performed'
+        ]);
+
+        return null;
+    }
+
+    /**
+     * Remover un rol persistente de un jugador.
+     *
+     * @param int $playerId ID del jugador
+     * @param string $roleName Nombre del rol a remover
+     * @return void
+     */
+    public function removePersistentRole(int $playerId, string $roleName): void
+    {
+        if (!isset($this->players[$playerId])) {
+            throw new \InvalidArgumentException("Player {$playerId} not found");
+        }
+
+        $player = $this->players[$playerId];
+
+        // Acceder directamente a la propiedad pública persistentRoles
+        $roles = array_filter($player->persistentRoles, fn($role) => $role !== $roleName);
+
+        // Actualizar los roles del jugador (reindexar array)
+        $player->persistentRoles = array_values($roles);
+    }
+
+    /**
      * Serializar a array para guardar en game_state.
      */
     public function toArray(): array
@@ -669,6 +902,8 @@ class PlayerManager
         $data = [
             'player_system' => [
                 'players' => [],
+                'persistent_roles' => [], // Mapa flat: playerId => role
+                'locked_players' => [], // Array de IDs de jugadores bloqueados
                 'config' => [
                     'available_roles' => $this->availableRoles,
                     'allow_multiple_persistent_roles' => $this->allowMultiplePersistentRoles,
@@ -679,6 +914,18 @@ class PlayerManager
 
         foreach ($this->players as $playerId => $player) {
             $data['player_system']['players'][$playerId] = $player->toArray();
+
+            // Exportar persistent_roles en formato flat para fácil acceso desde frontend
+            $playerRoles = $player->toArray()['persistent_roles'] ?? [];
+            if (!empty($playerRoles)) {
+                // Si solo tiene un rol, guardar como string; si tiene múltiples, como array
+                $data['player_system']['persistent_roles'][$playerId] = count($playerRoles) === 1 ? $playerRoles[0] : $playerRoles;
+            }
+
+            // Exportar locked_players para fácil acceso
+            if ($player->toArray()['locked'] ?? false) {
+                $data['player_system']['locked_players'][] = $playerId;
+            }
         }
 
         if ($this->trackScoreHistory) {
