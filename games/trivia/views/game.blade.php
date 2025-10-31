@@ -1,30 +1,30 @@
 <x-app-layout>
+    @vite(['resources/js/app.js', 'games/trivia/js/TriviaGameClient.js'])
     <x-slot name="header">
         <h2 class="font-semibold text-xl text-gray-800 leading-tight">
-            🎮 Trivia - Sala: {{ $code }}
+            🧠 Trivia - Sala: {{ $code }}
         </h2>
     </x-slot>
 
     <div class="py-12">
-        <div class="max-w-4xl mx-auto sm:px-6 lg:px-8">
+        <div class="max-w-5xl mx-auto sm:px-6 lg:px-8">
             <div class="bg-white overflow-hidden shadow-xl sm:rounded-lg">
                 <!-- Header -->
-                <div class="bg-green-600 px-6 py-4 text-center">
-                    <h3 class="text-2xl font-bold text-white">🎮 ¡EL JUEGO HA EMPEZADO!</h3>
+                <div id="game-header" class="px-6 py-4 text-center bg-indigo-600">
+                    <h3 class="text-2xl font-bold text-white">🧠 ¡Responde rápido y suma puntos!</h3>
                 </div>
 
                 <!-- Body -->
-                <div id="game-container" class="px-6 py-12">
-                    <!-- Loading State (usando componente Blade) -->
+                <div id="game-container" class="px-6 py-10">
+                    <!-- Loading State -->
                     <x-game.loading-state
                         id="loading-state"
-                        emoji="⏳"
-                        message="Esperando primera pregunta..."
+                        emoji="🧠"
+                        message="Esperando primera ronda..."
                         :roomCode="$code"
                     />
 
-                    <!-- Finished State (pantalla de resultados finales) -->
-                    {{-- Usando componente Blade genérico reutilizable --}}
+                    <!-- Finished State -->
                     <div id="finished-state" class="hidden">
                         <x-game.results-screen
                             :roomCode="$code"
@@ -34,49 +34,49 @@
                         />
                     </div>
 
-                    <!-- Question State (hidden initially) -->
-                    <div id="question-state" class="hidden relative">
-                        <!-- Locked Overlay (usando componente Blade) -->
-                        <div id="locked-overlay" class="hidden absolute inset-0 bg-gray-900 bg-opacity-60 backdrop-blur-sm z-10 flex items-center justify-center rounded-lg">
-                            <div class="bg-white px-8 py-6 rounded-lg shadow-xl">
-                                <x-game.player-lock
-                                    message="Ya respondiste"
-                                    icon="🔒"
-                                />
+                    <!-- Playing State -->
+                    <div id="playing-state" class="hidden">
+                        <!-- Round Info -->
+                        <x-game.round-info :current="1" :total="5" label="Ronda" />
+
+                        <!-- Phase Info -->
+                        <div class="text-center my-4">
+                            <p class="text-sm text-gray-600">Fase actual:</p>
+                            <p id="current-phase" class="text-xl font-bold text-gray-900">-</p>
+                        </div>
+
+                        <!-- Timer -->
+                        <div class="text-center my-4">
+                            <div class="inline-block bg-indigo-100 px-6 py-3 rounded-lg">
+                                <p class="text-sm text-indigo-600 font-semibold mb-1">Tiempo restante</p>
+                                <p id="timer" class="text-3xl font-mono font-bold text-indigo-900"></p>
                             </div>
                         </div>
 
-                        <!-- Round Info (usando componente Blade) -->
-                        <x-game.round-info
-                            :current="1"
-                            :total="10"
-                            label="Ronda"
-                        />
-                        <p id="players-answered" class="text-sm text-gray-500 mt-2 text-center">
-                            <!-- Se actualizará vía JavaScript -->
-                        </p>
-
-                        <!-- Category and Difficulty -->
-                        <div class="text-center mb-6 space-x-3">
-                            <span id="category-text" class="inline-block bg-purple-100 text-purple-800 text-sm font-semibold px-4 py-2 rounded-full"></span>
-                            <span id="difficulty-badge" class="inline-block px-2 py-1 text-xs font-semibold rounded"></span>
+                        <!-- Question Section -->
+                        <div id="question-section" class="mb-6">
+                            <div class="p-6 bg-indigo-50 border-2 border-indigo-200 rounded-lg text-center">
+                                <p id="question-text" class="text-lg font-semibold text-indigo-900">Preparados... la pregunta aparece y luego podrás responder.</p>
+                            </div>
                         </div>
 
-                        <!-- Question -->
-                        <div class="text-center mb-8">
-                            <h2 id="question-text" class="text-3xl font-bold text-gray-900 mb-2"></h2>
+                        <!-- Answer Options -->
+                        <div id="answer-buttons" class="hidden text-center mb-6">
+                            <div id="options-list" class="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-xl mx-auto"></div>
                         </div>
 
-                        <!-- Options -->
-                        <div id="options-container" class="space-y-3 max-w-2xl mx-auto">
-                            <!-- Options will be inserted here -->
+                        <!-- Locked Message -->
+                        <div id="locked-message" class="hidden text-center mb-6">
+                            <div class="inline-block px-4 py-2 bg-yellow-100 border border-yellow-300 text-yellow-800 rounded">
+                                Ya respondiste esta ronda. Espera la siguiente.
+                            </div>
                         </div>
 
-                        <!-- Timer (if present) -->
-                        <div class="text-center mt-8">
-                            <div class="inline-block bg-blue-100 px-6 py-3 rounded-lg">
-                                <p class="text-sm text-blue-600 font-semibold mb-1">Tiempo restante</p>
-                                <p id="timer" class="text-4xl font-mono font-bold text-blue-900"></p>
+                        <!-- Results Section -->
+                        <div id="results-section" class="hidden text-center">
+                            <div class="mb-4">
+                                <h3 class="text-xl font-bold text-gray-800">Resultados</h3>
+                                <p id="round-countdown" class="text-gray-600"></p>
                             </div>
                         </div>
                     </div>
@@ -85,150 +85,66 @@
         </div>
     </div>
 
-    {{-- Player Disconnected Popup (component genérico para todos los juegos) --}}
-    <x-game.player-disconnected-popup />
-
-    <style>
-        /* Timer warning styles */
-        #timer.countdown-warning {
-            color: #DC2626 !important;
-            animation: pulse 1s ease-in-out infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% {
-                opacity: 1;
-            }
-            50% {
-                opacity: 0.6;
-            }
-        }
-
-        #timer.timer-expired {
-            color: #EF4444 !important;
-        }
-    </style>
+    @include('mockup::partials.round_end_popup')
+    @include('mockup::partials.game_end_popup')
+    @include('mockup::partials.player_disconnected_popup')
 
     <script type="module">
-        // ========================================================================
-        // Trivia Game Client - Fase 4: WebSocket Bidirectional Communication
-        // ========================================================================
-
-        // EventManager, TimingModule y BaseGameClient ya están disponibles globalmente
-        // a través de resources/js/app.js cargado en el layout
-
-        // Cargar TriviaGameClient de forma lazy
-        await window.loadTriviaGameClient();
-        const { TriviaGameClient } = window;
-
-        // Configuración del juego desde PHP
         const config = {
             roomCode: '{{ $code }}',
             matchId: {{ $match->id }},
             playerId: {{ $playerId }},
+            userId: {{ $userId }},
             gameSlug: 'trivia',
-            players: [],  // Se cargará dinámicamente
+            players: [],
             scores: {},
             gameState: null,
             eventConfig: @json($eventConfig ?? null),
             timing: {}
         };
 
-        // Crear instancia del cliente de Trivia
-        const triviaClient = new TriviaGameClient(config);
+        const client = new window.TriviaGameClient(config);
 
-        // 🔥 FIX: Cargar estado inicial ANTES de conectar WebSockets
-        // Esto previene race conditions donde los eventos llegan antes del estado inicial
+        // Cargar estado inicial
         (async () => {
             try {
                 const response = await fetch(`/api/rooms/{{ $code }}/state`);
                 if (response.ok) {
                     const data = await response.json();
                     const gameState = data.game_state;
+                    client.players = data.players || [];
+                    client.gameState = gameState;
 
-                    // Cargar players desde el estado
-                    if (gameState?._config?.players) {
-                        triviaClient.players = Object.values(gameState._config.players);
-                    }
+                    // Cargar scores desde player_system
+                    const playerSystem = gameState.player_system?.players || {};
+                    client.scores = {};
+                    Object.keys(playerSystem).forEach(pid => {
+                        client.scores[pid] = playerSystem[pid].score || 0;
+                    });
 
-                    // Cargar scores desde el estado
-                    if (gameState?.scores) {
-                        triviaClient.scores = gameState.scores;
-                    }
+                    // Render inicial
+                    client.updateUI();
 
-                    // 🎯 PRIORIDAD 1: Si el juego terminó, mostrar pantalla de resultados
+                    // Si terminó, restaurar resultados
                     if (gameState?.phase === 'finished') {
-
-                        // Ocultar loading y question states
-                        triviaClient.hideElement('loading-state');
-                        triviaClient.hideElement('question-state');
-
-                        // Mostrar finished state
-                        triviaClient.showElement('finished-state');
-
-                        // Renderizar podio con ranking y scores finales
-                        if (gameState.ranking && gameState.final_scores) {
-                            triviaClient.renderPodium(gameState.ranking, gameState.final_scores, 'podium');
-                        }
-
-                        return; // ← No cargar más estados si ya terminó
-                    }
-
-                    // 🎯 PRIORIDAD 2: Si hay una pregunta activa, mostrarla
-                    if (gameState?.current_question) {
-                        // Crear evento simulado con la misma estructura que RoundStartedEvent
-                        const eventData = {
-                            current_round: gameState.round_system?.current_round || 1,
-                            total_rounds: gameState.round_system?.total_rounds || 10,
+                        const finishedEvent = {
+                            winner: gameState.winner || null,
+                            ranking: gameState.ranking || [],
+                            scores: client.scores,
                             game_state: gameState
                         };
-
-                        // Mostrar la pregunta primero
-                        triviaClient.handleRoundStarted(eventData);
-
-                        // Agregar timing metadata si hay un timer activo
-                        // NOTA: El timer ahora está en el PhaseManager, no en round
-                        const timerData = gameState.timer_system?.timers?.round;
-                        if (timerData) {
-                            // Reconstruir timing metadata desde el timer del backend
-                            const startedAt = new Date(timerData.started_at).getTime() / 1000; // a segundos UNIX
-                            const pausedAt = timerData.paused_at ? new Date(timerData.paused_at).getTime() / 1000 : null;
-                            const duration = timerData.duration;
-
-                            // Simular PhaseChangedEvent para que BaseGameClient reinicie el timer
-                            const phaseEvent = {
-                                new_phase: 'main',
-                                previous_phase: '',
-                                additional_data: {
-                                    server_time: startedAt,
-                                    duration: duration
-                                }
-                            };
-
-                            // Después de mostrar la pregunta, emitir el evento de fase
-                            // para que BaseGameClient.handlePhaseChanged() reinicie el timer
-                            setTimeout(() => {
-                                triviaClient.handlePhaseChanged(phaseEvent);
-                            }, 100);
-                        }
-
-                        // Si ya respondimos, mostrar overlay de bloqueado
-                        // Los locks se guardan en player_state_system.locks como objeto {playerId: true/false}
-                        const locks = gameState.player_state_system?.locks || {};
-                        if (locks[config.playerId] === true) {
-                            triviaClient.hasAnswered = true;
-                            triviaClient.showElement('locked-overlay');
-                        }
+                        client.handleGameFinished(finishedEvent);
                     }
-                } else {
-                    console.warn('⚠️ [Trivia] Could not load initial state');
                 }
-            } catch (error) {
-                console.error('❌ [Trivia] Error loading initial state:', error);
+            } catch (e) {
+                console.error('[Trivia] Error loading initial state', e);
             }
 
-            // Configurar Event Manager DESPUÉS de cargar el estado inicial
-            triviaClient.setupEventManager();
+            // Wire botones
+            document.getElementById('btn-correct')?.addEventListener('click', () => client.sendCorrectAnswer());
+            document.getElementById('btn-wrong')?.addEventListener('click', () => client.sendWrongAnswer());
         })();
     </script>
 </x-app-layout>
+
+

@@ -2,24 +2,17 @@
   "slug": "trivia",
   "version": "1.0",
   "requires": {
-    "modules": {
-      "session_manager": "^1.0",
-      "event_manager": "^1.0",
-      "turn_system": "^1.0",
-      "scoring_system": "^1.0",
-      "timer_system": "^1.0",
-      "round_system": "^1.0",
-      "guest_system": "^1.0"
-    }
+    "websockets": true,
+    "roles": true,
+    "timers": true,
+    "scoring": true
   },
   "provides": {
     "events": [
-      "GameFinishedEvent"
+      "Phase1StartedEvent",
+      "Phase1EndedEvent"
     ],
-    "routes": [
-      "/api/trivia/answer",
-      "/api/trivia/countdown-ended"
-    ],
+    "routes": [],
     "views": [
       "games/trivia/game"
     ]
@@ -27,6 +20,52 @@
   "event_config": {
     "channel": "room.{roomCode}",
     "events": {
+      "GameStartedEvent": {
+        "name": "game.started",
+        "description": "Sistema: Juego iniciado",
+        "handler": "handleGameStarted"
+      },
+      "RoundStartedEvent": {
+        "name": "game.round.started",
+        "description": "Sistema: Nueva ronda iniciada",
+        "handler": "handleRoundStarted"
+      },
+      "RoundEndedEvent": {
+        "name": "game.round.ended",
+        "description": "Sistema: Ronda finalizada",
+        "handler": "handleRoundEnded"
+      },
+      "PhaseChangedEvent": {
+        "name": "game.phase.changed",
+        "description": "Sistema: Cambio de fase",
+        "handler": "handlePhaseChanged"
+      },
+      "Phase1StartedEvent": {
+        "name": "trivia.question.started",
+        "description": "Trivia: Pregunta mostrada",
+        "handler": "handleQuestionStarted"
+      },
+      "Phase1EndedEvent": {
+        "name": "trivia.question.ended",
+        "description": "Trivia: Pregunta finalizada",
+        "handler": "handleQuestionEnded"
+      },
+      "PhaseStartedEvent": {
+        "name": "game.phase.started",
+        "description": "Sistema: Fase genérica iniciada",
+        "handler": "handlePhaseStarted"
+      },
+      "PlayerLockedEvent": {
+        "name": "game.player.locked",
+        "description": "Sistema: Jugador bloqueado",
+        "handler": "handlePlayerLocked"
+      },
+      "PlayersUnlockedEvent": {
+        "name": "players.unlocked",
+        "description": "Sistema: Jugadores desbloqueados",
+        "handler": "handlePlayersUnlocked"
+      }
     }
   }
 }
+

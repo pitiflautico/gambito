@@ -2,121 +2,122 @@
   "id": "trivia",
   "name": "Trivia",
   "slug": "trivia",
-  "description": "Responde preguntas de cultura general, deportes y ciencia. Gana puntos por respuestas correctas y bonificaciones por velocidad.",
+  "version": "1.0.0",
+  "description": "Juego de preguntas y respuestas con fases y puntuación",
   "minPlayers": 2,
-  "maxPlayers": 10,
-  "estimatedDuration": "10-15 minutos",
-  "type": "trivia",
-  "isPremium": false,
-  "version": "1.0",
-  "author": "Gambito",
+  "maxPlayers": 8,
+  "estimatedDuration": 15,
 
-  "customizableSettings": {
-    "questions_per_game": {
-      "type": "number",
-      "label": "Preguntas por partida",
-      "description": "Número de preguntas que tendrá la partida",
-      "default": 10,
-      "min": 5,
-      "max": 30,
-      "step": 1
-    },
-    "time_per_question": {
-      "type": "select",
-      "label": "Tiempo por pregunta",
-      "description": "Segundos disponibles para responder cada pregunta",
-      "default": 15,
-      "options": [
-        { "value": 10, "label": "10 segundos (rápido)" },
-        { "value": 15, "label": "15 segundos (normal)" },
-        { "value": 20, "label": "20 segundos (relajado)" },
-        { "value": 30, "label": "30 segundos (pensado)" }
-      ]
-    },
-    "difficulty": {
-      "type": "select",
-      "label": "Dificultad",
-      "description": "Nivel de dificultad de las preguntas",
-      "default": "mixed",
-      "options": [
-        { "value": "easy", "label": "Fácil" },
-        { "value": "medium", "label": "Media" },
-        { "value": "hard", "label": "Difícil" },
-        { "value": "mixed", "label": "Mixta (todas)" }
-      ]
-    },
-    "category": {
-      "type": "select",
-      "label": "Categoría",
-      "description": "Tipo de preguntas a incluir",
-      "default": "mixed",
-      "options": [
-        { "value": "mixed", "label": "Mixta (todas)" },
-        { "value": "general", "label": "Cultura general" },
-        { "value": "deportes", "label": "Deportes" },
-        { "value": "ciencia", "label": "Ciencia" }
-      ]
+  "timing": {
+    "round_ended": {
+      "type": "countdown",
+      "message": "Siguiente ronda en",
+      "delay": 3,
+      "auto_next": true
     }
   },
 
-  "turnSystemConfig": {
-    "mode": "simultaneous",
-    "allowModeChange": false,
-    "description": "Todos los jugadores responden simultáneamente cada pregunta"
-  },
-
-  "timing": {
-    "game_start": {
-      "auto_next": true,
-      "delay": 3,
-      "message": "Empezando"
-    },
-    "round_ended": {
-      "auto_next": true,
-      "delay": 3,
-      "message": "Siguiente pregunta"
-    },
-    "countdown_warning_threshold": 3
-  },
-
-  "scoring": {
-    "base_points": {
-      "easy": 80,
-      "medium": 90,
-      "hard": 100
-    },
-    "speed_bonus_max": 50
+  "event_config": {
+    "channel": "room.{roomCode}",
+    "events": {
+      "PhaseChangedEvent": {
+        "name": ".phase.changed",
+        "handler": "handlePhaseChanged"
+      },
+      "RoundEndedEvent": {
+        "name": ".round.ended",
+        "handler": "handleRoundEnded"
+      },
+      "Phase1StartedEvent": {
+        "name": ".trivia.question.started",
+        "handler": "handleQuestionStarted"
+      },
+      "Phase1EndedEvent": {
+        "name": ".trivia.question.ended",
+        "handler": "handleQuestionEnded"
+      },
+      "PhaseStartedEvent": {
+        "name": ".game.phase.started",
+        "handler": "handlePhaseStarted"
+      },
+      "PhaseEndedEvent": {
+        "name": ".game.phase.ended",
+        "handler": "handlePhaseEnded"
+      },
+      "PlayerLockedEvent": {
+        "name": ".game.player.locked",
+        "handler": "handlePlayerLocked"
+      },
+      "PlayersUnlockedEvent": {
+        "name": ".players.unlocked",
+        "handler": "handlePlayersUnlocked"
+      }
+    }
   },
 
   "modules": {
-    "turn_system": {
+    "game_core": { "enabled": true },
+    "room_manager": { "enabled": true },
+    "guest_system": { "enabled": true },
+    "round_system": { "enabled": true, "total_rounds": 5, "inter_round_delay": 3 },
+    "phase_system": {
       "enabled": true,
-      "mode": "simultaneous",
-      "round_per_turn": true,
-      "time_limit": 15
+      "phases": [
+        {
+          "name": "question",
+          "duration": 25,
+          "on_start": "App\\Events\\Trivia\\Phase1StartedEvent",
+          "on_end": "App\\Events\\Game\\PhaseEndedEvent",
+          "on_end_callback": "handleQuestionEnded",
+          "render_method": "renderQuestion"
+        }
+      ]
     },
-    "scoring_system": {
+    "timer_system": { "enabled": true },
+    "scoring_system": { "enabled": true },
+    "player_system": { "enabled": true },
+    "roles_system": {
       "enabled": true,
-      "track_history": true,
-      "allow_negative_scores": false
+      "roles": [
+        { "name": "player", "count": -1, "description": "Jugador de trivia", "rotate_on_round_start": false }
+      ]
     },
-    "timer_system": {
-      "enabled": true,
-      "round_duration": 15
+    "real_time_sync": { "enabled": true }
+  },
+
+  "customizableSettings": {
+    "rounds": { "type": "number", "label": "Número de rondas", "default": 5, "min": 1, "max": 20 },
+    "question_selection": {
+      "type": "select",
+      "label": "Modo de selección de preguntas",
+      "default": "shuffle",
+      "options": [
+        { "value": "shuffle", "label": "Aleatorio (todas las categorías)" },
+        { "value": "category", "label": "Solo una categoría" }
+      ]
     },
-    "round_system": {
-      "enabled": true,
-      "total_rounds": 10
+    "question_category": {
+      "type": "select",
+      "label": "Categoría",
+      "default": "easy",
+      "options": [
+        { "value": "easy", "label": "Fácil" },
+        { "value": "medium", "label": "Media" },
+        { "value": "hard", "label": "Difícil" }
+      ]
     },
-    "teams_system": {
-      "enabled": false,
-      "allow_toggle": true,
-      "default_mode": "all_teams",
-      "available_modes": ["all_teams"],
-      "min_teams": 2,
-      "max_teams": 4,
-      "default_teams": 2,
-      "require_all_team_members": false
+    "speed_scoring_enabled": {
+      "type": "checkbox",
+      "label": "Habilitar bonus por velocidad",
+      "default": true
+    },
+    "speed_scoring_max_bonus": {
+      "type": "number",
+      "label": "Bonus máximo por velocidad",
+      "default": 10,
+      "min": 0,
+      "max": 50
     }
   }
 }
+

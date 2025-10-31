@@ -77,8 +77,8 @@
                     </div>
                 </a>
 
-                <!-- Ver Juegos -->
-                <a href="{{ route('games.index') }}" class="block group">
+                <!-- Crear Juego (redirige a crear sala con selección de juego) -->
+                <a href="{{ route('rooms.create') }}" class="block group">
                     <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg hover:shadow-md transition">
                         <div class="p-6">
                             <div class="flex items-center space-x-4">

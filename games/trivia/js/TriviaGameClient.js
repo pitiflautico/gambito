@@ -1,293 +1,333 @@
-// BaseGameClient ya está disponible globalmente a través de resources/js/app.js
+// BaseGameClient está disponible globalmente desde resources/js/app.js
 const { BaseGameClient } = window;
 
-/**
- * TriviaGameClient - Cliente específico para el juego de Trivia
- *
- * Extiende BaseGameClient e implementa la lógica específica de Trivia:
- * - Mostrar preguntas y opciones
- * - Enviar respuestas con optimistic updates
- * - Bloquear jugador después de responder
- * - Mostrar resultados de ronda
- *
- * Fase 4: WebSocket Bidirectional Communication (Frontend)
- */
-class TriviaGameClient extends BaseGameClient {
+export class TriviaGameClient extends BaseGameClient {
     constructor(config) {
         super(config);
-
-        // Referencias a elementos DOM
-        this.loadingState = document.getElementById('loading-state');
-        this.questionState = document.getElementById('question-state');
-        this.lockedOverlay = document.getElementById('locked-overlay');
-        this.questionText = document.getElementById('question-text');
-        this.categoryText = document.getElementById('category-text');
-        this.difficultyBadge = document.getElementById('difficulty-badge');
-        this.optionsContainer = document.getElementById('options-container');
-        this.currentRoundEl = document.getElementById('current-round');
-        this.totalRoundsEl = document.getElementById('total-rounds');
-        this.playersAnsweredEl = document.getElementById('players-answered');
-
-        // Estado interno del juego
-        this.currentQuestion = null;
-        this.hasAnswered = false;
-        this.answersCount = 0;
+        this.config = config;
+        this.customHandlers = null;
+        // Alineado con Mockup: registrar handlers al construir
+        this.setupEventManager();
     }
 
-    /**
-     * Override: Manejar inicio de ronda (nueva pregunta)
-     */
-    async handleRoundStarted(event) {
-        await super.handleRoundStarted(event);
+    setupEventManager() {
+        this.customHandlers = {
+            handleDomLoaded: (event) => {
+                super.handleDomLoaded(event);
+                this.restorePlayerLockedState();
+            },
+            handleGameStarted: (event) => {
+                super.handleGameStarted(event);
+                this.updateUI();
+            },
+            handlePhaseChanged: (event) => {
+                super.handlePhaseChanged(event);
+                this.updatePhaseDisplay(event);
+            },
+            handleRoundStarted: (event) => {
+                super.handleRoundStarted(event);
+                this.updateRoundCounter(
+                    this.gameState?.round_system?.current_round || 1,
+                    this.gameState?._config?.modules?.round_system?.total_rounds || 5
+                );
+                this.hideLockedMessage();
+                // Asegurar cambio a estado de juego visible
+                document.getElementById('loading-state')?.classList.add('hidden');
+                document.getElementById('playing-state')?.classList.remove('hidden');
+            },
+            handleRoundEnded: (event) => {
+                super.handleRoundEnded(event);
+            },
+            // Custom events (aligned with capabilities/config)
+            handleQuestionStarted: (event) => {
+                console.log('[Trivia] handleQuestionStarted payload:', event);
+                // Fase única: pintar pregunta y opciones a la vez
+                this.updatePhaseDisplay({ additional_data: { phase_name: 'question' } });
 
-        // Extraer pregunta del evento
-        // El evento genérico envía game_state completo, necesitamos extraer current_question
-        const questionData = event.game_state?.current_question || event;
+                // Pregunta
+                if (event?.question_text) {
+                    const qTextEl = document.getElementById('question-text');
+                    if (qTextEl) qTextEl.textContent = event.question_text;
+                }
+                // Fallback: si no viene en payload, leer de gameState._ui
+                if (!event?.question_text) {
+                    const text = this.gameState?._ui?.phases?.question?.text;
+                    const qTextEl = document.getElementById('question-text');
+                    if (qTextEl && text) qTextEl.textContent = text;
+                }
+                if (!event?.question_text && !this.gameState?._ui?.phases?.question?.text) {
+                    console.warn('[Trivia] No question text in event or gameState, fetching state...');
+                    fetch(`/api/rooms/${this.config.roomCode}/state`).then(r => r.json()).then(data => {
+                        this.gameState = data.game_state;
+                        const text = this.gameState?._ui?.phases?.question?.text;
+                        const qTextEl = document.getElementById('question-text');
+                        if (qTextEl && text) qTextEl.textContent = text;
+                    }).catch(() => {});
+                }
+                const questionEl = document.getElementById('question-section');
+                questionEl?.classList.remove('hidden');
 
-        this.currentQuestion = {
-            question: questionData.question || event.question,
-            options: questionData.options || event.options,
-            category: questionData.category || event.category || 'General',
-            difficulty: questionData.difficulty || event.difficulty || 'medium',
-            questionNumber: event.current_round,
-            totalQuestions: event.total_rounds
+                // Opciones
+                const list = document.getElementById('options-list');
+                let options = Array.isArray(event?.options) ? event.options : (this.gameState?._ui?.phases?.answering?.options || []);
+                const correctIndex = typeof event?.correct_index === 'number' ? event.correct_index : this.gameState?._ui?.phases?.answering?.correct_option;
+                if (list && Array.isArray(options)) {
+                    list.innerHTML = '';
+                    options.forEach((opt, idx) => {
+                        const btn = document.createElement('button');
+                        btn.className = 'w-full px-4 py-3 bg-gray-100 hover:bg-gray-200 rounded-lg border';
+                        btn.textContent = opt;
+                        btn.addEventListener('click', () => {
+                            // Enviar respuesta al backend para validación server-side
+                            this.sendAnswer(idx);
+                            // Optimista: ocultar botones hasta respuesta del servidor
+                            this.hideAnswerButtons();
+                        });
+                        list.appendChild(btn);
+                    });
+                    document.getElementById('answer-buttons')?.classList.remove('hidden');
+                }
+                if ((!Array.isArray(options) || options.length === 0) && list) {
+                    console.warn('[Trivia] No options in event or gameState, fetching state...');
+                    fetch(`/api/rooms/${this.config.roomCode}/state`).then(r => r.json()).then(data => {
+                        this.gameState = data.game_state;
+                        const opts = this.gameState?._ui?.phases?.answering?.options || [];
+                        const correct = this.gameState?._ui?.phases?.answering?.correct_option;
+                        list.innerHTML = '';
+                        opts.forEach((opt, idx) => {
+                            const btn = document.createElement('button');
+                            btn.className = 'w-full px-4 py-3 bg-gray-100 hover:bg-gray-200 rounded-lg border';
+                            btn.textContent = opt;
+                            btn.addEventListener('click', () => {
+                                if (typeof correct === 'number' && idx === correct) {
+                                    this.sendCorrectAnswer();
+                                } else {
+                                    this.sendWrongAnswer();
+                                }
+                            });
+                            list.appendChild(btn);
+                        });
+                        if (opts.length > 0) {
+                            document.getElementById('answer-buttons')?.classList.remove('hidden');
+                        }
+                    }).catch(() => {});
+                }
+
+                // Mostrar playing-state
+                document.getElementById('loading-state')?.classList.add('hidden');
+                document.getElementById('playing-state')?.classList.remove('hidden');
+            },
+            handleQuestionEnded: (event) => {
+            },
+            // handleAnsweringStarted ya no se usa en fase única
+            // Generic
+            handlePhaseStarted: (event) => {
+                if (event.phase_name === 'results') {
+                    this.renderResultsGeneric();
+                }
+            },
+            handlePlayerLocked: (event) => {
+                this.onPlayerLocked(event);
+            },
+            handlePlayersUnlocked: (event) => {
+                this.onPlayersUnlocked(event);
+            },
         };
 
-        // Resetear estado de respuesta
-        this.hasAnswered = false;
-        this.answersCount = 0;
-
-        // Mostrar pregunta
-        this.displayQuestion();
+        super.setupEventManager(this.customHandlers);
     }
 
-    /**
-     * Mostrar pregunta en la UI
-     */
-    displayQuestion() {
-        if (!this.currentQuestion) {
-            console.warn('⚠️ [TriviaGameClient] No current question to display');
-            return;
-        }
-
-        // Ocultar loading, mostrar pregunta
-        this.hideElement('loading-state');
-        this.hideElement('locked-overlay');
-        this.showElement('question-state');
-
-        // Actualizar información de ronda
-        if (this.currentRoundEl) {
-            this.currentRoundEl.textContent = this.currentQuestion.questionNumber;
-        }
-        if (this.totalRoundsEl) {
-            this.totalRoundsEl.textContent = this.currentQuestion.totalQuestions;
-        }
-
-        // Actualizar categoría
-        if (this.categoryText) {
-            this.categoryText.textContent = this.currentQuestion.category;
-        }
-
-        // Actualizar dificultad
-        if (this.difficultyBadge) {
-            this.difficultyBadge.textContent = this.currentQuestion.difficulty.toUpperCase();
-            this.difficultyBadge.className = this.getDifficultyClass(this.currentQuestion.difficulty);
-        }
-
-        // Actualizar texto de pregunta
-        if (this.questionText) {
-            this.questionText.textContent = this.currentQuestion.question;
-        }
-
-        // Renderizar opciones
-        this.renderOptions();
-    }
-
-    /**
-     * Renderizar opciones de respuesta como botones
-     */
-    renderOptions() {
-        if (!this.optionsContainer || !this.currentQuestion) {
-            console.warn('⚠️ [TriviaGameClient] Cannot render options');
-            return;
-        }
-
-        // Limpiar opciones anteriores
-        this.optionsContainer.innerHTML = '';
-
-        // Crear botones para cada opción
-        this.currentQuestion.options.forEach((option, index) => {
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'w-full bg-white hover:bg-blue-50 border-2 border-gray-300 hover:border-blue-500 rounded-lg px-6 py-4 text-left font-medium text-gray-800 transition-all duration-150 hover:shadow-md';
-            button.dataset.answerIndex = index;
-            button.textContent = option;
-
-            // Agregar event listener
-            button.addEventListener('click', () => this.submitAnswer(index));
-
-            this.optionsContainer.appendChild(button);
-        });
-    }
-
-    /**
-     * Enviar respuesta del jugador (Fase 4 - con optimistic updates)
-     */
-    async submitAnswer(answerIndex) {
-        // Verificar que no haya respondido ya
-        if (this.hasAnswered) {
-            console.warn('⚠️ [TriviaGameClient] Already answered this question');
-            return;
-        }
-
-        // Marcar como respondido (local)
-        this.hasAnswered = true;
-
+    // ==============================
+    // Acciones del jugador
+    // ==============================
+    async sendCorrectAnswer() {
         try {
-            // Enviar acción con optimistic update
-            const result = await this.sendGameAction('answer', {
-                answer_index: answerIndex
-            }, true); // ← optimistic = true
-
-        } catch (error) {
-            console.error('❌ [TriviaGameClient] Error submitting answer:', error);
-
-            // El error ya revirtió el optimistic update via revertOptimisticUpdate()
-            // Solo necesitamos resetear el flag local
-            this.hasAnswered = false;
-        }
-    }
-
-    /**
-     * Aplicar actualización optimista (Fase 4)
-     *
-     * Se ejecuta INMEDIATAMENTE al hacer click en una respuesta,
-     * ANTES de enviar al servidor.
-     */
-    applyOptimisticUpdate(action, data) {
-        if (action === 'answer') {
-            // Deshabilitar todos los botones de respuesta
-            if (this.optionsContainer) {
-                const buttons = this.optionsContainer.querySelectorAll('button');
-                buttons.forEach(btn => {
-                    btn.disabled = true;
-                    btn.classList.add('opacity-50', 'cursor-not-allowed');
-                    btn.classList.remove('hover:bg-blue-50', 'hover:border-blue-500');
-                });
+            const response = await fetch(`/api/rooms/${this.config.roomCode}/action`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                },
+                body: JSON.stringify({ action: 'correct_answer', data: {} })
+            });
+            if (!response.ok) {
+                console.error('[Trivia] correct_answer failed');
             }
-
-            // Mostrar overlay de "bloqueado"
-            this.showElement('locked-overlay');
+        } catch (e) {
+            console.error('[Trivia] correct_answer error', e);
         }
     }
 
-    /**
-     * Revertir actualización optimista (Fase 4)
-     *
-     * Se ejecuta si la acción falla en el servidor.
-     */
-    revertOptimisticUpdate(action, data) {
-        if (action === 'answer') {
-            // Re-habilitar botones de respuesta
-            if (this.optionsContainer) {
-                const buttons = this.optionsContainer.querySelectorAll('button');
-                buttons.forEach(btn => {
-                    btn.disabled = false;
-                    btn.classList.remove('opacity-50', 'cursor-not-allowed');
-                    btn.classList.add('hover:bg-blue-50', 'hover:border-blue-500');
-                });
+    async sendWrongAnswer() {
+        try {
+            const response = await fetch(`/api/rooms/${this.config.roomCode}/action`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                },
+                body: JSON.stringify({ action: 'wrong_answer', data: {} })
+            });
+            if (!response.ok) {
+                console.error('[Trivia] wrong_answer failed');
             }
-
-            // Ocultar overlay de "bloqueado"
-            this.hideElement('locked-overlay');
+        } catch (e) {
+            console.error('[Trivia] wrong_answer error', e);
         }
     }
 
-    /**
-     * Override: Manejar acción de jugador
-     *
-     * Este evento se emite cuando CUALQUIER jugador realiza una acción.
-     * Lo usamos para actualizar el contador de "X de Y jugadores han respondido"
-     */
-    handlePlayerAction(event) {
-        // Si es una respuesta, actualizar contador
-        if (event.action_type === 'answer' && event.success) {
-            this.answersCount++;
-            this.updatePlayersAnsweredDisplay();
+    async sendAnswer(optionIndex) {
+        try {
+            const response = await fetch(`/api/rooms/${this.config.roomCode}/action`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                },
+                body: JSON.stringify({ action: 'answer', data: { option_index: optionIndex } })
+            });
+            if (!response.ok) {
+                console.error('[Trivia] answer failed');
+            }
+        } catch (e) {
+            console.error('[Trivia] answer error', e);
         }
     }
 
-    /**
-     * Actualizar display de "X de Y jugadores han respondido"
-     */
-    updatePlayersAnsweredDisplay() {
-        if (this.playersAnsweredEl) {
-            const totalPlayers = this.players.length;
-            this.playersAnsweredEl.textContent = `${this.answersCount} de ${totalPlayers} jugadores han respondido`;
+    // ==============================
+    // Render general/por fase
+    // ==============================
+    updateUI() {
+        if (!this.gameState) return;
+        this.renderGeneral();
+        this.renderCurrentPhase();
+        this.updateRoundCounter(
+            this.gameState.round_system?.current_round || 1,
+            this.gameState._config?.modules?.round_system?.total_rounds || 5
+        );
+        this.restorePlayerLockedState();
+    }
+
+    renderCurrentPhase() {
+        const currentPhase = this.gameState?.phase || this.gameState?.current_phase;
+        if (!currentPhase) return;
+        const phasesConfig = this.gameState?._config?.modules?.phase_system?.phases;
+        if (!phasesConfig || !Array.isArray(phasesConfig)) return;
+        const phaseConfig = phasesConfig.find(p => p.name === currentPhase);
+        if (!phaseConfig) return;
+        const renderMethod = phaseConfig.render_method;
+        if (!renderMethod || typeof this[renderMethod] !== 'function') return;
+        this[renderMethod]();
+    }
+
+    renderGeneral() {
+        const header = document.getElementById('game-header');
+        if (header) header.style.display = 'block';
+        const scores = document.getElementById('scores-container');
+        if (scores) scores.style.display = 'block';
+    }
+
+    renderQuestion() {
+        this.hideAnswerButtons();
+        const questionEl = document.getElementById('question-section');
+        if (questionEl) questionEl.classList.remove('hidden');
+
+        // Mostrar texto de la pregunta desde gameState._ui
+        const text = this.gameState?._ui?.phases?.question?.text;
+        const qTextEl = document.getElementById('question-text');
+        if (qTextEl && text) {
+            qTextEl.textContent = text;
+        }
+        const resultsEl = document.getElementById('results-section');
+        if (resultsEl) resultsEl.classList.add('hidden');
+    }
+
+    renderAnswering() {
+        this.showAnswerButtons();
+        const questionEl = document.getElementById('question-section');
+        if (questionEl) questionEl.classList.add('hidden');
+
+        // Renderizar opciones desde gameState._ui
+        const options = this.gameState?._ui?.phases?.answering?.options || [];
+        const correctIndex = this.gameState?._ui?.phases?.answering?.correct_option;
+        const list = document.getElementById('options-list');
+        if (list) {
+            list.innerHTML = '';
+            options.forEach((opt, idx) => {
+                const btn = document.createElement('button');
+                btn.className = 'w-full px-4 py-3 bg-gray-100 hover:bg-gray-200 rounded-lg border';
+                btn.textContent = opt;
+                btn.addEventListener('click', () => {
+                    if (typeof correctIndex === 'number' && idx === correctIndex) {
+                        this.sendCorrectAnswer();
+                    } else {
+                        this.sendWrongAnswer();
+                    }
+                });
+                list.appendChild(btn);
+            });
         }
     }
 
-    /**
-     * Override: Manejar fin de ronda
-     */
-    handleRoundEnded(event) {
-        super.handleRoundEnded(event);
-
-        // Resetear estado
-        this.hasAnswered = false;
-        this.answersCount = 0;
-        this.currentQuestion = null;
-
-        // Ocultar pregunta, mostrar loading para siguiente ronda
-        this.hideElement('question-state');
-        this.hideElement('locked-overlay');
-        this.showElement('loading-state');
-
-        // El TimingModule del BaseGameClient manejará el countdown automáticamente
-        // y llamará a notifyReadyForNextRound() cuando termine
+    renderResultsGeneric() {
+        this.hideAnswerButtons();
+        const resultsEl = document.getElementById('results-section');
+        if (resultsEl) resultsEl.classList.remove('hidden');
     }
 
-    /**
-     * Override: Manejar fin de juego
-     */
-    handleGameFinished(event) {
-        super.handleGameFinished(event);
-
-        // Ocultar todos los demás estados
-        this.hideElement('loading-state');
-        this.hideElement('question-state');
-        this.hideElement('locked-overlay');
-
-        // Mostrar estado de finalizado
-        this.showElement('finished-state');
-
-        // Renderizar podio usando método genérico de BaseGameClient
-        // BaseGameClient.renderPodium() es reutilizable para todos los juegos
-        super.renderPodium(event.ranking, event.scores, 'podium');
+    // ==============================
+    // UI helpers
+    // ==============================
+    showAnswerButtons() {
+        document.getElementById('answer-buttons')?.classList.remove('hidden');
+        document.getElementById('locked-message')?.classList.add('hidden');
     }
 
-    /**
-     * Obtener clase CSS según dificultad
-     */
-    getDifficultyClass(difficulty) {
-        const classes = {
-            'easy': 'px-2 py-1 text-xs font-semibold rounded bg-green-100 text-green-800',
-            'medium': 'px-2 py-1 text-xs font-semibold rounded bg-yellow-100 text-yellow-800',
-            'hard': 'px-2 py-1 text-xs font-semibold rounded bg-red-100 text-red-800'
-        };
-
-        return classes[difficulty.toLowerCase()] || classes.medium;
+    hideAnswerButtons() {
+        document.getElementById('answer-buttons')?.classList.add('hidden');
     }
 
-    /**
-     * Override: Obtener elemento para countdown (timing module)
-     */
-    getCountdownElement() {
-        // Retornar el elemento donde se mostrará el countdown entre rondas
-        const loadingMsg = this.loadingState?.querySelector('h2');
-        return loadingMsg || null;
+    hideLockedMessage() {
+        const lockedMessage = document.getElementById('locked-message');
+        if (lockedMessage) {
+            lockedMessage.classList.add('hidden');
+        }
+    }
+
+    onPlayerLocked(event) {
+        if (event.player_id !== this.config.playerId) return;
+        this.hideAnswerButtons();
+        document.getElementById('locked-message')?.classList.remove('hidden');
+    }
+
+    onPlayersUnlocked(event) {
+        document.getElementById('locked-message')?.classList.add('hidden');
+        this.showAnswerButtons();
+    }
+
+    restorePlayerLockedState() {
+        const lockedPlayers = this.gameState?.player_system?.locked_players || [];
+        const isLocked = lockedPlayers.includes(this.config.playerId);
+        if (isLocked) {
+            this.onPlayerLocked({ player_id: this.config.playerId });
+        }
+    }
+
+    updateRoundCounter(currentRound, totalRounds) {
+        const roundEl = document.getElementById('current-round');
+        if (roundEl) roundEl.textContent = currentRound;
+        const totalEl = document.getElementById('total-rounds');
+        if (totalEl) totalEl.textContent = totalRounds;
+    }
+
+    updatePhaseDisplay(event) {
+        const name = event?.additional_data?.phase_name || event?.new_phase || 'unknown';
+        const el = document.getElementById('current-phase');
+        if (el) el.textContent = name;
     }
 }
 
-// Exportar para uso global
+// Exponer globalmente para loader lazy
 window.TriviaGameClient = TriviaGameClient;
+
+

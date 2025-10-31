@@ -1,156 +1,25 @@
 {
-  "general": {
-    "easy": [
-      {
-        "question": "¿Cuál es la capital de España?",
-        "options": ["Madrid", "Barcelona", "Valencia", "Sevilla"],
-        "correct": 0
-      },
-      {
-        "question": "¿Cuántos días tiene una semana?",
-        "options": ["5", "6", "7", "8"],
-        "correct": 2
-      },
-      {
-        "question": "¿De qué color es el cielo en un día despejado?",
-        "options": ["Verde", "Azul", "Rojo", "Amarillo"],
-        "correct": 1
-      },
-      {
-        "question": "¿Cuántas patas tiene un perro?",
-        "options": ["2", "3", "4", "5"],
-        "correct": 2
-      },
-      {
-        "question": "¿Qué animal dice 'miau'?",
-        "options": ["Perro", "Gato", "Vaca", "Caballo"],
-        "correct": 1
-      }
-    ],
-    "medium": [
-      {
-        "question": "¿En qué año llegó el hombre a la Luna?",
-        "options": ["1965", "1967", "1969", "1971"],
-        "correct": 2
-      },
-      {
-        "question": "¿Cuál es el océano más grande del mundo?",
-        "options": ["Atlántico", "Índico", "Ártico", "Pacífico"],
-        "correct": 3
-      },
-      {
-        "question": "¿Quién pintó 'La Última Cena'?",
-        "options": ["Picasso", "Van Gogh", "Leonardo da Vinci", "Miguel Ángel"],
-        "correct": 2
-      },
-      {
-        "question": "¿Cuántos continentes hay en el mundo?",
-        "options": ["5", "6", "7", "8"],
-        "correct": 2
-      },
-      {
-        "question": "¿Qué gas necesitan las plantas para hacer fotosíntesis?",
-        "options": ["Oxígeno", "Nitrógeno", "Dióxido de carbono", "Hidrógeno"],
-        "correct": 2
-      }
-    ],
-    "hard": [
-      {
-        "question": "¿En qué año cayó el Muro de Berlín?",
-        "options": ["1987", "1989", "1991", "1993"],
-        "correct": 1
-      },
-      {
-        "question": "¿Cuál es el elemento químico con símbolo 'Au'?",
-        "options": ["Plata", "Oro", "Aluminio", "Argón"],
-        "correct": 1
-      },
-      {
-        "question": "¿Quién escribió 'Cien años de soledad'?",
-        "options": ["Mario Vargas Llosa", "Gabriel García Márquez", "Jorge Luis Borges", "Pablo Neruda"],
-        "correct": 1
-      },
-      {
-        "question": "¿Cuál es la velocidad de la luz?",
-        "options": ["300,000 km/s", "150,000 km/s", "450,000 km/s", "600,000 km/s"],
-        "correct": 0
-      },
-      {
-        "question": "¿En qué país se encuentra el monte Kilimanjaro?",
-        "options": ["Kenia", "Uganda", "Tanzania", "Etiopía"],
-        "correct": 2
-      }
-    ]
-  },
-  "deportes": {
-    "easy": [
-      {
-        "question": "¿Cuántos jugadores hay en un equipo de fútbol?",
-        "options": ["9", "10", "11", "12"],
-        "correct": 2
-      },
-      {
-        "question": "¿De qué color es el cinturón de mayor rango en karate?",
-        "options": ["Blanco", "Rojo", "Negro", "Azul"],
-        "correct": 2
-      },
-      {
-        "question": "¿En qué deporte se usa una raqueta?",
-        "options": ["Fútbol", "Baloncesto", "Tenis", "Natación"],
-        "correct": 2
-      }
-    ],
-    "medium": [
-      {
-        "question": "¿Cuántos Grand Slam hay en el tenis?",
-        "options": ["2", "3", "4", "5"],
-        "correct": 2
-      },
-      {
-        "question": "¿En qué ciudad se celebraron los Juegos Olímpicos de 1992?",
-        "options": ["Madrid", "Barcelona", "Valencia", "Sevilla"],
-        "correct": 1
-      }
-    ],
-    "hard": [
-      {
-        "question": "¿Quién tiene más Balones de Oro en la historia del fútbol?",
-        "options": ["Cristiano Ronaldo", "Lionel Messi", "Pelé", "Maradona"],
-        "correct": 1
-      }
-    ]
-  },
-  "ciencia": {
-    "easy": [
-      {
-        "question": "¿Cuántos planetas hay en el sistema solar?",
-        "options": ["7", "8", "9", "10"],
-        "correct": 1
-      },
-      {
-        "question": "¿Qué órgano del cuerpo humano bombea la sangre?",
-        "options": ["Pulmón", "Hígado", "Corazón", "Riñón"],
-        "correct": 2
-      }
-    ],
-    "medium": [
-      {
-        "question": "¿Cuál es el planeta más grande del sistema solar?",
-        "options": ["Saturno", "Neptuno", "Júpiter", "Urano"],
-        "correct": 2
-      },
-      {
-        "question": "¿Qué científico propuso la teoría de la relatividad?",
-        "options": ["Newton", "Einstein", "Galileo", "Hawking"],
-        "correct": 1
-      }
-    ],
-    "hard": [
-      {
-        "question": "¿Cuál es el nombre de la primera ley de Newton?",
-        "options": ["Ley de la gravedad", "Ley de la inercia", "Ley de acción y reacción", "Ley de la termodinámica"],
-        "correct": 1
-      }
-    ]
-  }
+  "easy": [
+    { "q": "¿Capital de Francia?", "options": ["Madrid", "París", "Roma", "Berlín"], "answer": 1 },
+    { "q": "¿2 + 2?", "options": ["3", "4", "5", "22"], "answer": 1 },
+    { "q": "¿Color del cielo despejado?", "options": ["Rojo", "Azul", "Verde", "Negro"], "answer": 1 },
+    { "q": "¿Día después del lunes?", "options": ["Martes", "Miércoles", "Jueves", "Viernes"], "answer": 0 },
+    { "q": "¿Animal que ladra?", "options": ["Gato", "Perro", "Vaca", "Pez"], "answer": 1 }
+  ],
+  "medium": [
+    { "q": "¿Quién pintó La noche estrellada?", "options": ["Picasso", "Van Gogh", "Da Vinci", "Monet"], "answer": 1 },
+    { "q": "¿Símbolo químico del oro?", "options": ["Ag", "Au", "Gd", "Go"], "answer": 1 },
+    { "q": "¿Capital de Canadá?", "options": ["Toronto", "Ottawa", "Vancouver", "Montreal"], "answer": 1 },
+    { "q": "¿Lenguaje ejecutado por el navegador?", "options": ["PHP", "Python", "JavaScript", "C#"], "answer": 2 },
+    { "q": "¿Planeta conocido como el rojo?", "options": ["Venus", "Marte", "Júpiter", "Saturno"], "answer": 1 }
+  ],
+  "hard": [
+    { "q": "¿Año del Tratado de Westfalia?", "options": ["1492", "1648", "1789", "1919"], "answer": 1 },
+    { "q": "¿Constante de Planck (aprox)?", "options": ["6.63e-34 J·s", "3.00e8 m/s", "1.60e-19 C", "9.81 m/s²"], "answer": 0 },
+    { "q": "¿Capital de Kazajistán (2024)?", "options": ["Astaná", "Almatý", "Taskent", "Biskek"], "answer": 0 },
+    { "q": "¿Quién formuló las ecuaciones del electromagnetismo clásicas?", "options": ["Faraday", "Maxwell", "Tesla", "Newton"], "answer": 1 },
+    { "q": "¿Número primo?", "options": ["21", "51", "97", "99"], "answer": 2 }
+  ]
 }
+
+
