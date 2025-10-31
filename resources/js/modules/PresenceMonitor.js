@@ -155,6 +155,15 @@ export default class PresenceMonitor {
     }
 
     /**
+     * Verificar si hay jugadores desconectados actualmente.
+     *
+     * @returns {boolean} True si hay al menos un jugador desconectado
+     */
+    hasDisconnectedPlayers() {
+        return this.notifiedDisconnections.size > 0;
+    }
+
+    /**
      * Detener el monitoreo.
      */
     stop() {

@@ -33,6 +33,9 @@ export class BaseGameClient {
         this.currentRound = 1;
         this.totalRounds = 10;
 
+        // Estado de desconexión (para preservar popup al renderizar)
+        this.lastDisconnectedPlayerEvent = null;
+
         // Inicializar TimingModule
         this.timing = new TimingModule();
         this.timing.configure(config.timing || {});
@@ -181,7 +184,12 @@ export class BaseGameClient {
         // Ocultar popup de fin de ronda anterior (si estaba visible)
         this.hideRoundEndPopup();
 
-        // Actualizar información de ronda
+        // CONVENCIÓN: Actualizar gameState (source of truth)
+        if (event.game_state) {
+            this.gameState = event.game_state;
+        }
+
+        // Actualizar información de ronda (variables de conveniencia)
         this.currentRound = event.current_round;
         this.totalRounds = event.total_rounds;
 
@@ -320,6 +328,9 @@ export class BaseGameClient {
      */
     handlePlayerDisconnected(event) {
 
+        // Guardar evento de desconexión para poder restaurar popup al renderizar
+        this.lastDisconnectedPlayerEvent = event;
+
         // Emitir evento para que los módulos se encarguen (ej: TimingModule pausa sus timers)
         window.dispatchEvent(new CustomEvent('game:player:disconnected', {
             detail: event
@@ -338,6 +349,9 @@ export class BaseGameClient {
      * Por defecto, oculta el popup y espera a que el backend reinicie la ronda.
      */
     handlePlayerReconnected(event) {
+
+        // Limpiar evento de desconexión guardado
+        this.lastDisconnectedPlayerEvent = null;
 
         // Dispatch custom event para que los módulos reanuden (ej: TimingModule reanuda timers)
         window.dispatchEvent(new CustomEvent('game:player:reconnected', {

@@ -168,41 +168,27 @@ export class MockupGameClient extends BaseGameClient {
                 // Llamar al handler del padre PRIMERO para que actualice this.gameState
                 super.handleGameStarted(event);
 
-                // El _ui ya está disponible en this.gameState para uso posterior
-                // console.log('🎮 [Mockup] Game started with UI state:', this.gameState._ui);
+                // CONVENCIÓN: Usar updateUI() para renderizar todo desde gameState
+                this.updateUI();
             },
             handlePhase1Started: (event) => {
-                // console.log('🎯 [Mockup] FASE 1 INICIADA - Timer de 3 segundos comenzando', event);
-                // Ocultar botones en fase 1
-                this.hideAnswerButtons();
+                // CONVENCIÓN: Render específico de Phase1 (evento custom)
+                this.renderPhase1();
             },
             handlePhase1Ended: (event) => {
                 // console.log('🏁 [Mockup] FASE 1 FINALIZADA - Timer expirado correctamente', event);
             },
             handlePhase2Started: (event) => {
-                // console.log('🎯 [Mockup] FASE 2 INICIADA - Mostrando botones de respuesta', event);
-
-                // Mostrar botones en fase 2
-                this.showAnswerButtons();
-
-                // Si el jugador ya votó, restaurar estado de bloqueado
-                this.restorePlayerLockedState();
+                // CONVENCIÓN: Render específico de Phase2 (evento custom)
+                this.renderPhase2();
             },
             handlePhaseStarted: (event) => {
-                // console.log('🎬 [Mockup] FASE INICIADA (GENERIC HANDLER)', event);
+                // CONVENCIÓN: Handler genérico para fases simples (sin evento custom)
 
-                // OPCIÓN A: Handler genérico con lógica condicional
-                // Esta opción es simple y funciona bien para lógica ligera
-
-                // Fase 3 usa este handler genérico (NO tiene evento custom)
+                // Fase 3 usa evento genérico porque es simple (solo ocultar botones + mensaje)
                 if (event.phase_name === 'phase3') {
-                    // console.log('🎯 [Mockup] FASE 3 DETECTADA (usando evento genérico) - Ocultando botones y mostrando mensaje');
-                    this.hideAnswerButtons();
-                    this.showPhase3Message();
+                    this.renderPhase3Generic();
                 }
-
-                // NOTA: Phase2 ahora usa evento custom (Phase2StartedEvent)
-                // por lo que NO pasará por aquí, irá directo a handlePhase2Started()
 
                 // TimingModule detectará automáticamente el timer porque el evento tiene:
                 // - timer_id
@@ -241,23 +227,21 @@ export class MockupGameClient extends BaseGameClient {
 
     /**
      * Override: Handler de ronda iniciada (para actualizar UI específica)
+     *
+     * CONVENCIÓN: Leer SIEMPRE de this.gameState (actualizado por super.handleRoundStarted)
      */
     handleRoundStarted(event) {
-        super.handleRoundStarted(event);
+        super.handleRoundStarted(event);  // Actualiza this.gameState con event.game_state
 
-        // Actualizar display de ronda en el DOM
-        const roundEl = document.getElementById('current-round');
-        if (roundEl) {
-            roundEl.textContent = event.round || 1;
-        }
+        // CONVENCIÓN: Leer de this.gameState (source of truth), NO de event.xxx
+        const currentRound = this.gameState.round_system?.current_round || 1;
+        const totalRounds = this.gameState._config?.modules?.round_system?.total_rounds || 3;
 
-        // Ocultar mensaje de bloqueado al iniciar nueva ronda
-        const lockedMessage = document.getElementById('locked-message');
-        if (lockedMessage) {
-            lockedMessage.style.display = 'none';
-        }
+        // Actualizar UI de contador de rondas
+        this.updateRoundCounter(currentRound, totalRounds);
 
-        // Ocultar mensaje de fase 3 al iniciar nueva ronda
+        // Limpiar estado de ronda anterior
+        this.hideLockedMessage();
         this.hidePhase3Message();
 
         // Los botones se ocultarán en fase 1 y se mostrarán en fase 2 automáticamente
@@ -309,15 +293,17 @@ export class MockupGameClient extends BaseGameClient {
 
     /**
      * Override: Handler de reconexión de jugador
+     *
+     * CONVENCIÓN: Usar updateUI() para re-renderizar todo desde gameState
      */
     handlePlayerReconnected(event) {
         // console.log('🔌 [Mockup] Player reconnected event:', event);
 
-        // Llamar al handler del padre
+        // Llamar al handler del padre (actualiza this.gameState)
         super.handlePlayerReconnected(event);
 
-        // Restaurar estado de jugador bloqueado
-        this.restorePlayerLockedState();
+        // CONVENCIÓN: Re-renderizar TODA la UI desde gameState actualizado
+        this.updateUI();
     }
 
     /**
@@ -402,6 +388,228 @@ export class MockupGameClient extends BaseGameClient {
             });
         } else {
             // console.log('✅ [Mockup] Player is not locked, no need to restore');
+        }
+    }
+
+    // ========================================================================
+    // MÉTODOS DE RENDER - Siguiendo CONVENCION_RENDER_FRONTEND.md
+    // ========================================================================
+
+    /**
+     * MÉTODO MAESTRO: Actualiza TODA la UI desde this.gameState
+     *
+     * Este es el punto de entrada principal para renderizar la UI completa.
+     * Se usa en:
+     * - Reconexión de jugadores (restaurar estado completo)
+     * - Botón de refresh (volver a renderizar todo)
+     * - Cambios de estado complejos
+     *
+     * Sigue el patrón: Estado → UI (similar a React/Vue)
+     */
+    updateUI() {
+        if (!this.gameState) {
+            console.warn('⚠️ [Mockup] Cannot update UI: gameState is null');
+            return;
+        }
+
+        // console.log('🎨 [Mockup] Updating complete UI from gameState');
+
+        // 1. Render general (elementos comunes)
+        this.renderGeneral();
+
+        // 2. Render de fase actual (detecta automáticamente)
+        this.renderCurrentPhase();
+
+        // 3. Actualizaciones reactivas (datos dinámicos)
+        this.updateRoundCounter(
+            this.gameState.round_system?.current_round || 1,
+            this.gameState._config?.modules?.round_system?.total_rounds || 3
+        );
+
+        // 4. Restaurar estados especiales
+        this.restorePlayerLockedState();
+
+        // 5. IMPORTANTE: Restaurar popup de desconexión si hay jugadores desconectados
+        // Esto previene que el popup desaparezca al renderizar
+        if (this.presenceMonitor?.hasDisconnectedPlayers() && this.lastDisconnectedPlayerEvent) {
+            this.showPlayerDisconnectedPopup(this.lastDisconnectedPlayerEvent);
+        }
+
+        // console.log('✅ [Mockup] UI update completed');
+    }
+
+    /**
+     * DETECCIÓN AUTOMÁTICA: Renderiza la fase actual
+     *
+     * CONVENCIÓN DINÁMICA: Lee del config qué método renderizar para cada fase.
+     * Esto hace que el método sea 100% genérico sin hardcodear nombres de fases.
+     *
+     * Ejemplo en config.json:
+     * "phases": [
+     *   { "name": "phase1", "render_method": "renderPhase1" },
+     *   { "name": "phase2", "render_method": "renderPhase2" }
+     * ]
+     */
+    renderCurrentPhase() {
+        const currentPhase = this.gameState.phase || this.gameState.current_phase;
+
+        if (!currentPhase) {
+            // console.log('⚠️ [Mockup] No phase detected in gameState');
+            return;
+        }
+
+        // Obtener configuración de fases desde gameState._config
+        const phasesConfig = this.gameState._config?.modules?.phase_system?.phases;
+
+        if (!phasesConfig || !Array.isArray(phasesConfig)) {
+            console.warn('⚠️ [Mockup] No phase_system config found in gameState');
+            return;
+        }
+
+        // Buscar la fase actual en la configuración
+        const phaseConfig = phasesConfig.find(p => p.name === currentPhase);
+
+        if (!phaseConfig) {
+            // console.log(`⚠️ [Mockup] Phase "${currentPhase}" not found in config, skipping render`);
+            return;
+        }
+
+        // Obtener el método de render desde la configuración
+        const renderMethod = phaseConfig.render_method;
+
+        if (!renderMethod) {
+            // console.log(`⚠️ [Mockup] No render_method defined for phase "${currentPhase}"`);
+            return;
+        }
+
+        // Verificar que el método existe en esta clase
+        if (typeof this[renderMethod] !== 'function') {
+            console.warn(`⚠️ [Mockup] Render method "${renderMethod}" not found in MockupGameClient`);
+            return;
+        }
+
+        // console.log(`🎯 [Mockup] Rendering phase "${currentPhase}" using method "${renderMethod}"`);
+
+        // Llamar dinámicamente al método de render
+        this[renderMethod]();
+    }
+
+    /**
+     * 1. RENDER GENERAL: Elementos comunes del juego
+     *
+     * Se ejecuta una vez al inicio del juego en handleGameStarted().
+     * Renderiza elementos que siempre están presentes:
+     * - Header del juego
+     * - Scoreboard
+     * - Contador de rondas
+     */
+    renderGeneral() {
+        const ui = this.gameState._ui?.general;
+
+        // Renderizar header si está configurado
+        if (ui?.show_header) {
+            const header = document.getElementById('game-header');
+            if (header) {
+                header.style.display = 'block';
+            }
+        }
+
+        // Renderizar scores si está configurado
+        if (ui?.show_scores) {
+            const scoresContainer = document.getElementById('scores-container');
+            if (scoresContainer) {
+                scoresContainer.style.display = 'block';
+            }
+        }
+
+        // console.log('🎨 [Mockup] General render completed', ui);
+    }
+
+    /**
+     * 2. RENDER POR FASE: Phase1
+     *
+     * Fase de countdown (3 segundos).
+     * - Oculta botones de respuesta
+     * - Muestra timer de cuenta regresiva
+     */
+    renderPhase1() {
+        const phaseUI = this.gameState._ui?.phases?.phase1;
+
+        // Ocultar botones de respuesta durante countdown
+        this.hideAnswerButtons();
+
+        // console.log('🎨 [Mockup] Phase1 render completed', phaseUI);
+    }
+
+    /**
+     * 2. RENDER POR FASE: Phase2
+     *
+     * Fase de respuesta.
+     * - Muestra botones de respuesta
+     * - Restaura estado de jugador bloqueado si ya votó
+     */
+    renderPhase2() {
+        const phaseUI = this.gameState._ui?.phases?.phase2;
+
+        // Mostrar botones de respuesta
+        this.showAnswerButtons();
+
+        // Si el jugador ya votó, restaurar estado de bloqueado
+        this.restorePlayerLockedState();
+
+        // console.log('🎨 [Mockup] Phase2 render completed', phaseUI);
+    }
+
+    /**
+     * 2. RENDER GENÉRICO: Phase3 (usando handler genérico)
+     *
+     * Fase de resultados.
+     * - Oculta botones
+     * - Muestra mensaje de resultados
+     */
+    renderPhase3Generic() {
+        const phaseUI = this.gameState._ui?.phases?.phase3;
+
+        // Ocultar botones
+        this.hideAnswerButtons();
+
+        // Mostrar mensaje de fase 3
+        this.showPhase3Message();
+
+        // console.log('🎨 [Mockup] Phase3 render completed (generic)', phaseUI);
+    }
+
+    // ========================================================================
+    // MÉTODOS DE ACTUALIZACIÓN REACTIVA - Siguiendo CONVENCION_EVENTOS_GAMESTATE.md
+    // ========================================================================
+
+    /**
+     * 3. ACTUALIZACIÓN REACTIVA: Contador de rondas
+     *
+     * Actualiza solo el contador de rondas sin re-renderizar toda la vista.
+     * Se llama desde handleRoundStarted() que lee de this.gameState.
+     */
+    updateRoundCounter(currentRound, totalRounds) {
+        const roundEl = document.getElementById('current-round');
+        if (roundEl) {
+            roundEl.textContent = currentRound;
+        }
+
+        const totalEl = document.getElementById('total-rounds');
+        if (totalEl) {
+            totalEl.textContent = totalRounds;
+        }
+
+        // console.log('🔄 [Mockup] Round counter updated:', currentRound, '/', totalRounds);
+    }
+
+    /**
+     * Helper: Ocultar mensaje de jugador bloqueado
+     */
+    hideLockedMessage() {
+        const lockedMessage = document.getElementById('locked-message');
+        if (lockedMessage) {
+            lockedMessage.style.display = 'none';
         }
     }
 }
