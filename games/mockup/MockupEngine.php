@@ -63,6 +63,23 @@ class MockupEngine extends BaseGameEngine
 
         $match->save();
 
+        // Inicializar sección _ui para datos de presentación (NO se guardan en snapshots)
+        $this->setUI($match, 'general.show_header', true);
+        $this->setUI($match, 'general.show_scores', true);
+        $this->setUI($match, 'general.animations.confetti', false);
+        $this->setUI($match, 'general.animations.shake', false);
+
+        // Estados iniciales por fase
+        $this->setUI($match, 'phases.answer.show_input', false);  // Se activa al empezar ronda
+        $this->setUI($match, 'phases.answer.input_placeholder', 'Tu respuesta aquí...');
+        $this->setUI($match, 'phases.results.show_winner', false);
+
+        // Transiciones iniciales
+        $this->setUI($match, 'transitions.phase_changing', false);
+        $this->setUI($match, 'transitions.round_ending', false);
+
+        $match->save();  // Guardar _ui en game_state
+
         // Inicializar módulos desde config.json
         $this->initializeModules($match, [
             'round_system' => [
@@ -263,6 +280,15 @@ class MockupEngine extends BaseGameEngine
             $gameState['actions'][$player->id] = 'good_answer';
             $match->game_state = $gameState;
             $match->save();
+
+            // Activar animación de confetti (datos de presentación)
+            $this->setUI($match, 'general.animations.confetti', true);
+            $this->setUI($match, 'phases.results.show_winner', true);
+            $match->save();
+
+            Log::info("🎉 [Mockup] Confetti animation enabled for winner", [
+                'player_id' => $player->id
+            ]);
 
             // Retornar forzando el fin de ronda
             return [

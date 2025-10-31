@@ -238,34 +238,58 @@ class PlayController extends Controller
                     // Limpiar cache (ya no necesitamos trackear)
                     $cache->forget($cacheKey);
 
-                    // EMITIR GameStartedEvent ANTES de inicializar el engine
-                    // Esto notifica al frontend que el juego está por comenzar
+                    // PASO 1: Obtener engine e INICIALIZAR (crea _ui, NO inicia ronda aún)
+                    \Log::info('🎮 [DomLoaded] Initializing game configuration...', [
+                        'room_code' => $code,
+                        'match_id' => $match->id,
+                    ]);
+
+                    $game = $match->room->game;
+                    $engineClass = $game->getEngineClass();
+
+                    if (!$engineClass || !class_exists($engineClass)) {
+                        throw new \RuntimeException("Game engine not found for game: {$game->slug}");
+                    }
+
+                    $engine = app($engineClass);
+
+                    // Inicializar configuración (crea _ui pero NO emite eventos de juego)
+                    $engine->initialize($match);
+
+                    // Refrescar para obtener _ui
+                    $match = $match->fresh();
+
+                    \Log::info('✅ [DomLoaded] Game configuration initialized with _ui', [
+                        'room_code' => $code,
+                        'match_id' => $match->id,
+                        'has_ui' => isset($match->game_state['_ui']),
+                    ]);
+
+                    // PASO 2: EMITIR GameStartedEvent (con _ui incluido, ANTES de startGame)
                     event(new \App\Events\Game\GameStartedEvent($match, $match->game_state ?? []));
 
-                    \Log::info('📢 [DomLoaded] GameStartedEvent emitted', [
+                    \Log::info('📢 [DomLoaded] GameStartedEvent emitted with _ui', [
                         'room_code' => $code,
                         'match_id' => $match->id,
                     ]);
 
-                    // INICIALIZAR EL ENGINE DEL JUEGO
-                    // Este es el ÚNICO lugar donde se inicializa completamente el engine.
-                    // Esto llama a:
-                    // 1. engine->initialize($match) - Configura el juego
-                    // 2. engine->startGame($match) - Resetea módulos y llama onGameStart()
-                    // 3. Actualiza room status a 'playing'
-                    // 4. Emite GameInitializedEvent
-                    \Log::info('🎮 [DomLoaded] Initializing game engine...', [
-                        'room_code' => $code,
-                        'match_id' => $match->id,
-                    ]);
+                    // PASO 3: Iniciar el juego (emite RoundStartedEvent, eventos de fase, etc.)
+                    $engine->startGame($match);
 
-                    $match->initializeEngine();
+                    // Actualizar estado de la sala a 'playing'
+                    $match->room->update(['status' => \App\Models\Room::STATUS_PLAYING]);
 
-                    \Log::info('✅ [DomLoaded] Game engine initialized and started successfully', [
+                    // Refrescar para obtener estado actualizado
+                    $match->refresh();
+
+                    \Log::info('✅ [DomLoaded] Game started successfully', [
                         'room_code' => $code,
                         'match_id' => $match->id,
                         'phase' => $match->game_state['phase'] ?? 'unknown',
                     ]);
+
+                    // Emitir GameInitializedEvent
+                    event(new \App\Events\Game\GameInitializedEvent($match, $match->game_state));
                 } else {
                     \Log::info('⏭️  [DomLoaded] Game already started, resending current state to player', [
                         'room_code' => $code,

@@ -30,14 +30,14 @@ export class MockupGameClient extends BaseGameClient {
             });
         }
 
-        console.log('🧪 [Mockup] Test controls setup complete');
+        // console.log('🧪 [Mockup] Test controls setup complete');
     }
 
     /**
      * Handler para Good Answer - finaliza la ronda inmediatamente
      */
     async handleGoodAnswer() {
-        console.log('✅ [Mockup] Good Answer clicked - ending round immediately');
+        // console.log('✅ [Mockup] Good Answer clicked - ending round immediately');
 
         try {
             const response = await fetch(`/api/rooms/${this.config.roomCode}/action`, {
@@ -59,7 +59,7 @@ export class MockupGameClient extends BaseGameClient {
                 return;
             }
 
-            console.log('✅ [Mockup] Good Answer successful:', data);
+            // console.log('✅ [Mockup] Good Answer successful:', data);
         } catch (error) {
             console.error('❌ [Mockup] Error calling Good Answer:', error);
         }
@@ -69,7 +69,7 @@ export class MockupGameClient extends BaseGameClient {
      * Handler para Bad Answer - bloquea al jugador
      */
     async handleBadAnswer() {
-        console.log('❌ [Mockup] Bad Answer clicked - blocking player');
+        // console.log('❌ [Mockup] Bad Answer clicked - blocking player');
 
         try {
             const response = await fetch(`/api/rooms/${this.config.roomCode}/action`, {
@@ -91,7 +91,7 @@ export class MockupGameClient extends BaseGameClient {
                 return;
             }
 
-            console.log('❌ [Mockup] Bad Answer successful:', data);
+            // console.log('❌ [Mockup] Bad Answer successful:', data);
         } catch (error) {
             console.error('❌ [Mockup] Error calling Bad Answer:', error);
         }
@@ -165,18 +165,23 @@ export class MockupGameClient extends BaseGameClient {
                 this.onPlayerUnlocked(event);
             },
             handleGameStarted: (event) => {
-                console.log('🎮 [Mockup] JUEGO INICIADO', event);
+                // Llamar al handler del padre PRIMERO para que actualice this.gameState
+                super.handleGameStarted(event);
+
+                // El _ui ya está disponible en this.gameState para uso posterior
+                // console.log('🎮 [Mockup] Game started with UI state:', this.gameState._ui);
             },
             handlePhase1Started: (event) => {
-                console.log('🎯 [Mockup] FASE 1 INICIADA - Timer de 3 segundos comenzando', event);
+                // console.log('🎯 [Mockup] FASE 1 INICIADA - Timer de 3 segundos comenzando', event);
                 // Ocultar botones en fase 1
                 this.hideAnswerButtons();
             },
             handlePhase1Ended: (event) => {
-                console.log('🏁 [Mockup] FASE 1 FINALIZADA - Timer expirado correctamente', event);
+                // console.log('🏁 [Mockup] FASE 1 FINALIZADA - Timer expirado correctamente', event);
             },
             handlePhase2Started: (event) => {
-                console.log('🎯 [Mockup] FASE 2 INICIADA - Mostrando botones de respuesta', event);
+                // console.log('🎯 [Mockup] FASE 2 INICIADA - Mostrando botones de respuesta', event);
+
                 // Mostrar botones en fase 2
                 this.showAnswerButtons();
 
@@ -184,14 +189,14 @@ export class MockupGameClient extends BaseGameClient {
                 this.restorePlayerLockedState();
             },
             handlePhaseStarted: (event) => {
-                console.log('🎬 [Mockup] FASE INICIADA (GENERIC HANDLER)', event);
+                // console.log('🎬 [Mockup] FASE INICIADA (GENERIC HANDLER)', event);
 
                 // OPCIÓN A: Handler genérico con lógica condicional
                 // Esta opción es simple y funciona bien para lógica ligera
 
                 // Fase 3 usa este handler genérico (NO tiene evento custom)
                 if (event.phase_name === 'phase3') {
-                    console.log('🎯 [Mockup] FASE 3 DETECTADA (usando evento genérico) - Ocultando botones y mostrando mensaje');
+                    // console.log('🎯 [Mockup] FASE 3 DETECTADA (usando evento genérico) - Ocultando botones y mostrando mensaje');
                     this.hideAnswerButtons();
                     this.showPhase3Message();
                 }
@@ -231,7 +236,7 @@ export class MockupGameClient extends BaseGameClient {
             descEl.textContent = `Fase ${phaseName} en progreso...`;
         }
 
-        console.log('📋 [Mockup] Fase actualizada:', phaseName, event);
+        // console.log('📋 [Mockup] Fase actualizada:', phaseName, event);
     }
 
     /**
@@ -266,7 +271,7 @@ export class MockupGameClient extends BaseGameClient {
         if (answerButtons) {
             answerButtons.style.display = 'block';
         }
-        console.log('👀 [Mockup] Botones de respuesta mostrados');
+        // console.log('👀 [Mockup] Botones de respuesta mostrados');
     }
 
     /**
@@ -277,7 +282,7 @@ export class MockupGameClient extends BaseGameClient {
         if (answerButtons) {
             answerButtons.style.display = 'none';
         }
-        console.log('🙈 [Mockup] Botones de respuesta ocultados');
+        // console.log('🙈 [Mockup] Botones de respuesta ocultados');
     }
 
     /**
@@ -288,7 +293,7 @@ export class MockupGameClient extends BaseGameClient {
         if (phase3Message) {
             phase3Message.style.display = 'block';
         }
-        console.log('📝 [Mockup] Mensaje de fase 3 mostrado (usando evento genérico)');
+        // console.log('📝 [Mockup] Mensaje de fase 3 mostrado (usando evento genérico)');
     }
 
     /**
@@ -299,14 +304,14 @@ export class MockupGameClient extends BaseGameClient {
         if (phase3Message) {
             phase3Message.style.display = 'none';
         }
-        console.log('🙈 [Mockup] Mensaje de fase 3 ocultado');
+        // console.log('🙈 [Mockup] Mensaje de fase 3 ocultado');
     }
 
     /**
      * Override: Handler de reconexión de jugador
      */
     handlePlayerReconnected(event) {
-        console.log('🔌 [Mockup] Player reconnected event:', event);
+        // console.log('🔌 [Mockup] Player reconnected event:', event);
 
         // Llamar al handler del padre
         super.handlePlayerReconnected(event);
@@ -319,15 +324,15 @@ export class MockupGameClient extends BaseGameClient {
      * Handler cuando un jugador es bloqueado
      */
     onPlayerLocked(event) {
-        console.log('🔒 [Mockup] Player locked event:', event);
+        // console.log('🔒 [Mockup] Player locked event:', event);
 
         // Solo procesar si es el jugador actual
         if (event.player_id !== this.config.playerId) {
-            console.log('🔒 [Mockup] Not current player, ignoring');
+            // console.log('🔒 [Mockup] Not current player, ignoring');
             return;
         }
 
-        console.log('🔒 [Mockup] Current player locked - hiding buttons');
+        // console.log('🔒 [Mockup] Current player locked - hiding buttons');
 
         // Ocultar botones
         const answerButtons = document.getElementById('answer-buttons');
@@ -346,7 +351,7 @@ export class MockupGameClient extends BaseGameClient {
      * Handler cuando los jugadores son desbloqueados (nueva ronda)
      */
     onPlayerUnlocked(event) {
-        console.log('🔓 [Mockup] Players unlocked event:', event);
+        // console.log('🔓 [Mockup] Players unlocked event:', event);
 
         // Restaurar botones
         const answerButtons = document.getElementById('answer-buttons');
@@ -360,35 +365,35 @@ export class MockupGameClient extends BaseGameClient {
             lockedMessage.style.display = 'none';
         }
 
-        console.log('🔓 [Mockup] Players unlocked - buttons restored');
+        // console.log('🔓 [Mockup] Players unlocked - buttons restored');
     }
 
     /**
      * Restaurar estado de jugador bloqueado al reconectar
      */
     restorePlayerLockedState() {
-        console.log('🔄 [Mockup] Checking if need to restore locked state...', {
-            hasGameState: !!this.gameState,
-            gameState: this.gameState,
-            playerId: this.config.playerId
-        });
+        // // console.log('🔄 [Mockup] Checking if need to restore locked state...', {
+        //     hasGameState: !!this.gameState,
+        //     gameState: this.gameState,
+        //     playerId: this.config.playerId
+        // });
 
         // Verificar si tenemos gameState
         if (!this.gameState || !this.gameState.player_system) {
-            console.log('⚠️ [Mockup] No player_system in gameState, skipping restore');
+            // console.log('⚠️ [Mockup] No player_system in gameState, skipping restore');
             return;
         }
 
         const playerSystem = this.gameState.player_system;
         const lockedPlayers = playerSystem.locked_players || [];
 
-        console.log('🔍 [Mockup] Locked players:', lockedPlayers);
+        // console.log('🔍 [Mockup] Locked players:', lockedPlayers);
 
         // Verificar si el jugador actual está bloqueado
         const isLocked = lockedPlayers.includes(this.config.playerId);
 
         if (isLocked) {
-            console.log('🔄 [Mockup] Restoring locked state for player', this.config.playerId);
+            // console.log('🔄 [Mockup] Restoring locked state for player', this.config.playerId);
 
             // Simular evento PlayerLockedEvent para restaurar UI
             this.onPlayerLocked({
@@ -396,7 +401,7 @@ export class MockupGameClient extends BaseGameClient {
                 player_name: 'Current Player'
             });
         } else {
-            console.log('✅ [Mockup] Player is not locked, no need to restore');
+            // console.log('✅ [Mockup] Player is not locked, no need to restore');
         }
     }
 }

@@ -993,7 +993,15 @@ abstract class BaseGameEngine implements GameEngineInterface
     protected function takeSnapshot(GameMatch $match): void
     {
         // Hacer copia profunda del game_state usando json encode/decode
-        $this->gameStateSnapshot = json_decode(json_encode($match->game_state), true);
+        $gameState = $match->game_state;
+
+        // IMPORTANTE: Excluir _ui del snapshot (solo guardar _data y otros campos de modelo)
+        // _ui contiene datos de presentación que NO deben guardarse en BD ni snapshots
+        if (isset($gameState['_ui'])) {
+            unset($gameState['_ui']);
+        }
+
+        $this->gameStateSnapshot = json_decode(json_encode($gameState), true);
 
         // Guardar también en Redis para rollback manual (TTL: 1 hora)
         try {
@@ -1001,7 +1009,7 @@ abstract class BaseGameEngine implements GameEngineInterface
             $snapshotData = [
                 'game_state' => $this->gameStateSnapshot,
                 'timestamp' => now()->toDateTimeString(),
-                'round' => $match->game_state['round_system']['current_round'] ?? 'N/A',
+                'round' => $gameState['round_system']['current_round'] ?? 'N/A',
             ];
             \Illuminate\Support\Facades\Redis::setex($snapshotKey, 3600, json_encode($snapshotData));
         } catch (\Exception $e) {
@@ -1011,7 +1019,7 @@ abstract class BaseGameEngine implements GameEngineInterface
             ]);
         }
 
-        Log::info("[{$this->getGameSlug()}] Snapshot taken | match_id: {$match->id} | round: " . ($match->game_state['round_system']['current_round'] ?? 'N/A'));
+        Log::info("[{$this->getGameSlug()}] Snapshot taken (excluding _ui) | match_id: {$match->id} | round: " . ($gameState['round_system']['current_round'] ?? 'N/A'));
     }
 
     /**
@@ -2345,6 +2353,151 @@ abstract class BaseGameEngine implements GameEngineInterface
             'winner' => $winner,
         ];
     }
+
+    // ========================================================================
+    // SEPARACIÓN DE CAPAS: Datos vs Presentación
+    // ========================================================================
+    // Convención: game_state se divide en dos secciones:
+    // - _data: Datos del modelo/negocio (se guardan en BD, se incluyen en snapshots)
+    // - _ui: Datos de presentación (solo para frontend, NO se guardan en BD, NO en snapshots)
+    //
+    // Beneficios:
+    // - Snapshots más pequeños y eficientes
+    // - Separación clara de responsabilidades
+    // - Evitar guardar datos efímeros de UI en la BD
+
+    /**
+     * Establecer un valor en la sección _data del game_state.
+     *
+     * Uso: $this->setData($match, 'player_system.current_player', 123)
+     *
+     * @param GameMatch $match
+     * @param string $path Ruta con notación de punto (ej: 'player_system.current_player')
+     * @param mixed $value
+     * @return void
+     */
+    protected function setData(GameMatch $match, string $path, $value): void
+    {
+        $gameState = $match->game_state;
+
+        if (!isset($gameState['_data'])) {
+            $gameState['_data'] = [];
+        }
+
+        $keys = explode('.', $path);
+        $current = &$gameState['_data'];
+
+        foreach ($keys as $key) {
+            if (!isset($current[$key])) {
+                $current[$key] = [];
+            }
+            $current = &$current[$key];
+        }
+
+        $current = $value;
+        $match->game_state = $gameState;
+    }
+
+    /**
+     * Obtener un valor de la sección _data del game_state.
+     *
+     * Uso: $this->getData($match, 'player_system.current_player', null)
+     *
+     * @param GameMatch $match
+     * @param string $path Ruta con notación de punto
+     * @param mixed $default Valor por defecto si no existe
+     * @return mixed
+     */
+    protected function getData(GameMatch $match, string $path, $default = null)
+    {
+        $gameState = $match->game_state;
+
+        if (!isset($gameState['_data'])) {
+            return $default;
+        }
+
+        $keys = explode('.', $path);
+        $current = $gameState['_data'];
+
+        foreach ($keys as $key) {
+            if (!isset($current[$key])) {
+                return $default;
+            }
+            $current = $current[$key];
+        }
+
+        return $current;
+    }
+
+    /**
+     * Establecer un valor en la sección _ui del game_state (solo presentación).
+     *
+     * Los valores en _ui NO se guardan en snapshots ni en BD.
+     * Úsalo para datos temporales de presentación.
+     *
+     * Uso: $this->setUI($match, 'animations.show_confetti', true)
+     *
+     * @param GameMatch $match
+     * @param string $path Ruta con notación de punto
+     * @param mixed $value
+     * @return void
+     */
+    protected function setUI(GameMatch $match, string $path, $value): void
+    {
+        $gameState = $match->game_state;
+
+        if (!isset($gameState['_ui'])) {
+            $gameState['_ui'] = [];
+        }
+
+        $keys = explode('.', $path);
+        $current = &$gameState['_ui'];
+
+        foreach ($keys as $key) {
+            if (!isset($current[$key])) {
+                $current[$key] = [];
+            }
+            $current = &$current[$key];
+        }
+
+        $current = $value;
+        $match->game_state = $gameState;
+    }
+
+    /**
+     * Obtener un valor de la sección _ui del game_state.
+     *
+     * Uso: $this->getUI($match, 'animations.show_confetti', false)
+     *
+     * @param GameMatch $match
+     * @param string $path Ruta con notación de punto
+     * @param mixed $default Valor por defecto si no existe
+     * @return mixed
+     */
+    protected function getUI(GameMatch $match, string $path, $default = null)
+    {
+        $gameState = $match->game_state;
+
+        if (!isset($gameState['_ui'])) {
+            return $default;
+        }
+
+        $keys = explode('.', $path);
+        $current = $gameState['_ui'];
+
+        foreach ($keys as $key) {
+            if (!isset($current[$key])) {
+                return $default;
+            }
+            $current = $current[$key];
+        }
+
+        return $current;
+    }
+
+    // ========================================================================
+    // FIN SEPARACIÓN DE CAPAS
+    // ========================================================================
 
     /**
      * Obtener scores finales.

@@ -104,7 +104,7 @@
             csrfToken: '{{ csrf_token() }}'
         };
 
-        console.log('[Mockup Game] Loaded with data:', window.mockupGameData);
+        // console.log('[Mockup Game] Loaded with data:', window.mockupGameData);
     </script>
 
     {{-- Inicializar MockupGameClient --}}
