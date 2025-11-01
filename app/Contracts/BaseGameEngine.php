@@ -1887,6 +1887,11 @@ abstract class BaseGameEngine implements GameEngineInterface
 
     /**
      * Guardar PlayerManager de vuelta al game_state.
+     * 
+     * NUEVA ARQUITECTURA UNIFICADA:
+     * - PlayerManager es la fuente de verdad de scores individuales
+     * - Sincroniza scores a scoring_system para backward compatibility
+     * - TeamsManager puede agregar scores desde PlayerManager
      *
      * @param GameMatch $match
      * @param \App\Services\Modules\PlayerSystem\PlayerManager $playerManager
@@ -1894,11 +1899,95 @@ abstract class BaseGameEngine implements GameEngineInterface
      */
     protected function savePlayerManager(GameMatch $match, \App\Services\Modules\PlayerSystem\PlayerManager $playerManager): void
     {
-        $match->game_state = array_merge(
-            $match->game_state,
-            $playerManager->toArray()
-        );
+        $gameState = $match->game_state;
+        
+        // Guardar PlayerManager en game_state (player_system)
+        $gameState = array_merge($gameState, $playerManager->toArray());
+        
+        // Sincronizar scores a scoring_system para backward compatibility
+        // Esto permite que getScores() y getScoreManager() sigan funcionando
+        if ($this->isModuleEnabled($match, 'scoring_system')) {
+            $playerScores = $playerManager->getScores();
+            $gameState['scoring_system']['scores'] = $playerScores;
+            
+            Log::debug("[{$this->getGameSlug()}] PlayerManager scores synced to scoring_system", [
+                'match_id' => $match->id,
+                'scores' => $playerScores
+            ]);
+        }
+        
+        // Sincronizar PlayerManager con TeamsManager si teams_system está habilitado
+        if ($this->isModuleEnabled($match, 'teams_system')) {
+            try {
+                $teamsManager = $this->getTeamsManager($match);
+                if ($teamsManager) {
+                    $teamsManager->setPlayerManager($playerManager);
+                    
+                    Log::debug("[{$this->getGameSlug()}] PlayerManager set on TeamsManager", [
+                        'match_id' => $match->id
+                    ]);
+                }
+            } catch (\Exception $e) {
+                // TeamsManager puede no estar inicializado todavía, ignorar
+                Log::debug("[{$this->getGameSlug()}] TeamsManager not available for sync", [
+                    'match_id' => $match->id,
+                    'error' => $e->getMessage()
+                ]);
+            }
+        }
+        
+        $match->game_state = $gameState;
         $match->save();
+    }
+
+    // ========================================================================
+    // HELPERS: TeamsManager
+    // ========================================================================
+
+    /**
+     * Obtener TeamsManager del game_state.
+     *
+     * @param GameMatch $match
+     * @return \App\Services\Modules\TeamsSystem\TeamsManager|null
+     */
+    protected function getTeamsManager(GameMatch $match): ?\App\Services\Modules\TeamsSystem\TeamsManager
+    {
+        // Verificar si teams_system está habilitado
+        if (!$this->isModuleEnabled($match, 'teams_system')) {
+            return null;
+        }
+
+        try {
+            $teamsManager = new \App\Services\Modules\TeamsSystem\TeamsManager($match);
+            
+            // Si hay PlayerManager disponible, sincronizarlo
+            if (isset($match->game_state['player_system'])) {
+                $scoreCalculator = null;
+                // Intentar obtener calculator desde scoring_system config
+                if (isset($match->game_state['_config']['modules']['scoring_system']['calculator'])) {
+                    // Esto requeriría instanciar el calculator, por ahora lo dejamos null
+                    // El PlayerManager se sincronizará en savePlayerManager()
+                }
+                
+                try {
+                    $playerManager = $this->getPlayerManager($match, $scoreCalculator);
+                    $teamsManager->setPlayerManager($playerManager);
+                } catch (\Exception $e) {
+                    // Si no hay PlayerManager aún, continuar sin él
+                    Log::debug("[{$this->getGameSlug()}] PlayerManager not available for TeamsManager", [
+                        'match_id' => $match->id
+                    ]);
+                }
+            }
+            
+            return $teamsManager;
+        } catch (\Exception $e) {
+            Log::debug("[{$this->getGameSlug()}] TeamsManager not initialized yet", [
+                'match_id' => $match->id,
+                'error' => $e->getMessage()
+            ]);
+            return null;
+        }
     }
 
     // ========================================================================

@@ -20,6 +20,12 @@ class TeamsManager
     protected string $lockKey;
     protected int $syncInterval = 10; // Sincronizar a BD cada 10 segundos
     protected int $lockTimeout = 5; // Timeout del lock en segundos
+    
+    /**
+     * PlayerManager opcional para agregar scores desde jugadores individuales.
+     * Si está disponible, getTeamRanking() sumará scores de jugadores.
+     */
+    protected ?\App\Services\Modules\PlayerSystem\PlayerManager $playerManager = null;
 
     /**
      * Colores por defecto para equipos
@@ -37,14 +43,28 @@ class TeamsManager
 
     /**
      * Constructor
+     * 
+     * @param GameMatch $match
+     * @param \App\Services\Modules\PlayerSystem\PlayerManager|null $playerManager Opcional, para agregar scores desde jugadores
      */
-    public function __construct(GameMatch $match)
+    public function __construct(GameMatch $match, ?\App\Services\Modules\PlayerSystem\PlayerManager $playerManager = null)
     {
         $this->match = $match;
+        $this->playerManager = $playerManager;
         $this->cacheKey = "game:match:{$match->id}:state";
         $this->lockKey = "game:match:{$match->id}:lock";
 
         $this->loadOrInitialize();
+    }
+    
+    /**
+     * Establecer PlayerManager para agregar scores desde jugadores individuales.
+     * 
+     * @param \App\Services\Modules\PlayerSystem\PlayerManager|null $playerManager
+     */
+    public function setPlayerManager(?\App\Services\Modules\PlayerSystem\PlayerManager $playerManager): void
+    {
+        $this->playerManager = $playerManager;
     }
 
     /**
@@ -395,11 +415,37 @@ class TeamsManager
     }
 
     /**
-     * Obtener puntuación de un equipo
+     * Obtener puntuación de un equipo.
+     * 
+     * NUEVA ARQUITECTURA:
+     * - Si PlayerManager está disponible, suma scores de jugadores individuales
+     * - Si no, usa team['score'] legacy (backward compatibility)
+     * 
+     * @param string $teamId
+     * @return int Puntuación total del equipo
      */
     public function getTeamScore(string $teamId): int
     {
         $team = $this->getTeam($teamId);
+        if (!$team) {
+            return 0;
+        }
+        
+        // Si PlayerManager está disponible, agregar desde jugadores individuales
+        if ($this->playerManager !== null) {
+            $teamScore = 0;
+            foreach ($team['members'] ?? [] as $playerId) {
+                try {
+                    $teamScore += $this->playerManager->getScore($playerId);
+                } catch (\Exception $e) {
+                    // Si el jugador no existe en PlayerManager, ignorar
+                    continue;
+                }
+            }
+            return $teamScore;
+        }
+        
+        // Backward compatibility: usar team['score'] si no hay PlayerManager
         return $team['score'] ?? 0;
     }
 
@@ -474,9 +520,18 @@ class TeamsManager
 
     /**
      * Agregar puntos a un equipo
+     * 
+     * @deprecated Este método está deprecado. Los scores ahora se manejan individualmente
+     * en PlayerManager y se agregan automáticamente en getTeamRanking().
+     * Si necesitas otorgar puntos, usa PlayerManager->awardPoints() para cada jugador del equipo.
+     * 
+     * @param string $teamId
+     * @param int $points
      */
     public function addTeamScore(string $teamId, int $points): void
     {
+        // Mantener backward compatibility: actualizar score del equipo si existe
+        // Pero esto ya no es la fuente de verdad, solo para juegos legacy
         Cache::lock($this->lockKey, $this->lockTimeout)->block(3, function() use ($teamId, $points) {
             $state = $this->getState();
 
@@ -492,12 +547,40 @@ class TeamsManager
     }
 
     /**
-     * Obtener ranking de equipos ordenado por puntuación
+     * Obtener ranking de equipos ordenado por puntuación.
+     * 
+     * NUEVA ARQUITECTURA:
+     * - Si PlayerManager está disponible, agrega scores de jugadores individuales
+     * - Si no, usa team['score'] legacy (backward compatibility)
+     * 
+     * @return array Equipos ordenados con scores agregados
      */
     public function getTeamRanking(): array
     {
         $teams = $this->getTeams();
 
+        // Si PlayerManager está disponible, agregar scores desde jugadores individuales
+        if ($this->playerManager !== null) {
+            foreach ($teams as &$team) {
+                $teamScore = 0;
+                
+                // Sumar scores de todos los jugadores del equipo
+                foreach ($team['members'] ?? [] as $playerId) {
+                    try {
+                        $teamScore += $this->playerManager->getScore($playerId);
+                    } catch (\Exception $e) {
+                        // Si el jugador no existe en PlayerManager, ignorar
+                        continue;
+                    }
+                }
+                
+                // Actualizar score del equipo (para backward compatibility)
+                $team['score'] = $teamScore;
+            }
+        }
+        // Si no hay PlayerManager, usar team['score'] legacy
+
+        // Ordenar por score (mayor a menor)
         usort($teams, fn($a, $b) => $b['score'] <=> $a['score']);
 
         // Agregar posición

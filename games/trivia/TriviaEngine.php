@@ -53,16 +53,23 @@ class TriviaEngine extends BaseGameEngine
             ],
         ]);
 
+        // NUEVA ARQUITECTURA UNIFICADA: PlayerManager con scoreCalculator
+        // PlayerManager es la fuente de verdad de scores individuales
+        $scoreCalculator = new TriviaScoreCalculator();
+        
         // PlayerManager: restaurar o crear y asignar roles desde config
         if (isset($match->game_state['player_system'])) {
-            $playerManager = \App\Services\Modules\PlayerSystem\PlayerManager::fromArray($match->game_state);
+            $playerManager = \App\Services\Modules\PlayerSystem\PlayerManager::fromArray(
+                $match->game_state,
+                $scoreCalculator // ← NUEVO: pasar calculator
+            );
         } else {
             $playerIds = $match->players->pluck('id')->toArray();
             $rolesConfig = $match->game_state['_config']['modules']['roles_system']['roles'] ?? [];
             $availableRoles = array_map(fn($role) => $role['name'], $rolesConfig);
             $playerManager = new \App\Services\Modules\PlayerSystem\PlayerManager(
                 playerIds: $playerIds,
-                scoreCalculator: null,
+                scoreCalculator: $scoreCalculator, // ← NUEVO: pasar calculator
                 config: ['available_roles' => $availableRoles]
             );
             $playerManager->autoAssignRolesFromConfig($rolesConfig, shuffle: true);
@@ -75,8 +82,10 @@ class TriviaEngine extends BaseGameEngine
     public function finalize(GameMatch $match): array
     {
         Log::info('[Trivia] Finalizing', ['match_id' => $match->id]);
-        $scoreManager = $this->getScoreManager($match);
-        $scores = $scoreManager->getScores();
+        
+        // NUEVA ARQUITECTURA: Obtener scores finales desde PlayerManager (fuente de verdad)
+        $playerManager = $this->getPlayerManager($match, new TriviaScoreCalculator());
+        $scores = $playerManager->getScores();
         arsort($scores);
         $ranking = [];
         $pos = 1;
@@ -210,10 +219,12 @@ class TriviaEngine extends BaseGameEngine
 
             if ((int)$optionIndex === (int)$correctIndex) {
                 // Correcta: puntuar y finalizar ronda
-                $scoreManager = $this->getScoreManager($match);
+                // NUEVA ARQUITECTURA: Usar PlayerManager como fuente de verdad
+                $playerManager = $this->getPlayerManager($match, new TriviaScoreCalculator());
                 $points = $this->calculateSpeedPoints($match, basePoints: 10);
-                $scoreManager->awardPoints($player->id, 'correct_answer', ['points' => $points]);
-                $this->saveScoreManager($match, $scoreManager);
+                $playerManager->awardPoints($player->id, 'correct_answer', ['points' => $points], $match);
+                $this->savePlayerManager($match, $playerManager);
+                // savePlayerManager() sincroniza automáticamente a scoring_system para backward compatibility
 
                 $state = $match->game_state;
                 $state['actions'][$player->id] = 'correct_answer';

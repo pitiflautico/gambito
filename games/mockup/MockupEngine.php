@@ -90,12 +90,19 @@ class MockupEngine extends BaseGameEngine
             ]
         ]);
 
+        // NUEVA ARQUITECTURA UNIFICADA: PlayerManager con scoreCalculator
+        // PlayerManager es la fuente de verdad de scores individuales
+        $scoreCalculator = new MockupScoreCalculator();
+        
         // Inicializar PlayerManager
         // Si ya existe player_system en game_state (ej: al reconectar), restaurarlo
         // Si no existe, crear uno nuevo y asignar roles
         if (isset($match->game_state['player_system'])) {
-            // Restaurar PlayerManager existente desde game_state
-            $playerManager = \App\Services\Modules\PlayerSystem\PlayerManager::fromArray($match->game_state);
+            // Restaurar PlayerManager existente desde game_state con calculator
+            $playerManager = \App\Services\Modules\PlayerSystem\PlayerManager::fromArray(
+                $match->game_state,
+                $scoreCalculator
+            );
 
             Log::info("[Mockup] Restored existing PlayerManager from game_state", [
                 'match_id' => $match->id,
@@ -111,7 +118,7 @@ class MockupEngine extends BaseGameEngine
 
             $playerManager = new \App\Services\Modules\PlayerSystem\PlayerManager(
                 playerIds: $playerIds,
-                scoreCalculator: null,
+                scoreCalculator: $scoreCalculator, // ← NUEVO: pasar calculator
                 config: [
                     'available_roles' => $availableRoles
                 ]
@@ -126,7 +133,7 @@ class MockupEngine extends BaseGameEngine
             ]);
         }
 
-        // Guardar PlayerManager en game_state
+        // Guardar PlayerManager en game_state (sincroniza scores a scoring_system automáticamente)
         $this->savePlayerManager($match, $playerManager);
 
         Log::info("[Mockup] Initialized successfully", [
@@ -142,9 +149,9 @@ class MockupEngine extends BaseGameEngine
     {
         Log::info("[Mockup] Finalizing game", ['match_id' => $match->id]);
 
-        // Obtener scores finales
-        $scoreManager = $this->getScoreManager($match);
-        $scores = $scoreManager->getScores();
+        // NUEVA ARQUITECTURA: Obtener scores finales desde PlayerManager (fuente de verdad)
+        $playerManager = $this->getPlayerManager($match, new MockupScoreCalculator());
+        $scores = $playerManager->getScores();
 
         // Crear ranking ordenado por puntos
         arsort($scores);
@@ -293,10 +300,11 @@ class MockupEngine extends BaseGameEngine
                 'player_id' => $player->id,
             ]);
 
-            // Otorgar 10 puntos al jugador
-            $scoreManager = $this->getScoreManager($match);
-            $scoreManager->awardPoints($player->id, 'good_answer', ['points' => 10]);
-            $this->saveScoreManager($match, $scoreManager);
+            // NUEVA ARQUITECTURA: Usar PlayerManager como fuente de verdad
+            $playerManager = $this->getPlayerManager($match, new MockupScoreCalculator());
+            $playerManager->awardPoints($player->id, 'good_answer', ['points' => 10], $match);
+            $this->savePlayerManager($match, $playerManager);
+            // savePlayerManager() sincroniza automáticamente a scoring_system para backward compatibility
 
             // Guardar acción
             $gameState = $match->game_state;
@@ -419,8 +427,9 @@ class MockupEngine extends BaseGameEngine
         // Aquí podríamos dar puntos a otros jugadores si fuera necesario
         // (por ejemplo, puntos de participación)
 
-        $scoreManager = $this->getScoreManager($match);
-        $scores = $scoreManager->getScores();
+        // NUEVA ARQUITECTURA: Obtener scores desde PlayerManager (fuente de verdad)
+        $playerManager = $this->getPlayerManager($match, new MockupScoreCalculator());
+        $scores = $playerManager->getScores();
 
         // Recopilar resultados de la ronda
         $results = [
@@ -453,8 +462,9 @@ class MockupEngine extends BaseGameEngine
     {
         $allActions = $match->game_state['actions'] ?? [];
 
-        $scoreManager = $this->getScoreManager($match);
-        $scores = $scoreManager->getScores();
+        // NUEVA ARQUITECTURA: Obtener scores desde PlayerManager (fuente de verdad)
+        $playerManager = $this->getPlayerManager($match, new MockupScoreCalculator());
+        $scores = $playerManager->getScores();
 
         return [
             'actions' => $allActions,
