@@ -11,6 +11,7 @@
   },
   "provides": {
     "events": [
+      "DrawingStartedEvent",
       "DrawStrokeEvent",
       "WordRevealedEvent",
       "CanvasClearedEvent",
@@ -25,6 +26,11 @@
   "event_config": {
     "channel": "room.{roomCode}",
     "events": {
+      "GameStartedEvent": {
+        "name": "game.started",
+        "description": "Sistema: Juego iniciado",
+        "handler": "handleGameStarted"
+      },
       "RoundStartedEvent": {
         "name": "game.round.started",
         "description": "Sistema: Nueva ronda iniciada",
@@ -37,8 +43,33 @@
       },
       "PhaseChangedEvent": {
         "name": "game.phase.changed",
-        "description": "Sistema: Cambio de fase con timing para timer",
+        "description": "Sistema: Cambio de fase",
         "handler": "handlePhaseChanged"
+      },
+      "DrawingStartedEvent": {
+        "name": "pictionary.drawing.started",
+        "description": "Pictionary: Fase de dibujo iniciada",
+        "handler": "handleDrawingStarted"
+      },
+      "PhaseStartedEvent": {
+        "name": "game.phase.started",
+        "description": "Sistema: Fase genérica iniciada",
+        "handler": "handlePhaseStarted"
+      },
+      "PhaseEndedEvent": {
+        "name": "game.phase.ended",
+        "description": "Sistema: Fase finalizada",
+        "handler": "handlePhaseEnded"
+      },
+      "PlayerLockedEvent": {
+        "name": "game.player.locked",
+        "description": "Sistema: Jugador bloqueado",
+        "handler": "handlePlayerLocked"
+      },
+      "PlayersUnlockedEvent": {
+        "name": "players.unlocked",
+        "description": "Sistema: Jugadores desbloqueados",
+        "handler": "handlePlayersUnlocked"
       },
       "DrawStrokeEvent": {
         "name": "pictionary.draw-stroke",
@@ -69,11 +100,6 @@
         "name": "pictionary.answer-validated",
         "description": "Broadcast when drawer validates a claim",
         "handler": "handleAnswerValidated"
-      },
-      "PlayersUnlockedEvent": {
-        "name": "game.players.unlocked",
-        "description": "Broadcast when all players are unlocked (new round)",
-        "handler": "handlePlayersUnlocked"
       },
       "PlayerScoreUpdatedEvent": {
         "name": "player.score.updated",

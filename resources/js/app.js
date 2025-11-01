@@ -26,6 +26,14 @@ window.loadTriviaGameClient = async () => {
     if (window.TriviaGameClient) return; // Ya cargado
     const module = await import('../../games/trivia/js/TriviaGameClient.js');
     // El módulo ya expone window.TriviaGameClient internamente
+    // Esperar un tick para asegurar que window.TriviaGameClient esté disponible
+    if (!window.TriviaGameClient && module.TriviaGameClient) {
+        window.TriviaGameClient = module.TriviaGameClient;
+    }
+    // Verificar que se cargó correctamente
+    if (!window.TriviaGameClient) {
+        console.error('[app.js] TriviaGameClient not available after import');
+    }
 };
 
 // PictionaryGameClient will be loaded when needed

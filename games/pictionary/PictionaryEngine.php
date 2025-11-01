@@ -55,8 +55,7 @@ class PictionaryEngine extends BaseGameEngine
         $totalRounds = $gameSettings['rounds'] ?? $defaultRounds;
         $difficulty = $gameSettings['difficulty'] ?? 'medium';
 
-        // TODO: Seleccionar palabras según dificultad y número de rondas
-        // Por ahora, seleccionar aleatoriamente
+        // Seleccionar palabras según dificultad y número de rondas
         $selectedWords = $this->selectWords($wordsData, $totalRounds, $difficulty);
 
         Log::info("[Pictionary] Words configured", [
@@ -91,9 +90,6 @@ class PictionaryEngine extends BaseGameEngine
 
         $match->save();
 
-        // Cachear players en _config (1 query, 1 sola vez)
-        $this->cachePlayersInState($match);
-
         // Inicializar módulos automáticamente desde config.json
         $this->initializeModules($match, [
             'scoring_system' => [
@@ -127,13 +123,11 @@ class PictionaryEngine extends BaseGameEngine
     }
 
     /**
-     * Hook cuando el juego empieza - FASE 3 (POST-COUNTDOWN)
-     *
-     * Establece la rotación de drawers y prepara la primera ronda.
+     * Hook cuando el juego empieza.
      */
     protected function onGameStart(GameMatch $match): void
     {
-        Log::info("[Pictionary] Game starting - FASE 3", ['match_id' => $match->id]);
+        Log::info('[Pictionary] onGameStart', ['match_id' => $match->id]);
 
         // Establecer rotación de drawers (todos los jugadores)
         $playerIds = $match->players->pluck('id')->toArray();
@@ -145,91 +139,24 @@ class PictionaryEngine extends BaseGameEngine
             'drawer_rotation' => $playerIds,
             'current_drawer_index' => 0,
         ]);
-
         $match->save();
 
-        // Usar handleNewRound() para iniciar la primera ronda
+        // Note: UI setup will happen in onRoundStarting() which is called by handleNewRound()
         $this->handleNewRound($match, advanceRound: false);
-
-        Log::info("[Pictionary] First round started via handleNewRound()", [
-            'match_id' => $match->id,
-            'room_code' => $match->room->code,
-            'drawer_rotation' => $playerIds
-        ]);
     }
 
-    /**
-     * ✅ SISTEMA UNIFICADO DE FASES: NO emitir timing en RoundStartedEvent
-     *
-     * El timing ahora se emite via PhaseChangedEvent en onRoundStarted()
-     */
-    protected function getRoundStartTiming(GameMatch $match): ?array
-    {
-        return null; // NO timing en RoundStartedEvent
-    }
 
     /**
-     * ✅ SISTEMA UNIFICADO DE FASES: Emitir PhaseChangedEvent con timing
+     * Procesar acción de ronda.
      *
-     * Este hook se ejecuta DESPUÉS de RoundStartedEvent.
-     * Aquí obtenemos el PhaseManager y emitimos el evento con timing metadata.
-     */
-    protected function onRoundStarted(GameMatch $match, int $currentRound, int $totalRounds): void
-    {
-        $roundManager = $this->getRoundManager($match);
-        $phaseManager = $roundManager->getTurnManager(); // Es PhaseManager
-
-        if (!$phaseManager) {
-            Log::error("[Pictionary] PhaseManager NOT FOUND in RoundManager", ['match_id' => $match->id]);
-            return;
-        }
-
-        $currentPhase = $phaseManager->getCurrentPhaseName();
-        $timingInfo = $phaseManager->getTimingInfo();
-
-        $timing = [
-            'server_time' => now()->timestamp,
-            'duration' => $timingInfo['delay'] ?? 0
-        ];
-
-        Log::info("[Pictionary] Emitting PhaseChangedEvent after RoundStarted", [
-            'match_id' => $match->id,
-            'phase' => $currentPhase,
-            'duration' => $timing['duration']
-        ]);
-
-        event(new PhaseChangedEvent(
-            match: $match,
-            newPhase: $currentPhase,
-            previousPhase: '',  // Primera fase, no hay anterior
-            additionalData: $timing
-        ));
-    }
-
-    /**
-     * Procesar acción de ronda - Puede ser un intento de adivinar o un stroke del dibujo.
-     *
-     * Flujo para GUESS:
-     * 1. Verificar que el jugador no sea el drawer
-     * 2. Verificar que no esté bloqueado (ya adivinó)
-     * 3. Verificar la respuesta contra la palabra actual
-     * 4. Si es correcta:
-     *    - Sumar puntos al guesser (base + speed bonus)
-     *    - Sumar puntos al drawer
-     *    - Bloquear al jugador
-     *    - Si todos adivinaron, terminar ronda
-     * 5. Si es incorrecta:
-     *    - No hacer nada (seguir intentando)
-     *
-     * Flujo para DRAW_STROKE:
-     * 1. Verificar que el jugador sea el drawer actual
-     * 2. Agregar stroke al canvas_data
-     * 3. Broadcast del stroke a todos los jugadores
-     *
-     * @param GameMatch $match
-     * @param Player $player
-     * @param array $data ['action' => 'guess'|'draw_stroke', 'guess' => string, 'stroke' => array]
-     * @return array
+     * RETORNO:
+     * [
+     *   'success' => bool,
+     *   'player_id' => int,
+     *   'data' => mixed,
+     *   'force_end' => bool,         // ¿Forzar fin de ronda?
+     *   'end_reason' => string|null  // Razón del fin
+     * ]
      */
     protected function processRoundAction(GameMatch $match, Player $player, array $data): array
     {
@@ -238,7 +165,12 @@ class PictionaryEngine extends BaseGameEngine
         if ($action === 'claim_answer') {
             return $this->processClaimAnswer($match, $player, $data);
         } elseif ($action === 'validate_claim') {
-            return $this->processValidateClaim($match, $player, $data);
+            $result = $this->processValidateClaim($match, $player, $data);
+            // Si force_end es true, terminar la ronda
+            if (($result['force_end'] ?? false) === true) {
+                $this->endCurrentRound($match);
+            }
+            return $result;
         } elseif ($action === 'draw_stroke') {
             return $this->processDrawStroke($match, $player, $data);
         } elseif ($action === 'clear_canvas') {
@@ -248,177 +180,8 @@ class PictionaryEngine extends BaseGameEngine
         return [
             'success' => false,
             'message' => 'Acción desconocida',
+            'force_end' => false,
         ];
-    }
-
-    /**
-     * Procesar intento de adivinar.
-     *
-     * TODO: Implementar lógica de validación de respuestas
-     * - Normalizar la respuesta (lowercase, sin acentos, trim)
-     * - Comparar con la palabra actual
-     * - Calcular puntos con speed bonus
-     */
-    private function processGuess(GameMatch $match, Player $player, array $data): array
-    {
-        Log::info("[Pictionary] Processing guess", [
-            'match_id' => $match->id,
-            'player_id' => $player->id,
-            'guess' => $data['guess'] ?? null
-        ]);
-
-        // 1. Validar que se envió una respuesta
-        if (!isset($data['guess'])) {
-            return [
-                'success' => false,
-                'message' => 'No se envió una respuesta',
-            ];
-        }
-
-        // 2. Verificar que el jugador no sea el drawer
-        $currentDrawerId = $this->getCurrentDrawerId($match);
-        if ($player->id === $currentDrawerId) {
-            return [
-                'success' => false,
-                'message' => 'El dibujante no puede adivinar',
-            ];
-        }
-
-        // 3. Verificar que el jugador no esté bloqueado
-        $playerManager = $this->getPlayerManager($match, $this->scoreCalculator);
-        if ($playerManager->isPlayerLocked($player->id)) {
-            return [
-                'success' => false,
-                'message' => 'Ya adivinaste esta palabra',
-            ];
-        }
-
-        // 4. Obtener la palabra actual
-        $currentWord = $this->getCurrentWord($match);
-        if (!$currentWord) {
-            return [
-                'success' => false,
-                'message' => 'No hay palabra actual',
-            ];
-        }
-
-        // 5. Normalizar y verificar la respuesta
-        $guess = $this->normalizeString($data['guess']);
-        $correctWord = $this->normalizeString($currentWord['word']);
-
-        $isCorrect = ($guess === $correctWord);
-
-        // 6. Registrar la acción del jugador
-        $playerManager->setPlayerAction($player->id, [
-            'type' => 'guess',
-            'guess' => $data['guess'],
-            'is_correct' => $isCorrect,
-            'timestamp' => now()->toDateTimeString(),
-        ]);
-
-        $resultData = [];
-        $forceEnd = false;
-
-        if ($isCorrect) {
-            // ✅ RESPUESTA CORRECTA
-            Log::info("[Pictionary] Correct guess!", [
-                'match_id' => $match->id,
-                'player_id' => $player->id,
-                'word' => $currentWord['word']
-            ]);
-
-            // Calcular puntos con speed bonus
-            $context = [
-                'difficulty' => $currentWord['difficulty'] ?? 'medium',
-            ];
-
-            // Calcular elapsed time para speed bonus
-            $timerDuration = $gameConfig['modules']['timer_system']['round_duration'] ?? null;
-            if ($timerDuration) {
-                try {
-                    $elapsedTime = $this->getElapsedTime($match, 'round');
-                    $context['time_taken'] = $elapsedTime;
-                    $context['time_limit'] = $timerDuration;
-                } catch (\Exception $e) {
-                    Log::debug("[Pictionary] No timer available for speed bonus");
-                }
-            }
-
-            // Sumar puntos al guesser
-            $guessPoints = $calculator->calculate('correct_guess', $context);
-            $this->awardPoints($match, $player->id, 'correct_guess', $context, $calculator);
-
-            // Sumar puntos al drawer
-            $drawer = Player::find($currentDrawerId);
-            if ($drawer) {
-                $drawerPoints = $calculator->calculate('drawer_success', $context);
-                $this->awardPoints($match, $drawer->id, 'drawer_success', $context, $calculator);
-            }
-
-            $resultData = [
-                'is_correct' => true,
-                'points' => $guessPoints,
-                'guess' => $data['guess'],
-            ];
-
-            // Bloquear jugador
-            $lockResult = $playerManager->lockPlayer($player->id, $match, $player, $resultData);
-            $this->savePlayerManager($match, $playerManager);
-
-            // Obtener score total del jugador
-            $scoreManager = $this->getScoreManager($match);
-            $totalScore = $scoreManager->getScore($player->id);
-
-            // Emitir evento CorrectGuessEvent
-            event(new \App\Events\Pictionary\CorrectGuessEvent(
-                $match,
-                $player,
-                $data['guess'],
-                $guessPoints,
-                $totalScore
-            ));
-
-            // Verificar si todos los guessers adivinaron
-            $allGuessers = $playerManager->getPlayersWithRoundRole('guesser');
-            $lockedGuessers = array_filter($allGuessers, function ($playerId) use ($playerManager) {
-                return $playerManager->isPlayerLocked($playerId);
-            });
-
-            if (count($lockedGuessers) >= count($allGuessers)) {
-                // Todos los guessers adivinaron → termina la ronda
-                $forceEnd = true;
-                $endReason = 'all_players_guessed';
-
-                Log::info("[Pictionary] All guessers got it right - ending round", [
-                    'match_id' => $match->id,
-                    'total_guessers' => count($allGuessers),
-                    'locked_guessers' => count($lockedGuessers)
-                ]);
-            }
-
-        } else {
-            // ❌ RESPUESTA INCORRECTA
-            Log::info("[Pictionary] Incorrect guess", [
-                'match_id' => $match->id,
-                'player_id' => $player->id,
-                'guess' => $data['guess']
-            ]);
-
-            $resultData = [
-                'is_correct' => false,
-                'guess' => $data['guess'],
-            ];
-
-            // En Pictionary, no se bloquea por respuesta incorrecta
-            // Los jugadores pueden seguir intentando
-        }
-
-        return array_merge([
-            'success' => true,
-            'should_end_turn' => $forceEnd ?? false,
-            'end_reason' => $endReason ?? null,
-            'player_id' => $player->id,
-        ], $resultData);
     }
 
     /**
@@ -549,7 +312,7 @@ class PictionaryEngine extends BaseGameEngine
             ];
         }
 
-        // Usar PlayerManager (unifica scores + state)
+        // Usar PlayerManager - IMPORTANTE: pasar scoreCalculator para que awardPoints funcione
         $playerManager = $this->getPlayerManager($match, $this->scoreCalculator);
 
         $forceEnd = false;
@@ -586,13 +349,17 @@ class PictionaryEngine extends BaseGameEngine
 
             $points = $guessPoints;
 
-            // Registrar acción de guess correcto (para getAllPlayerResults)
-            $playerManager->setPlayerAction($playerId, [
+            // Registrar acción en game_state
+            $gameState = $match->game_state;
+            $gameState['actions'][$playerId] = [
                 'type' => 'guess',
                 'is_correct' => true,
                 'guess' => $currentWord['word'] ?? 'unknown',
                 'timestamp' => now()->toDateTimeString(),
-            ]);
+                'points' => $guessPoints,
+            ];
+            $match->game_state = $gameState;
+            $match->save();
 
             // Bloquear jugador
             $lockResult = $playerManager->lockPlayer($playerId, $match, $player, [
@@ -624,24 +391,32 @@ class PictionaryEngine extends BaseGameEngine
                 'reason' => 'incorrect_guess',
             ]);
 
-            // Registrar acción de guess incorrecto
-            $playerManager->setPlayerAction($playerId, [
+            // Registrar acción en game_state
+            $gameState = $match->game_state;
+            $gameState['actions'][$playerId] = [
                 'type' => 'guess',
                 'is_correct' => false,
                 'timestamp' => now()->toDateTimeString(),
-            ]);
+            ];
+            $match->game_state = $gameState;
+            $match->save();
 
             $this->savePlayerManager($match, $playerManager);
 
             // Verificar si todos los guessers ya intentaron y ninguno acertó
-            if ($playerManager->haveAllRolePlayersFailedAttempt('guesser')) {
+            $guessers = $playerManager->getPlayersWithRoundRole('guesser');
+            $lockedGuessers = array_filter($guessers, function ($playerId) use ($playerManager) {
+                return $playerManager->isPlayerLocked($playerId);
+            });
+            
+            if (count($lockedGuessers) >= count($guessers) && count($guessers) > 0) {
                 $forceEnd = true;
                 $endReason = 'all_guessers_failed';
 
-                $guessers = $playerManager->getPlayersWithRoundRole('guesser');
                 Log::info("[Pictionary] All guessers failed - ending round", [
                     'match_id' => $match->id,
                     'total_guessers' => count($guessers),
+                    'locked_guessers' => count($lockedGuessers),
                 ]);
             }
         }
@@ -656,18 +431,18 @@ class PictionaryEngine extends BaseGameEngine
 
         return [
             'success' => true,
-            'should_end_turn' => $forceEnd,
-            'end_reason' => $endReason,
             'player_id' => $playerId,
-            'is_correct' => $isCorrect,
-            'points' => $points,
+            'data' => [
+                'is_correct' => $isCorrect,
+                'points' => $points,
+            ],
+            'force_end' => $forceEnd,
+            'end_reason' => $endReason,
         ];
     }
 
     /**
      * Procesar stroke del dibujo.
-     *
-     * TODO: Implementar broadcast en tiempo real del stroke
      */
     private function processDrawStroke(GameMatch $match, Player $player, array $data): array
     {
@@ -764,22 +539,37 @@ class PictionaryEngine extends BaseGameEngine
     }
 
     /**
-     * Hook OPCIONAL: Preparar datos específicos para la nueva ronda.
-     *
-     * BaseGameEngine ya ejecutó:
-     * - PlayerManager::reset() (desbloquea jugadores, emite PlayersUnlockedEvent)
-     * - RoundManager::advanceToNextRound() (incrementa contador)
-     *
-     * Aquí SOLO ejecutamos lógica específica de Pictionary:
-     * - Rotar drawer
-     * - Cargar siguiente palabra
-     * - Limpiar canvas
-     * - Asignar roles (drawer/guesser)
-     * - Emitir WordRevealedEvent (solo al drawer)
+     * Hook llamado ANTES de emitir DrawingStartedEvent.
+     * Aquí preparamos los datos de la ronda para que estén disponibles cuando
+     * PhaseManager emita DrawingStartedEvent.
      */
     protected function onRoundStarting(GameMatch $match): void
     {
-        Log::info("[Pictionary] Preparing round data", ['match_id' => $match->id]);
+        Log::info('[Pictionary] onRoundStarting hook called');
+        
+        // Llamar a startNewRound() que prepara los datos específicos
+        $this->startNewRound($match);
+    }
+
+    /**
+     * Iniciar nueva ronda - Preparar datos específicos de Pictionary.
+     *
+     * NOTA: PlayerManager::reset() ya se llama automáticamente en handleNewRound().
+     * Aquí solo hacemos la lógica específica del juego.
+     */
+    protected function startNewRound(GameMatch $match): void
+    {
+        Log::info('[Pictionary] startNewRound hook');
+        
+        // NOTA: PlayerManager::reset() ya se llama automáticamente en handleNewRound()
+        // Aquí solo hacemos la lógica específica del juego
+        
+        // Limpiar acciones del game_state
+        $gameState = $match->game_state;
+        $gameState['actions'] = [];
+        $gameState['phase'] = 'playing';
+        $match->game_state = $gameState;
+        $match->save();
 
         // 1. Rotar drawer
         $this->rotateDrawer($match);
@@ -799,53 +589,139 @@ class PictionaryEngine extends BaseGameEngine
         // 5. Emitir WordRevealedEvent (solo al drawer)
         $this->emitWordRevealedEvent($match, $word);
 
-        Log::info("[Pictionary] Round data prepared", [
+        Log::info('[Pictionary] Round data prepared', [
             'match_id' => $match->id,
-            'word' => $word['word'],
+            'word' => $word['word'] ?? 'N/A',
             'drawer_id' => $this->getCurrentDrawerId($match)
         ]);
     }
 
     /**
-     * Obtener resultados de la ronda actual (Método abstracto de BaseGameEngine).
-     *
-     * Formatea los datos específicos de Pictionary:
-     * - Palabra actual y dificultad
-     * - ID del drawer
-     * - Lista de guessers que acertaron (con timestamps)
-     * - Total de aciertos
-     *
-     * BaseGameEngine usa este método para:
-     * - Emitir RoundEndedEvent con los resultados
-     * - Guardar historial de rondas
+     * Finalizar ronda actual.
+     * 
+     * SIGUE EL PROTOCOLO DE MOCKUP:
+     * - Obtener scores desde PlayerManager (no ScoreManager)
+     * - PlayerManager contiene los scores actualizados después de awardPoints()
+     */
+    public function endCurrentRound(GameMatch $match): void
+    {
+        Log::info("[Pictionary] Ending current round", ['match_id' => $match->id]);
+
+        // Obtener resultados de la ronda
+        $results = $this->getRoundResults($match);
+        
+        // Obtener scores desde PlayerManager (donde se actualizan con awardPoints)
+        $playerManager = $this->getPlayerManager($match, $this->scoreCalculator);
+        $scores = $playerManager->getScores();
+
+        Log::info("[Pictionary] Round end scores from PlayerManager", [
+            'match_id' => $match->id,
+            'scores' => $scores,
+        ]);
+
+        // Completar ronda (esto emite RoundEndedEvent con los scores)
+        $this->completeRound($match, $results, $scores);
+    }
+
+    /**
+     * Sobrescribir completeRound para usar scores de PlayerManager.
+     * 
+     * BaseGameEngine::completeRound() usa getScores() que busca en scoring_system,
+     * pero Pictionary guarda scores en PlayerManager (player_system).
+     * 
+     * Si se pasan scores como tercer parámetro, los usamos directamente.
+     */
+    protected function completeRound(GameMatch $match, array $results = [], array $scores = []): void
+    {
+        Log::info("[Pictionary] Completing round", [
+            'match_id' => $match->id,
+            'has_scores' => !empty($scores),
+        ]);
+
+        // Si no se pasaron scores, obtenerlos desde PlayerManager
+        if (empty($scores)) {
+            $playerManager = $this->getPlayerManager($match, $this->scoreCalculator);
+            $scores = $playerManager->getScores();
+        }
+
+        // Llamar al método padre pero con nuestros scores
+        $roundManager = $this->getRoundManager($match);
+        $timerService = $this->isModuleEnabled($match, 'timer_system')
+            ? $this->getTimerService($match)
+            : null;
+
+        // RoundManager maneja: emitir evento, crear timer countdown, etc.
+        $roundManager->completeRound($match, $results, $scores, $timerService);
+
+        // Guardar TimerService si se creó un timer
+        if ($timerService !== null) {
+            $this->saveTimerService($match, $timerService);
+        }
+
+        // Llamar al hook para que el juego ejecute lógica custom después del evento
+        $currentRound = $roundManager->getCurrentRound();
+        $this->onRoundEnded($match, $currentRound, $results, $scores);
+
+        // Guardar estado actualizado
+        $this->saveRoundManager($match, $roundManager);
+
+        // Verificar si el juego terminó
+        if ($roundManager->isGameComplete()) {
+            Log::info("[Pictionary] Game complete, finalizing", [
+                'match_id' => $match->id,
+            ]);
+            $this->finalize($match);
+            return;
+        }
+    }
+
+    /**
+     * Obtener resultados de la ronda actual.
      */
     protected function getRoundResults(GameMatch $match): array
     {
         $playerManager = $this->getPlayerManager($match, $this->scoreCalculator);
-        $allActions = $playerManager->getAllActions();
+        $allActions = $match->game_state['actions'] ?? [];
         $currentWord = $this->getCurrentWord($match);
         $currentDrawerId = $this->getCurrentDrawerId($match);
 
-        $playerResults = [];
         $guessers = [];
-
         foreach ($allActions as $playerId => $action) {
-            if ($action['type'] === 'guess' && $action['is_correct']) {
+            if (isset($action['is_correct']) && $action['is_correct'] === true) {
                 $guessers[] = [
                     'player_id' => $playerId,
-                    'guess' => $action['guess'],
+                    'guess' => $action['guess'] ?? null,
                     'is_correct' => true,
-                    'timestamp' => $action['timestamp'],
+                    'timestamp' => $action['timestamp'] ?? now()->toDateTimeString(),
                 ];
             }
         }
 
         return [
+            'actions' => $allActions,
             'word' => $currentWord,
             'drawer_id' => $currentDrawerId,
             'guessers' => $guessers,
             'total_correct' => count($guessers),
         ];
+    }
+
+    // ========================================================================
+    // Callbacks de fase
+    // ========================================================================
+
+    /**
+     * Callback cuando termina la fase de dibujo.
+     */
+    public function handleDrawingEnded(GameMatch $match, array $phaseData): void
+    {
+        Log::info('[Pictionary] handleDrawingEnded callback called', [
+            'match_id' => $match->id,
+            'phase' => $phaseData['name'] ?? 'drawing'
+        ]);
+
+        // Con fase única, al completar el ciclo finalizamos la ronda
+        $this->endCurrentRound($match);
     }
 
     // ========================================================================
@@ -1236,8 +1112,8 @@ class PictionaryEngine extends BaseGameEngine
             // Terminar ronda actual usando método heredado de BaseGameEngine
             $roundManager = $this->getRoundManager($match);
             if (!$roundManager->isGameComplete()) {
-                // Llamar al método heredado de BaseGameEngine que maneja el flujo completo
-                parent::endCurrentRound($match);
+                // Terminar ronda actual
+                $this->endCurrentRound($match);
             }
         }
     }
@@ -1245,69 +1121,16 @@ class PictionaryEngine extends BaseGameEngine
     /**
      * Override: Manejar reconexión de jugador.
      *
-     * A diferencia del comportamiento por defecto (que reinicia la ronda),
-     * Pictionary solo resume el juego en su estado actual SIN rotarDrawer ni reiniciar.
+     * SIGUE EL PROTOCOLO DE MOCKUP:
+     * - No sobrescribir, usar el comportamiento por defecto de BaseGameEngine
+     * - BaseGameEngine::onPlayerReconnected() automáticamente:
+     *   1. Quita la pausa
+     *   2. Llama a handleNewRound(advanceRound: false) para reiniciar la ronda actual
+     *   3. Esto emite RoundStartedEvent y DrawingStartedEvent automáticamente
+     *   4. Emite PlayerReconnectedEvent
+     *
+     * El timer se restaura automáticamente cuando llega el DrawingStartedEvent.
      */
-    public function onPlayerReconnected(GameMatch $match, Player $player): void
-    {
-        Log::info("[Pictionary] Player reconnected - resuming without restarting", [
-            'match_id' => $match->id,
-            'player_id' => $player->id,
-            'player_name' => $player->name,
-        ]);
+    // No es necesario sobrescribir - usar comportamiento por defecto igual que Mockup
 
-        // 1. Quitar pausa
-        $gameState = $match->game_state;
-        $gameState['paused'] = false;
-        unset($gameState['paused_reason']);
-        unset($gameState['disconnected_player_id']);
-        unset($gameState['paused_at']);
-        $match->game_state = $gameState;
-        $match->save();
-
-        // 2. Reanudar timer si está configurado y estaba pausado
-        if (isset($gameState['timer_system'])) {
-            try {
-                $timerService = $this->getTimerService($match);
-                if ($timerService->hasTimer('round')) {
-                    $timer = $timerService->getTimer('round');
-                    if ($timer->isPaused()) {
-                        $timerService->resumeTimer('round');
-                        $this->saveTimerService($match, $timerService);
-                        Log::info("[Pictionary] Round timer resumed", [
-                            'match_id' => $match->id,
-                            'timer_name' => 'round'
-                        ]);
-                    }
-                }
-            } catch (\Exception $e) {
-                // Timer no está disponible, continuar sin error
-                Log::debug("[Pictionary] Timer not available, skipping timer resume", [
-                    'error' => $e->getMessage()
-                ]);
-            }
-        }
-
-        // 3. Emitir evento de reconexión (sin reiniciar ronda)
-        event(new \App\Events\Game\PlayerReconnectedEvent($match, $player, false));
-
-        Log::info("[Pictionary] Game resumed at current state", [
-            'match_id' => $match->id,
-            'current_round' => $gameState['round_system']['current_round'] ?? null,
-            'current_drawer_index' => $gameState['current_drawer_index'] ?? null,
-        ]);
-    }
-
-    // ========================================================================
-    // MÉTODOS HEREDADOS (NO REIMPLEMENTAR)
-    // ========================================================================
-    //
-    // Los siguientes métodos se heredan de BaseGameEngine y NO deben sobrescribirse:
-    // - getGameConfig(): Carga config.json del juego automáticamente
-    // - getFinalScores(): Obtiene scores finales de PlayerManager automáticamente
-    // - endCurrentRound(): Maneja el flujo completo de fin de ronda (llama getRoundResults())
-    // - handlePlayerDisconnect/Reconnect(): OBSOLETOS, usar hooks beforePlayerDisconnectedPause() y afterPlayerReconnected()
-    //
-    // getGameConfig() y getFinalScores() ahora se heredan de BaseGameEngine
-    // (implementación común para todos los juegos)
 }

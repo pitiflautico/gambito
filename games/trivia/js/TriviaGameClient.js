@@ -328,6 +328,8 @@ export class TriviaGameClient extends BaseGameClient {
 }
 
 // Exponer globalmente para loader lazy
+// IMPORTANTE: Hacer esto DESPUÉS de definir la clase completa
+// Esto asegura que todos los métodos estén en el prototipo
 window.TriviaGameClient = TriviaGameClient;
 
 

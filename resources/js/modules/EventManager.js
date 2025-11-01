@@ -143,12 +143,14 @@ class EventManager {
 
             if (!this.handlers[handler]) {
                 // Silenciar warnings de handlers opcionales
+                console.log(`⏭️ [EventManager] Skipping ${eventClass} - handler '${handler}' not found`);
                 return;
             }
 
             // Registrar listener
             // Laravel Echo requiere un punto inicial para eventos personalizados
             const eventName = name.startsWith('.') ? name : `.${name}`;
+            console.log(`📌 [EventManager] Registering listener for ${eventClass}: ${eventName} -> ${handler}`);
             this.channel.listen(eventName, (event) => {
                 try {
                     console.log(`📩 [EventManager] Evento recibido: ${name}`, event);

@@ -13,6 +13,9 @@ export default defineConfig({
                 // 'resources/js/pictionary-canvas.js', // TODO: create this file
                 'resources/js/trivia-game.js',
                 'resources/js/trivia-game-new.js',
+                'games/mockup/js/MockupGameClient.js',
+                'games/trivia/js/TriviaGameClient.js',
+                'games/pictionary/js/PictionaryGameClient.js',
                 'games/mentiroso/js/MentirosoGameClient.js',
             ],
             refresh: [

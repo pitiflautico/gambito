@@ -13,22 +13,58 @@
   "supports_teams": true,
 
   "modules": {
+    "game_core": {
+      "enabled": true
+    },
+    "room_manager": {
+      "enabled": true
+    },
     "guest_system": {
       "enabled": true
     },
-    "turn_system": {
-      "enabled": true,
-      "mode": "sequential"
-    },
     "round_system": {
+      "enabled": true,
+      "total_rounds": 10,
+      "inter_round_delay": 5
+    },
+    "phase_system": {
+      "enabled": true,
+      "phases": [
+        {
+          "name": "drawing",
+          "duration": 20,
+          "on_start": "App\\Events\\Pictionary\\DrawingStartedEvent",
+          "on_end": "App\\Events\\Game\\PhaseEndedEvent",
+          "on_end_callback": "handleDrawingEnded",
+          "render_method": "renderDrawing"
+        }
+      ]
+    },
+    "timer_system": {
       "enabled": true
     },
     "scoring_system": {
       "enabled": true
     },
-    "timer_system": {
+    "player_system": {
+      "enabled": true
+    },
+    "roles_system": {
       "enabled": true,
-      "round_duration": 30
+      "roles": [
+        {
+          "name": "drawer",
+          "count": 1,
+          "description": "El jugador que dibuja",
+          "rotate_on_round_start": true
+        },
+        {
+          "name": "guesser",
+          "count": -1,
+          "description": "Los jugadores que adivinan",
+          "rotate_on_round_start": false
+        }
+      ]
     },
     "teams_system": {
       "enabled": true,
@@ -37,26 +73,51 @@
       "allow_self_selection": true,
       "allow_toggle": true
     },
-    "player_state_system": {
-      "enabled": true,
-      "uses_locks": true
-    },
-    "roles_system": {
-      "enabled": true,
-      "roles": ["drawer", "guesser", "viewer"]
+    "real_time_sync": {
+      "enabled": true
     }
   },
 
   "timing": {
-    "round_start": {
-      "duration": 30,
-      "countdown_visible": true,
-      "warning_threshold": 5
-    },
     "round_ended": {
-      "auto_next": true,
+      "type": "countdown",
+      "message": "Siguiente ronda en",
       "delay": 5,
-      "message": "Siguiente ronda"
+      "auto_next": true
+    }
+  },
+
+  "event_config": {
+    "channel": "room.{roomCode}",
+    "events": {
+      "PhaseChangedEvent": {
+        "name": ".game.phase.changed",
+        "handler": "handlePhaseChanged"
+      },
+      "RoundEndedEvent": {
+        "name": ".game.round.ended",
+        "handler": "handleRoundEnded"
+      },
+      "DrawingStartedEvent": {
+        "name": ".pictionary.drawing.started",
+        "handler": "handleDrawingStarted"
+      },
+      "PhaseStartedEvent": {
+        "name": ".game.phase.started",
+        "handler": "handlePhaseStarted"
+      },
+      "PhaseEndedEvent": {
+        "name": ".game.phase.ended",
+        "handler": "handlePhaseEnded"
+      },
+      "PlayerLockedEvent": {
+        "name": ".game.player.locked",
+        "handler": "handlePlayerLocked"
+      },
+      "PlayersUnlockedEvent": {
+        "name": ".players.unlocked",
+        "handler": "handlePlayersUnlocked"
+      }
     }
   },
 

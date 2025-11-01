@@ -90,6 +90,7 @@
     @include('mockup::partials.player_disconnected_popup')
 
     <script type="module">
+        // Configuración del juego desde PHP
         const config = {
             roomCode: '{{ $code }}',
             matchId: {{ $match->id }},
@@ -103,6 +104,7 @@
             timing: {}
         };
 
+        // Crear instancia del cliente de Trivia (igual que Mockup)
         const client = new window.TriviaGameClient(config);
 
         // Cargar estado inicial

@@ -555,7 +555,6 @@ export class BaseGameClient {
             const result = await response.json();
 
             if (!result.success) {
-
                 // Revertir actualización optimista si falló
                 if (optimistic) {
                     this.revertOptimisticUpdate(action, data);
@@ -966,6 +965,10 @@ export class BaseGameClient {
             return;
         }
 
+        // IMPORTANTE: Ocultar otros popups antes de mostrar el de ronda
+        this.hidePlayerDisconnectedPopup();
+        this.hideGameEndPopup();
+
         // Actualizar número de ronda
         const roundNumber = document.getElementById('popup-round-number');
         if (roundNumber) {
@@ -1003,6 +1006,7 @@ export class BaseGameClient {
 
         // Mostrar popup
         popup.style.display = 'flex';
+        popup.classList.remove('hidden');
 
         console.log('🎉 [BaseGameClient] Round end popup shown', {
             round: event.round_number,
@@ -1017,6 +1021,7 @@ export class BaseGameClient {
         const popup = document.getElementById('round-end-popup');
         if (popup) {
             popup.style.display = 'none';
+            popup.classList.add('hidden');
             console.log('🔒 [BaseGameClient] Round end popup hidden');
         }
     }
@@ -1107,8 +1112,13 @@ export class BaseGameClient {
             });
         }
 
+        // IMPORTANTE: Ocultar otros popups antes de mostrar el de fin de juego
+        this.hidePlayerDisconnectedPopup();
+        this.hideRoundEndPopup();
+
         // Mostrar popup
         popup.style.display = 'flex';
+        popup.classList.remove('hidden');
 
         console.log('🏆 [BaseGameClient] Game end popup shown', {
             winner: event.winner,
@@ -1124,6 +1134,7 @@ export class BaseGameClient {
         const popup = document.getElementById('game-end-popup');
         if (popup) {
             popup.style.display = 'none';
+            popup.classList.add('hidden');
             console.log('🔒 [BaseGameClient] Game end popup hidden');
         }
     }
@@ -1143,6 +1154,10 @@ export class BaseGameClient {
             return;
         }
 
+        // IMPORTANTE: Ocultar otros popups antes de mostrar el de desconexión
+        this.hideRoundEndPopup();
+        this.hideGameEndPopup();
+
         // Actualizar nombre del jugador desconectado
         const playerNameElement = document.getElementById('disconnected-player-name');
         if (playerNameElement && event.player_id) {
@@ -1152,6 +1167,7 @@ export class BaseGameClient {
 
         // Mostrar popup
         popup.style.display = 'flex';
+        popup.classList.remove('hidden');
 
         console.log('⚠️ [BaseGameClient] Player disconnected popup shown', {
             player_id: event.player_id
@@ -1165,6 +1181,7 @@ export class BaseGameClient {
         const popup = document.getElementById('player-disconnected-popup');
         if (popup) {
             popup.style.display = 'none';
+            popup.classList.add('hidden');
             console.log('✅ [BaseGameClient] Player disconnected popup hidden');
         }
     }

@@ -23,19 +23,7 @@
                         :roomCode="$code"
                     />
 
-                    <!-- Round Results State -->
-                    <div id="round-results-state" class="hidden text-center">
-                        <div class="mb-8">
-                            <h3 class="text-2xl text-gray-600 mb-4">🎨 La palabra era:</h3>
-                            <h2 id="result-word" class="text-6xl font-bold text-purple-600 mb-6"></h2>
-                            <p id="result-guessers" class="text-xl text-gray-700"></p>
-                        </div>
-                        <div class="mt-8">
-                            <p id="round-countdown" class="text-lg text-gray-500"></p>
-                        </div>
-                    </div>
-
-                    <!-- Finished State -->
+                    <!-- Finished State (solo si no usamos popup) -->
                     <div id="finished-state" class="hidden">
                         <x-game.results-screen
                             :roomCode="$code"
@@ -200,6 +188,12 @@
     {{-- Player Disconnected Popup --}}
     <x-game.player-disconnected-popup />
 
+    {{-- Round End Popup --}}
+    @include('mockup::partials.round_end_popup')
+
+    {{-- Game End Popup --}}
+    @include('mockup::partials.game_end_popup')
+
     <style>
         /* Timer warning styles */
         #timer.countdown-warning {
@@ -318,31 +312,13 @@
                             }
                         }
 
-                        // Mostrar la pregunta primero (sin timing)
+                        // Mostrar la ronda primero
                         pictionaryClient.handleRoundStarted(eventData);
-
-                        // ✅ SISTEMA UNIFICADO DE FASES: Reconstruir y reiniciar timer con PhaseChangedEvent
-                        const timerData = gameState.timer_system?.timers?.round;
-                        if (timerData) {
-                            const startedAt = new Date(timerData.started_at).getTime() / 1000; // a segundos UNIX
-                            const duration = timerData.duration;
-
-                            // Simular PhaseChangedEvent para que BaseGameClient reinicie el timer
-                            const phaseEvent = {
-                                new_phase: 'main',
-                                previous_phase: '',
-                                additional_data: {
-                                    server_time: startedAt,
-                                    duration: duration
-                                }
-                            };
-
-                            // Después de mostrar la ronda, emitir el evento de fase
-                            // para que BaseGameClient.handlePhaseChanged() reinicie el timer
-                            setTimeout(() => {
-                                pictionaryClient.handlePhaseChanged(phaseEvent);
-                            }, 100);
-                        }
+                        
+                        // ✅ El backend ya hace restart round al reconectar (handleNewRound con advanceRound: false)
+                        // El DrawingStartedEvent se emitirá automáticamente cuando el backend reinicie la ronda
+                        // Solo esperamos a que llegue el evento por WebSocket
+                        console.log('[Pictionary] Waiting for DrawingStartedEvent from backend restart round...');
 
                         // Si ya dibujamos o adivinamos, mostrar overlay de bloqueado
                         const locks = gameState.player_state_system?.locks || {};

@@ -30,32 +30,79 @@ export class PictionaryGameClient extends BaseGameClient {
         this.currentWord = null;
         this.isLocked = false;
 
-        // TODO: Inicializar canvas
-        this.initializeCanvas();
-        this.initializeControls();
-
-        // NOTA: No renderizamos la lista aquí porque this.players está vacío
-        // Se renderiza después de cargar el estado inicial en game.blade.php
+        // NOTA: initializeCanvas() y initializeControls() se llamarán en handleDomLoaded
+        // cuando el DOM esté listo
     }
 
     /**
      * Override: Configurar EventManager con handlers específicos de Pictionary
      */
     setupEventManager() {
-        // Registrar handlers personalizados de Pictionary automáticamente
-        const customHandlers = {
+        // Registrar handlers personalizados de Pictionary
+        this.customHandlers = {
+            handleDomLoaded: (event) => {
+                super.handleDomLoaded(event);
+                // Inicializar canvas y controles cuando el DOM esté listo
+                this.initializeCanvas();
+                this.initializeControls();
+            },
+            handleGameStarted: (event) => {
+                super.handleGameStarted(event);
+                this.updateUI();
+            },
+            handleRoundStarted: (event) => {
+                super.handleRoundStarted(event);
+                this.handleRoundStarted(event);
+            },
+            handleDrawingStarted: (event) => {
+                console.log('[Pictionary] Drawing phase started:', event);
+                console.log('[Pictionary] Event data for TimingModule:', {
+                    timer_id: event.timer_id,
+                    server_time: event.server_time,
+                    duration: event.duration,
+                    timer_name: event.timer_name,
+                    full_event: event
+                });
+                
+                // IMPORTANTE: TimingModule procesará automáticamente este evento
+                // después de este handler (en EventManager). Solo necesitamos mostrar UI.
+                
+                // Actualizar UI para mostrar que la fase de dibujo ha iniciado
+                this.showElement('playing-state');
+                this.hideElement('loading-state');
+                
+                // El timer será manejado automáticamente por TimingModule cuando
+                // reciba el evento con timer_id, server_time y duration
+            },
+            handlePhaseStarted: (event) => {
+                // Handler genérico para PhaseStartedEvent (si se emite)
+                // TimingModule también procesará este evento automáticamente
+                console.log('[Pictionary] Generic phase started:', event);
+            },
+            handleRoundEnded: (event) => {
+                // super.handleRoundEnded() ya llama a showRoundEndPopup()
+                super.handleRoundEnded(event);
+            },
+            handleGameFinished: (event) => {
+                super.handleGameFinished(event);
+                this.handleGameFinished(event);
+            },
+            handlePlayersUnlocked: (event) => {
+                this.handlePlayersUnlocked(event);
+            },
+            handlePlayerLocked: (event) => {
+                this.handlePlayerLocked(event);
+            },
+            // Eventos custom de Pictionary
             handleDrawStroke: (event) => this.handleDrawStroke(event),
             handleWordRevealed: (event) => this.handleWordRevealed(event),
             handleCanvasCleared: (event) => this.handleCanvasCleared(event),
             handleAnswerClaimed: (event) => this.handleAnswerClaimed(event),
             handleAnswerValidated: (event) => this.handleAnswerValidated(event),
-            handlePlayersUnlocked: (event) => this.handlePlayersUnlocked(event),
-            handleRoundEnded: (event) => this.handleRoundEnded(event),
-            handleGameFinished: (event) => this.handleGameFinished(event)
         };
 
         // Llamar al método padre con los handlers personalizados
-        super.setupEventManager(customHandlers);
+        super.setupEventManager(this.customHandlers);
 
         // IMPORTANTE: WordRevealedEvent se envía por un canal privado del usuario
         // Necesitamos escuchar también el canal privado además del canal de la sala
@@ -170,12 +217,10 @@ export class PictionaryGameClient extends BaseGameClient {
 
     /**
      * Handler: Ronda iniciada
+     * Este handler se llama después de super.handleRoundStarted() en setupEventManager
      */
     handleRoundStarted(event) {
         console.log('[Pictionary] Round started:', event);
-
-        // IMPORTANTE: Llamar al handler base primero para procesar timing
-        super.handleRoundStarted(event);
 
         const { current_round, total_rounds, game_state } = event;
 
@@ -215,8 +260,16 @@ export class PictionaryGameClient extends BaseGameClient {
             // Mostrar herramientas de canvas
             this.showElement('canvas-tools');
 
-            // Mostrar panel de validación
+            // Mostrar panel de validación y limpiar claims previos
             this.showElement('validation-panel');
+            const claimsList = document.getElementById('claims-list');
+            if (claimsList) {
+                claimsList.innerHTML = `
+                    <p class="text-sm text-gray-500 text-center py-4">
+                        Esperando a que alguien adivine...
+                    </p>
+                `;
+            }
 
             // Ocultar sección de guess
             this.hideElement('guess-section');
@@ -332,6 +385,43 @@ export class PictionaryGameClient extends BaseGameClient {
             this.hideElement('incorrect-overlay');
             this.showElement('claim-section');
         }
+    }
+
+    /**
+     * Handler: Jugador bloqueado
+     */
+    handlePlayerLocked(event) {
+        if (event.player_id !== this.config.playerId) return;
+        
+        console.log('[Pictionary] Player locked:', event);
+        this.isLocked = true;
+        
+        // Si soy guesser y me bloquearon, ocultar claim button
+        if (!this.isDrawer) {
+            this.hideElement('claim-section');
+        }
+    }
+
+    /**
+     * Actualizar UI basándose en gameState (patrón Mockup/Trivia)
+     */
+    updateUI() {
+        if (!this.gameState) return;
+        
+        // Restaurar estado de jugador bloqueado
+        const lockedPlayers = this.gameState?.player_system?.locked_players || [];
+        const isLocked = lockedPlayers.includes(this.config.playerId);
+        if (isLocked) {
+            this.isLocked = true;
+            if (!this.isDrawer) {
+                this.hideElement('claim-section');
+            }
+        }
+        
+        // Actualizar info de ronda si está disponible
+        const currentRound = this.gameState?.round_system?.current_round || 1;
+        const totalRounds = this.gameState?._config?.modules?.round_system?.total_rounds || 10;
+        this.updateRoundInfo(currentRound, totalRounds);
     }
 
     /**
@@ -463,14 +553,31 @@ export class PictionaryGameClient extends BaseGameClient {
                 is_correct: isCorrect
             });
 
-            if (response.success) {
+            // Verificar respuesta
+            if (!response) {
+                console.error('[Pictionary] Validation failed: No response received');
+                alert('Error: No se recibió respuesta del servidor');
+                return;
+            }
+
+            if (response.success === true) {
                 console.log('[Pictionary] Validation sent successfully');
                 // La UI se actualiza cuando llega el evento AnswerValidatedEvent
             } else {
-                console.error('[Pictionary] Validation failed:', response.message);
+                // Extraer mensaje de error del response
+                const errorMessage = response.message || 
+                                   response.error || 
+                                   (response.toString && response.toString()) ||
+                                   'Error desconocido al validar';
+                
+                console.error('[Pictionary] Validation failed:', errorMessage, { fullResponse: response });
+                alert(`Error al validar: ${errorMessage}`);
             }
         } catch (error) {
+            // Manejar errores de red o parsing
+            const errorMessage = error.message || error.error || 'Error de conexión';
             console.error('[Pictionary] Error validating claim:', error);
+            alert(`Error al validar: ${errorMessage}`);
         }
     }
 
@@ -481,6 +588,13 @@ export class PictionaryGameClient extends BaseGameClient {
         const claimsList = document.getElementById('claims-list');
         if (!claimsList) return;
 
+        // Verificar si ya existe una notificación para este jugador (evitar duplicados)
+        const existingClaim = document.getElementById(`claim-${playerId}`);
+        if (existingClaim) {
+            console.log('[Pictionary] Claim notification already exists for player', playerId);
+            return;
+        }
+
         // Remover mensaje de "Esperando..."
         const emptyMsg = claimsList.querySelector('p.text-gray-500');
         if (emptyMsg) emptyMsg.remove();
@@ -488,7 +602,7 @@ export class PictionaryGameClient extends BaseGameClient {
         // Crear notificación
         const claimDiv = document.createElement('div');
         claimDiv.id = `claim-${playerId}`;
-        claimDiv.className = 'p-4 bg-white border-2 border-yellow-400 rounded-lg';
+        claimDiv.className = 'p-4 bg-white border-2 border-yellow-400 rounded-lg mb-3';
         claimDiv.innerHTML = `
             <p class="font-bold text-gray-900 mb-3">
                 🙋 <span class="text-yellow-600">${playerName}</span> dice que lo sabe
@@ -761,9 +875,9 @@ export class PictionaryGameClient extends BaseGameClient {
 
     /**
      * Agregar guess al feed
+     * @deprecated No implementado, puede usarse en el futuro
      */
     addToGuessesFeed(playerId, guess, isCorrect, points = 0) {
-        // TODO: Implementar
         // const feed = document.getElementById('guesses-feed');
         // const playerName = this.getPlayerName(playerId);
         //
@@ -781,88 +895,35 @@ export class PictionaryGameClient extends BaseGameClient {
     }
 
     /**
-     * Handler: Ronda terminada - Mostrar palabra y resultados
-     */
-    handleRoundEnded(event) {
-        // Llamar primero al handler base que actualiza scores y maneja timing
-        super.handleRoundEnded(event);
-
-        console.log('[Pictionary] Round ended:', event);
-
-        const { round_number, results, scores, timing } = event;
-
-        // Extraer palabra (puede venir como objeto {word, difficulty} o como string)
-        const word = results?.word?.word || results?.word;
-
-        // Obtener nombres de jugadores que adivinaron
-        let guessersText = '❌ Nadie adivinó';
-        if (results?.guessers && results.guessers.length > 0) {
-            const names = results.guessers.map(g => this.getPlayerName(g.player_id));
-            guessersText = `✅ ${names.join(', ')}`;
-        }
-
-        // Actualizar elementos de resultados
-        const resultWord = document.getElementById('result-word');
-        const resultGuessers = document.getElementById('result-guessers');
-
-        if (resultWord && word) {
-            resultWord.textContent = `"${word}"`;
-        }
-        if (resultGuessers) {
-            resultGuessers.textContent = guessersText;
-        }
-
-        // Ocultar estado de juego, mostrar resultados
-        this.hideElement('playing-state');
-        this.hideElement('loading-state');
-        this.showElement('round-results-state');
-
-        // El TimingModule del BaseGameClient mostrará el countdown automáticamente
-        // en el elemento que retorne getCountdownElement()
-    }
-
-    /**
-     * Implementar getTimerElement para que el TimingModule sepa dónde mostrar el timer de ronda
+     * Implementar getTimerElement para que el TimingModule sepa dónde mostrar el timer de fase
+     * El timer de fase se muestra durante el juego (playing-state) en #timer
      */
     getTimerElement() {
-        // El timer de ronda se muestra durante el juego (playing-state)
+        // El timer de fase se muestra durante el juego (playing-state)
         return document.getElementById('timer');
     }
 
     /**
      * Implementar getCountdownElement para que el TimingModule sepa dónde mostrar el countdown
+     * El countdown se muestra en el popup de fin de ronda
      */
     getCountdownElement() {
-        // El countdown se mostrará en el div de round-results-state
-        return document.getElementById('round-countdown');
+        // El countdown se mostrará en el popup de fin de ronda
+        return document.getElementById('popup-timer');
     }
 
     /**
      * Handler: Juego terminado - Mostrar pantalla de resultados finales
+     * Este handler se llama después de super.handleGameFinished() en setupEventManager
      */
     handleGameFinished(event) {
         console.log('[Pictionary] Game finished:', event);
 
-        // IMPORTANTE: Llamar al base primero (detiene PresenceMonitor)
-        super.handleGameFinished(event);
-
-        const { winner, ranking, scores } = event;
-
-        // Ocultar estado de juego
-        this.hideElement('playing-state');
-        this.hideElement('loading-state');
+        // Mostrar popup de fin de partida usando template por defecto
+        super.showGameEndPopup(event);
 
         // Actualizar puntuaciones finales
-        this.scores = scores;
-
-        // Mostrar pantalla de resultados
-        this.showElement('finished-state');
-
-        // Renderizar podio de resultados finales
-        this.renderPodium(ranking, scores, 'podium');
-
-        console.log('[Pictionary] Final ranking:', ranking);
-        console.log('[Pictionary] Winner:', winner);
+        this.scores = event.scores || {};
     }
 
     /**
