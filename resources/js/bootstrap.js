@@ -24,6 +24,7 @@ const echoConfig = {
     forceTLS: useTLS,
     enabledTransports: useTLS ? ['wss'] : ['ws'],
     disableStats: true,
+    cluster: '', // Required by Pusher.js but not used by Reverb
     authorizer: (channel, options) => {
         return {
             authorize: (socketId, callback) => {
