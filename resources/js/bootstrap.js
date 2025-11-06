@@ -43,8 +43,10 @@ const echoConfig = {
 };
 
 try {
+    console.log('Echo config:', echoConfig);
     window.Echo = new Echo(echoConfig);
-
+    console.log('Echo initialized successfully');
 } catch (error) {
-
+    console.error('Failed to initialize Echo:', error);
+    console.error('Echo config was:', echoConfig);
 }
