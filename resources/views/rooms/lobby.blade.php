@@ -462,6 +462,12 @@
 
             if (!confirm('¿Iniciar la partida?')) return;
 
+            // Deshabilitar botón mientras se procesa
+            const startButton = document.getElementById('start-game-button');
+            const originalText = startButton.textContent;
+            startButton.disabled = true;
+            startButton.textContent = 'Iniciando...';
+
             // Hacer el fetch para iniciar el juego
             fetch('/rooms/{{ $room->code }}/start', {
                 method: 'POST',
@@ -469,13 +475,31 @@
                     'Content-Type': 'application/json',
                     'X-CSRF-TOKEN': '{{ csrf_token() }}'
                 }
-            }).catch(error => {
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(data => {
+                        throw new Error(data.message || 'Error al iniciar la partida');
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.success) {
+                    console.log('Game start requested, waiting for WebSocket event...');
+                    // El master también esperará el WebSocket .game.started como todos los demás
+                } else {
+                    alert('⚠️ ' + (data.message || 'Error al iniciar la partida'));
+                    startButton.disabled = false;
+                    startButton.textContent = originalText;
+                }
+            })
+            .catch(error => {
                 console.error('Error starting game:', error);
+                alert('⚠️ ' + error.message);
+                startButton.disabled = false;
+                startButton.textContent = originalText;
             });
-
-            // NO redirigir aquí
-            // El master también esperará el WebSocket .game.started como todos los demás
-            console.log('Game start requested, waiting for WebSocket event...');
         }
 
         function closeRoom() {

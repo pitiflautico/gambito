@@ -654,6 +654,7 @@ class RoomController extends Controller
         $room = $this->roomService->findRoomByCode($code);
 
         if (!$room) {
+            \Log::warning("apiStart - Room not found", ['code' => $code]);
             return response()->json([
                 'success' => false,
                 'message' => 'Sala no encontrada',
@@ -662,6 +663,11 @@ class RoomController extends Controller
 
         // Verificar que el usuario sea el master
         if (!Auth::check() || Auth::id() !== $room->master_id) {
+            \Log::warning("apiStart - Unauthorized", [
+                'code' => $code,
+                'user_id' => Auth::id(),
+                'master_id' => $room->master_id,
+            ]);
             return response()->json([
                 'success' => false,
                 'message' => 'Solo el master puede iniciar la partida',
@@ -669,11 +675,23 @@ class RoomController extends Controller
         }
 
         try {
+            \Log::info("apiStart - Attempting to start game", [
+                'code' => $code,
+                'room_id' => $room->id,
+                'match_id' => $room->match?->id,
+                'players_count' => $room->match?->players()->count() ?? 0,
+            ]);
+
             $this->roomService->startGame($room);
 
             // Refrescar sala para obtener último estado
             $room = $room->fresh();
             $room->load('match.players');
+
+            \Log::info("apiStart - Game started successfully", [
+                'code' => $code,
+                'status' => $room->status,
+            ]);
 
             // NOTA: El evento GameStartedEvent (genérico) se emite automáticamente
             // desde GameMatch::start() con el timing metadata correcto.
@@ -687,6 +705,12 @@ class RoomController extends Controller
                 ],
             ]);
         } catch (\Exception $e) {
+            \Log::error("apiStart - Error starting game", [
+                'code' => $code,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            
             return response()->json([
                 'success' => false,
                 'message' => $e->getMessage(),
