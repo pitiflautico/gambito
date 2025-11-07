@@ -72,6 +72,7 @@ const expectedPlayers = @json($expectedPlayers);
 let connectedUsers = [];
 let allConnectedNotified = false;
 let timing = null;
+let presenceChannelInstance = null; // Guardar referencia del Presence Channel
 
 console.log('🎮 [Transition] Initializing...', {
     roomCode,
@@ -105,10 +106,10 @@ function initializePresenceChannel() {
 
     console.log('📡 [Transition] Connecting to Presence Channel...');
 
-    const presenceChannel = window.Echo.join(`room.${roomCode}`);
+    presenceChannelInstance = window.Echo.join(`room.${roomCode}`);
 
     // Usuarios actualmente conectados
-    presenceChannel.here((users) => {
+    presenceChannelInstance.here((users) => {
         console.log('👥 [Transition] Users here:', users.length);
         connectedUsers = users;
         updatePlayerStatus(users);
@@ -116,7 +117,7 @@ function initializePresenceChannel() {
     });
 
     // Usuario se unió
-    presenceChannel.joining((user) => {
+    presenceChannelInstance.joining((user) => {
         console.log('✅ [Transition] User joining:', user.name);
         connectedUsers.push(user);
         updatePlayerStatus(connectedUsers);
@@ -124,7 +125,7 @@ function initializePresenceChannel() {
     });
 
     // Usuario se fue
-    presenceChannel.leaving((user) => {
+    presenceChannelInstance.leaving((user) => {
         console.log('❌ [Transition] User leaving:', user.name);
         connectedUsers = connectedUsers.filter(u => u.id !== user.id);
         updatePlayerStatus(connectedUsers);
@@ -197,6 +198,69 @@ function checkAllConnected() {
 }
 
 /**
+ * Función para manejar el evento de countdown
+ */
+function handleCountdownEvent(data) {
+    console.log('⏰ [Transition] Countdown event received:', data);
+
+    // Asegurar que TimingModule está inicializado
+    if (!timing) {
+        console.error('❌ [Transition] TimingModule not initialized yet!');
+        // Reintentar después de un momento
+        setTimeout(() => {
+            if (timing) {
+                handleCountdownEvent(data);
+            }
+        }, 500);
+        return;
+    }
+
+    // Ocultar estado de espera
+    const waitingState = document.getElementById('waiting-state');
+    const countdownState = document.getElementById('countdown-state');
+    
+    if (waitingState) waitingState.classList.add('hidden');
+    if (countdownState) countdownState.classList.remove('hidden');
+
+    const countdownElement = document.getElementById('countdown-number');
+    const messageElement = document.getElementById('countdown-message');
+
+    if (!countdownElement || !messageElement) {
+        console.error('❌ [Transition] Countdown elements not found');
+        return;
+    }
+
+    // Usar TimingModule con countdown sincronizado por timestamps
+    // Este es el método que usan Fortnite, CS:GO, etc.
+    timing.handleCountdownEvent(
+        data,
+        countdownElement,
+        () => {
+            // Callback cuando termina el countdown
+            messageElement.textContent = '¡Comenzando!';
+            console.log('⏰ [Transition] Countdown finished, initializing engine...');
+
+            // Llamar al endpoint para inicializar el engine
+            fetch(`/api/rooms/${roomCode}/initialize-engine`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('✅ [Transition] Engine initialization requested', data);
+            })
+            .catch(error => {
+                console.error('❌ [Transition] Error initializing engine:', error);
+            });
+        },
+        'game-start'
+    );
+}
+
+/**
  * Inicializar listeners de WebSocket para eventos del juego
  */
 function initializeGameEvents() {
@@ -206,57 +270,93 @@ function initializeGameEvents() {
         return;
     }
 
-    const channel = window.Echo.channel(`room.${roomCode}`);
+    // Verificar que la conexión WebSocket esté establecida
+    const pusher = window.Echo.connector.pusher;
+    if (!pusher || pusher.connection.state !== 'connected') {
+        console.log('⏳ [Transition] WebSocket not connected yet, state:', pusher?.connection?.state);
+        // Esperar a que se conecte
+        pusher.connection.bind('connected', () => {
+            console.log('✅ [Transition] WebSocket connected, setting up listeners...');
+            setupChannelListeners();
+        });
+        return;
+    }
+
+    // Si ya está conectado, configurar listeners inmediatamente
+    setupChannelListeners();
+}
+
+/**
+ * Configurar listeners en los canales
+ */
+function setupChannelListeners() {
+    const channelName = `room.${roomCode}`;
+    console.log('[Transition] Configurando listeners para canal:', channelName);
+
+    // Canal público
+    const publicChannel = window.Echo.channel(channelName);
+    
+    if (!publicChannel) {
+        console.error('[Transition] ❌ No se pudo crear el canal público');
+        return;
+    }
 
     // Evento: Countdown iniciado (desde backend)
-    channel.listen('.game.countdown', (data) => {
-        console.log('⏰ [Transition] Countdown event received:', data);
+    publicChannel.listen('.game.countdown', (data) => {
+        handleCountdownEvent(data);
+    });
 
-        // Asegurar que TimingModule está inicializado
-        if (!timing) {
-            console.error('❌ [Transition] TimingModule not initialized yet!');
-            return;
-        }
-
-        // Ocultar estado de espera
-        document.getElementById('waiting-state').classList.add('hidden');
-        document.getElementById('countdown-state').classList.remove('hidden');
-
-        const countdownElement = document.getElementById('countdown-number');
-        const messageElement = document.getElementById('countdown-message');
-
-        // Usar TimingModule con countdown sincronizado por timestamps
-        // Este es el método que usan Fortnite, CS:GO, etc.
-        timing.handleCountdownEvent(
-            data,
-            countdownElement,
-            () => {
-                // Callback cuando termina el countdown
-                messageElement.textContent = '¡Comenzando!';
-                console.log('⏰ [Transition] Countdown finished, initializing engine...');
-
-                // Llamar al endpoint para inicializar el engine
-                fetch(`/api/rooms/${roomCode}/initialize-engine`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-TOKEN': '{{ csrf_token() }}'
-                    }
-                })
-                .then(response => response.json())
-                .then(data => {
-                    console.log('✅ [Transition] Engine initialization requested', data);
-                })
-                .catch(error => {
-                    console.error('❌ [Transition] Error initializing engine:', error);
+    // También escuchar en el Presence Channel como respaldo
+    // Usar la referencia del Presence Channel que ya está conectado
+    if (presenceChannelInstance) {
+        console.log('[Transition] Configurando listener en Presence Channel (backup)');
+        presenceChannelInstance.listen('.game.countdown', (data) => {
+            console.log('⏰ [Transition] Countdown event received via Presence Channel:', data);
+            handleCountdownEvent(data);
+        });
+        
+        // También escuchar game.initialized en Presence Channel
+        presenceChannelInstance.listen('.game.initialized', (data) => {
+            console.log('🎮 [Transition] Game initialized via Presence Channel, loading game view...', data);
+            showInitializing();
+            setTimeout(() => {
+                window.location.replace(`/rooms/${roomCode}`);
+            }, 1000);
+        });
+    } else {
+        console.warn('[Transition] ⚠️ Presence Channel instance not available yet, will retry...');
+        // Reintentar después de un momento si el Presence Channel aún no está inicializado
+        setTimeout(() => {
+            if (presenceChannelInstance) {
+                presenceChannelInstance.listen('.game.countdown', (data) => {
+                    console.log('⏰ [Transition] Countdown event received via Presence Channel (delayed):', data);
+                    handleCountdownEvent(data);
                 });
-            },
-            'game-start'
-        );
+                presenceChannelInstance.listen('.game.initialized', (data) => {
+                    console.log('🎮 [Transition] Game initialized via Presence Channel (delayed), loading game view...', data);
+                    showInitializing();
+                    setTimeout(() => {
+                        window.location.replace(`/rooms/${roomCode}`);
+                    }, 1000);
+                });
+            }
+        }, 1000);
+    }
+
+    // Listener global para capturar eventos incluso si el canal no está suscrito aún
+    const pusher = window.Echo.connector.pusher;
+    pusher.bind_global((eventName, data) => {
+        // Capturar game.countdown desde cualquier canal
+        if ((eventName === '.game.countdown' || eventName === 'game.countdown' || 
+             eventName.includes('game.countdown')) && 
+            data && (data.room_code === roomCode || data.roomCode === roomCode)) {
+            console.log('[Transition] 🔍 Countdown event detected via global listener:', eventName, data);
+            handleCountdownEvent(data);
+        }
     });
 
     // Evento: Juego inicializado
-    channel.listen('.game.initialized', (data) => {
+    publicChannel.listen('.game.initialized', (data) => {
         console.log('🎮 [Transition] Game initialized, loading game view...', data);
         showInitializing();
 
@@ -264,6 +364,24 @@ function initializeGameEvents() {
         setTimeout(() => {
             window.location.replace(`/rooms/${roomCode}`);
         }, 1000);
+    });
+
+    // También escuchar game.initialized en Presence Channel
+    if (presenceChannel) {
+        presenceChannel.listen('.game.initialized', (data) => {
+            console.log('🎮 [Transition] Game initialized via Presence Channel, loading game view...', data);
+            showInitializing();
+            setTimeout(() => {
+                window.location.replace(`/rooms/${roomCode}`);
+            }, 1000);
+        });
+    }
+
+    // Confirmar suscripción del canal público
+    pusher.bind('pusher:subscription_succeeded', (data) => {
+        if (data.channel === channelName) {
+            console.log('[Transition] ✅ Canal público suscrito correctamente:', channelName);
+        }
     });
 
     console.log('✅ [Transition] Game event listeners registered');
