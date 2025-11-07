@@ -14,8 +14,10 @@ window.Pusher = Pusher;
 const scheme = import.meta.env.VITE_REVERB_SCHEME ?? 'https';
 const useTLS = scheme === 'https';
 const wsHost = import.meta.env.VITE_REVERB_HOST;
-const wsPort = import.meta.env.VITE_REVERB_PORT ? parseInt(import.meta.env.VITE_REVERB_PORT) : (useTLS ? 443 : 80);
-const wssPort = import.meta.env.VITE_REVERB_PORT ? parseInt(import.meta.env.VITE_REVERB_PORT) : 443;
+// Convertir puerto a número (asegurar que siempre sea número, no string)
+const wsPortRaw = import.meta.env.VITE_REVERB_PORT;
+const wsPort = wsPortRaw ? (typeof wsPortRaw === 'string' ? parseInt(wsPortRaw, 10) : Number(wsPortRaw)) : (useTLS ? 443 : 80);
+const wssPort = wsPortRaw ? (typeof wsPortRaw === 'string' ? parseInt(wsPortRaw, 10) : Number(wsPortRaw)) : 443;
 const appKey = import.meta.env.VITE_REVERB_APP_KEY;
 // Path opcional para proxy Nginx (ej: '/app' cuando Nginx hace proxy en /app)
 const wsPath = import.meta.env.VITE_REVERB_PATH || undefined;
@@ -78,6 +80,25 @@ try {
     // Listeners de eventos de conexión para diagnóstico
     const pusher = window.Echo.connector.pusher;
     
+    // Verificar URL de conexión que se está intentando usar
+    const socket = pusher.connection.socket;
+    if (socket && socket.url) {
+        console.log('[Echo] URL de conexión:', socket.url);
+    }
+    
+    // Capturar error inmediatamente si ya falló
+    if (pusher.connection.state === 'failed' || pusher.connection.state === 'unavailable') {
+        console.error('[Echo] ⚠️ Conexión ya falló al inicializar');
+        console.error('[Echo] Estado:', pusher.connection.state);
+        console.error('[Echo] Último error:', pusher.connection.last_error);
+        
+        // Intentar obtener más información del socket
+        if (socket) {
+            console.error('[Echo] Socket state:', socket.readyState);
+            console.error('[Echo] Socket URL:', socket.url);
+        }
+    }
+    
     pusher.connection.bind('connected', () => {
         console.log('[Echo] ✅ Conexión WebSocket establecida exitosamente');
     });
@@ -92,12 +113,18 @@ try {
         console.error('[Echo] Último error:', pusher.connection.last_error);
         
         // Información adicional para debugging
-        if (error.error) {
+        if (error && error.error) {
             console.error('[Echo] Detalles del error:', {
                 code: error.error.code,
                 message: error.error.message,
                 data: error.error.data
             });
+        }
+        
+        // Verificar socket
+        if (socket) {
+            console.error('[Echo] Socket readyState:', socket.readyState);
+            console.error('[Echo] Socket URL:', socket.url);
         }
     });
     
@@ -113,6 +140,14 @@ try {
         console.error('[Echo] 3. Nginx esté configurado correctamente para WebSocket proxy');
         console.error('[Echo] 4. Las variables VITE_REVERB_* coincidan con REVERB_* en el servidor');
     });
+    
+    // Verificar estado después de un breve delay
+    setTimeout(() => {
+        console.log('[Echo] Estado después de 1 segundo:', pusher.connection.state);
+        if (pusher.connection.state === 'failed') {
+            console.error('[Echo] ⚠️ La conexión falló. Verifica la configuración del servidor.');
+        }
+    }, 1000);
     
     console.log('[Echo] ✅ Echo inicializado correctamente');
     console.log('[Echo] Estado inicial de conexión:', pusher.connection.state);
