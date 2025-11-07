@@ -57,15 +57,20 @@ const echoConfig = {
     authorizer: (channel, options) => {
         return {
             authorize: (socketId, callback) => {
+                console.log('[Echo] Intentando autorizar canal:', channel.name, 'socketId:', socketId);
                 axios.post('/broadcasting/auth', {
                     socket_id: socketId,
                     channel_name: channel.name
                 })
                 .then(response => {
+                    console.log('[Echo] ✅ Autorización exitosa para:', channel.name);
                     callback(null, response.data);
                 })
                 .catch(error => {
-                    console.error('[Echo] Error en autorización:', error);
+                    console.error('[Echo] ❌ Error en autorización de canal:', channel.name);
+                    console.error('[Echo] Error response:', error.response);
+                    console.error('[Echo] Status:', error.response?.status);
+                    console.error('[Echo] Data:', error.response?.data);
                     callback(error);
                 });
             }
