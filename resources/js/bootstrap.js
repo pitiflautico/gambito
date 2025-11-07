@@ -22,6 +22,16 @@ const appKey = import.meta.env.VITE_REVERB_APP_KEY;
 // Path opcional para proxy Nginx (ej: '/app' cuando Nginx hace proxy en /app)
 const wsPath = import.meta.env.VITE_REVERB_PATH || undefined;
 
+// Debug: Verificar qué valores están llegando desde import.meta.env
+console.log('[Echo] Debug - Variables de entorno:', {
+    VITE_REVERB_APP_KEY: import.meta.env.VITE_REVERB_APP_KEY,
+    VITE_REVERB_HOST: import.meta.env.VITE_REVERB_HOST,
+    VITE_REVERB_PORT: import.meta.env.VITE_REVERB_PORT,
+    VITE_REVERB_SCHEME: import.meta.env.VITE_REVERB_SCHEME,
+    'Tipo de VITE_REVERB_APP_KEY': typeof import.meta.env.VITE_REVERB_APP_KEY,
+    'Valor raw': JSON.stringify(import.meta.env.VITE_REVERB_APP_KEY)
+});
+
 // Validar configuración crítica
 const errors = [];
 if (!wsHost) {
