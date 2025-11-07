@@ -19,8 +19,12 @@ const wsPortRaw = import.meta.env.VITE_REVERB_PORT;
 const wsPort = wsPortRaw ? (typeof wsPortRaw === 'string' ? parseInt(wsPortRaw, 10) : Number(wsPortRaw)) : (useTLS ? 443 : 80);
 const wssPort = wsPortRaw ? (typeof wsPortRaw === 'string' ? parseInt(wsPortRaw, 10) : Number(wsPortRaw)) : 443;
 const appKey = import.meta.env.VITE_REVERB_APP_KEY;
-// Path opcional para proxy Nginx (ej: '/app' cuando Nginx hace proxy en /app)
-const wsPath = import.meta.env.VITE_REVERB_PATH || undefined;
+// Path opcional para proxy Nginx
+// NOTA: Pusher.js ya agrega automáticamente '/app' para Reverb, así que NO uses wsPath
+// a menos que tu configuración de Nginx sea diferente
+const wsPathRaw = import.meta.env.VITE_REVERB_PATH;
+// Solo usar wsPath si está explícitamente configurado y NO es '/app' (para evitar duplicación)
+const wsPath = wsPathRaw && wsPathRaw !== '/app' ? wsPathRaw : undefined;
 
 // Validar configuración crítica
 const errors = [];
