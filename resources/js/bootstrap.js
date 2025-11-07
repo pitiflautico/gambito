@@ -10,20 +10,37 @@ import Echo from 'laravel-echo';
 import Pusher from 'pusher-js';
 window.Pusher = Pusher;
 
-// Debug: Verificar variables de entorno
-
+// Configuración de WebSocket
 const scheme = import.meta.env.VITE_REVERB_SCHEME ?? 'https';
 const useTLS = scheme === 'https';
+const wsHost = import.meta.env.VITE_REVERB_HOST;
+const wsPort = import.meta.env.VITE_REVERB_PORT ? parseInt(import.meta.env.VITE_REVERB_PORT) : (useTLS ? 443 : 80);
+const wssPort = import.meta.env.VITE_REVERB_PORT ? parseInt(import.meta.env.VITE_REVERB_PORT) : 443;
+const appKey = import.meta.env.VITE_REVERB_APP_KEY;
+// Path opcional para proxy Nginx (ej: '/app' cuando Nginx hace proxy en /app)
+const wsPath = import.meta.env.VITE_REVERB_PATH || undefined;
+
+// Validar configuración crítica
+if (!wsHost) {
+    console.error('[Echo] VITE_REVERB_HOST no está definido');
+}
+if (!appKey) {
+    console.error('[Echo] VITE_REVERB_APP_KEY no está definido');
+}
 
 const echoConfig = {
     broadcaster: 'reverb',
-    key: import.meta.env.VITE_REVERB_APP_KEY,
-    wsHost: import.meta.env.VITE_REVERB_HOST,
-    wsPort: import.meta.env.VITE_REVERB_PORT ?? 80,
-    wssPort: import.meta.env.VITE_REVERB_PORT ?? 443,
+    key: appKey,
+    wsHost: wsHost,
+    wsPort: wsPort,
+    wssPort: wssPort,
+    wsPath: wsPath, // Path para proxy Nginx (ej: '/app')
     forceTLS: useTLS,
-    enabledTransports: useTLS ? ['wss'] : ['ws'],
+    enabledTransports: useTLS ? ['wss', 'ws'] : ['ws', 'wss'], // Fallback a ws si wss falla
     disableStats: true,
+    // Configuración adicional para mejor manejo de conexiones
+    cluster: undefined, // No usar cluster para Reverb
+    encrypted: useTLS,
     authorizer: (channel, options) => {
         return {
             authorize: (socketId, callback) => {
@@ -35,6 +52,7 @@ const echoConfig = {
                     callback(null, response.data);
                 })
                 .catch(error => {
+                    console.error('[Echo] Error en autorización:', error);
                     callback(error);
                 });
             }
@@ -43,10 +61,64 @@ const echoConfig = {
 };
 
 try {
-    console.log('Echo config:', echoConfig);
+    console.log('[Echo] Configuración:', {
+        broadcaster: echoConfig.broadcaster,
+        host: echoConfig.wsHost,
+        wsPort: echoConfig.wsPort,
+        wssPort: echoConfig.wssPort,
+        wsPath: echoConfig.wsPath || '(no path)',
+        scheme: scheme,
+        forceTLS: echoConfig.forceTLS,
+        enabledTransports: echoConfig.enabledTransports,
+        key: echoConfig.key ? `${echoConfig.key.substring(0, 10)}...` : 'undefined'
+    });
+
     window.Echo = new Echo(echoConfig);
-    console.log('Echo initialized successfully');
+    
+    // Listeners de eventos de conexión para diagnóstico
+    const pusher = window.Echo.connector.pusher;
+    
+    pusher.connection.bind('connected', () => {
+        console.log('[Echo] ✅ Conexión WebSocket establecida exitosamente');
+    });
+    
+    pusher.connection.bind('disconnected', () => {
+        console.warn('[Echo] ⚠️ Conexión WebSocket desconectada');
+    });
+    
+    pusher.connection.bind('error', (error) => {
+        console.error('[Echo] ❌ Error de conexión WebSocket:', error);
+        console.error('[Echo] Estado de conexión:', pusher.connection.state);
+        console.error('[Echo] Último error:', pusher.connection.last_error);
+        
+        // Información adicional para debugging
+        if (error.error) {
+            console.error('[Echo] Detalles del error:', {
+                code: error.error.code,
+                message: error.error.message,
+                data: error.error.data
+            });
+        }
+    });
+    
+    pusher.connection.bind('state_change', (states) => {
+        console.log('[Echo] Cambio de estado:', states.previous, '->', states.current);
+    });
+    
+    pusher.connection.bind('unavailable', () => {
+        console.error('[Echo] ❌ Servidor WebSocket no disponible');
+        console.error('[Echo] Verifica que:');
+        console.error('[Echo] 1. El servidor Reverb esté corriendo');
+        console.error('[Echo] 2. El puerto esté abierto y accesible');
+        console.error('[Echo] 3. Nginx esté configurado correctamente para WebSocket proxy');
+        console.error('[Echo] 4. Las variables VITE_REVERB_* coincidan con REVERB_* en el servidor');
+    });
+    
+    console.log('[Echo] ✅ Echo inicializado correctamente');
+    console.log('[Echo] Estado inicial de conexión:', pusher.connection.state);
+    
 } catch (error) {
-    console.error('Failed to initialize Echo:', error);
-    console.error('Echo config was:', echoConfig);
+    console.error('[Echo] ❌ Error al inicializar Echo:', error);
+    console.error('[Echo] Configuración utilizada:', echoConfig);
+    console.error('[Echo] Stack trace:', error.stack);
 }

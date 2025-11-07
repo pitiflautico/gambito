@@ -349,23 +349,24 @@ QUEUE_CONNECTION=redis
 SESSION_DRIVER=redis
 
 # Broadcasting (Laravel Reverb)
-BROADCAST_DRIVER=reverb
+BROADCAST_CONNECTION=reverb
 
+# Backend Reverb (puerto interno donde corre Reverb)
 REVERB_APP_ID=your-app-id
 REVERB_APP_KEY=your-app-key
 REVERB_APP_SECRET=your-app-secret
 REVERB_HOST=yourdomain.com
-REVERB_PORT=443
+REVERB_PORT=8080
 REVERB_SCHEME=https
 
-# Pusher (para Reverb)
-PUSHER_APP_ID="${REVERB_APP_ID}"
-PUSHER_APP_KEY="${REVERB_APP_KEY}"
-PUSHER_APP_SECRET="${REVERB_APP_SECRET}"
-PUSHER_HOST="${REVERB_HOST}"
-PUSHER_PORT="${REVERB_PORT}"
-PUSHER_SCHEME="${REVERB_SCHEME}"
-PUSHER_APP_CLUSTER=mt1
+# Frontend WebSocket (variables VITE_* se compilan en el bundle)
+# IMPORTANTE: VITE_REVERB_APP_KEY debe coincidir exactamente con REVERB_APP_KEY
+VITE_REVERB_APP_KEY="${REVERB_APP_KEY}"
+VITE_REVERB_HOST="${REVERB_HOST}"
+VITE_REVERB_PORT=443
+VITE_REVERB_SCHEME=https
+# Opcional: Si Nginx hace proxy en /app, descomenta la siguiente línea
+# VITE_REVERB_PATH=/app
 
 # Mail (opcional)
 MAIL_MAILER=smtp
@@ -655,18 +656,35 @@ sudo systemctl restart php8.2-fpm
 
 ## 🆘 Troubleshooting
 
+> **📖 Guía Completa:** Para problemas detallados de WebSocket, consulta [`WEBSOCKET_PRODUCTION_TROUBLESHOOTING.md`](WEBSOCKET_PRODUCTION_TROUBLESHOOTING.md)
+
 ### Problema: WebSockets no conectan
+
+**Diagnóstico rápido:**
 
 ```bash
 # Verificar Reverb está corriendo
 sudo systemctl status reverb
+# o con Supervisor
+supervisorctl status gambito-reverb
 
 # Verificar puerto abierto
 sudo netstat -tlnp | grep 8080
 
 # Ver logs
 sudo journalctl -u reverb -n 50
+# o
+tail -f storage/logs/reverb.log
 ```
+
+**Verificaciones comunes:**
+
+1. Variables `VITE_REVERB_*` coinciden con `REVERB_*` en `.env`
+2. Assets recompilados después de cambiar variables: `npm run build`
+3. Nginx configurado para proxy WebSocket (ver sección de Nginx arriba)
+4. Certificado SSL válido para el dominio
+
+**Ver más:** [`WEBSOCKET_PRODUCTION_TROUBLESHOOTING.md`](WEBSOCKET_PRODUCTION_TROUBLESHOOTING.md)
 
 ### Problema: Queue no procesa
 
