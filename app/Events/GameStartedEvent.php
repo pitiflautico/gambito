@@ -18,13 +18,24 @@ class GameStartedEvent implements ShouldBroadcast
     public function __construct(Room $room)
     {
         $this->room = $room;
+        
+        \Log::info('🎮 [GameStartedEvent] Evento creado', [
+            'room_code' => $room->code,
+            'room_id' => $room->id,
+            'channel' => 'room.' . $room->code,
+        ]);
     }
 
     public function broadcastOn(): array
     {
-        return [
-            new Channel('room.' . $this->room->code),
-        ];
+        $channel = new Channel('room.' . $this->room->code);
+        
+        \Log::info('🎮 [GameStartedEvent] Configurando canal de broadcast', [
+            'room_code' => $this->room->code,
+            'channel_name' => 'room.' . $this->room->code,
+        ]);
+        
+        return [$channel];
     }
 
     public function broadcastAs(): string
@@ -45,12 +56,20 @@ class GameStartedEvent implements ShouldBroadcast
                 ];
             });
 
-        return [
+        $data = [
             'room_code' => $this->room->code,
             'game_name' => $this->room->game->name,
             'players' => $players->toArray(),
             'total_players' => $players->count(),
             'timestamp' => now()->toIso8601String(),
         ];
+        
+        \Log::info('🎮 [GameStartedEvent] Datos del evento preparados', [
+            'room_code' => $this->room->code,
+            'total_players' => $players->count(),
+            'event_name' => 'game.started',
+        ]);
+
+        return $data;
     }
 }

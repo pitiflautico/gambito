@@ -488,6 +488,13 @@
                 if (data.success) {
                     console.log('Game start requested, waiting for WebSocket event...');
                     // El master también esperará el WebSocket .game.started como todos los demás
+                    // Activar polling como fallback en caso de que el evento WebSocket no llegue
+                    if (lobbyManager && typeof lobbyManager.startGameStartPolling === 'function') {
+                        // Esperar 2 segundos antes de iniciar polling (dar tiempo al WebSocket)
+                        setTimeout(() => {
+                            lobbyManager.startGameStartPolling();
+                        }, 2000);
+                    }
                 } else {
                     alert('⚠️ ' + (data.message || 'Error al iniciar la partida'));
                     startButton.disabled = false;

@@ -14,6 +14,9 @@ export class LobbyManager {
         this.maxPlayers = options.maxPlayers || 10;
         this.presenceManager = null;
         this.allConnectedLogged = false;
+        this.publicChannel = null;
+        this.publicChannelSubscribed = false;
+        this.gameStartCheckInterval = null;
 
         this.initialize();
     }
@@ -31,9 +34,32 @@ export class LobbyManager {
      */
     initializeWebSocket() {
         if (typeof window.Echo === 'undefined') {
+            console.log('[LobbyManager] ⏳ Echo no disponible, reintentando...');
             setTimeout(() => this.initializeWebSocket(), 100);
             return;
         }
+
+        // Verificar que la conexión WebSocket esté establecida
+        const pusher = window.Echo.connector.pusher;
+        if (!pusher || pusher.connection.state !== 'connected') {
+            console.log('[LobbyManager] ⏳ WebSocket no conectado aún, estado:', pusher?.connection?.state);
+            // Esperar a que se conecte
+            pusher.connection.bind('connected', () => {
+                console.log('[LobbyManager] ✅ WebSocket conectado, inicializando listeners...');
+                this.setupChannelListeners();
+            });
+            return;
+        }
+
+        // Si ya está conectado, configurar listeners inmediatamente
+        this.setupChannelListeners();
+    }
+
+    /**
+     * Configurar listeners de eventos en los canales
+     */
+    setupChannelListeners() {
+        console.log('[LobbyManager] Configurando listeners de eventos para room:', this.roomCode);
 
         // IMPORTANTE: Hay DOS eventos diferentes:
         // 1. App\Events\GameStartedEvent - Se emite desde GameMatch::start() en canal público
@@ -43,32 +69,132 @@ export class LobbyManager {
         // Pero también escuchamos en Presence Channel por si acaso
 
         // Escuchar en canal público (para GameStartedEvent del lobby)
-        const publicChannel = window.Echo.channel(`room.${this.roomCode}`);
-        publicChannel.listen('.game.started', (data) => {
-            console.log('🎮 [LobbyManager] Game started event received (public channel), redirecting...', data);
+        const channelName = `room.${this.roomCode}`;
+        console.log('[LobbyManager] Suscribiendo a canal público:', channelName);
+        
+        this.publicChannel = window.Echo.channel(channelName);
+        
+        // Verificar que el canal se haya creado correctamente
+        if (!this.publicChannel) {
+            console.error('[LobbyManager] ❌ No se pudo crear el canal público');
+            return;
+        }
+
+        // Función para manejar la redirección cuando se recibe el evento
+        const handleGameStarted = (data, source) => {
+            console.log(`🎮 [LobbyManager] ✅ Game started event received (${source}), redirecting...`, data);
+            // Limpiar intervalo de verificación si existe
+            if (this.gameStartCheckInterval) {
+                clearInterval(this.gameStartCheckInterval);
+                this.gameStartCheckInterval = null;
+            }
             window.location.replace(`/rooms/${this.roomCode}`);
+        };
+
+        // Registrar listener para el evento game.started
+        this.publicChannel.listen('.game.started', (data) => {
+            handleGameStarted(data, 'public channel');
+        });
+
+        // También escuchar eventos de suscripción del canal para confirmar que está listo
+        const pusher = window.Echo.connector.pusher;
+        pusher.bind('pusher:subscription_succeeded', (data) => {
+            if (data.channel === channelName) {
+                console.log('[LobbyManager] ✅ Canal público suscrito correctamente:', channelName);
+                this.publicChannelSubscribed = true;
+            }
+        });
+
+        // También escuchar errores de suscripción
+        pusher.bind('pusher:subscription_error', (data) => {
+            if (data.channel === channelName) {
+                console.error('[LobbyManager] ❌ Error al suscribirse al canal público:', data);
+            }
         });
 
         // También escuchar en Presence Channel (para Game\GameStartedEvent)
         if (this.presenceManager && this.presenceManager.channel) {
             const presenceChannel = this.presenceManager.channel;
+            console.log('[LobbyManager] Configurando listener en Presence Channel');
             presenceChannel.listen('.game.started', (data) => {
-                console.log('🎮 [LobbyManager] Game started event received (presence channel), redirecting...', data);
-                window.location.replace(`/rooms/${this.roomCode}`);
+                handleGameStarted(data, 'presence channel');
             });
         } else {
             // Si aún no tenemos presenceManager, intentar más tarde
+            console.log('[LobbyManager] ⏳ Presence Manager no disponible aún, intentando más tarde...');
             setTimeout(() => {
                 if (this.presenceManager && this.presenceManager.channel) {
+                    console.log('[LobbyManager] Configurando listener en Presence Channel (delayed)');
                     this.presenceManager.channel.listen('.game.started', (data) => {
-                        console.log('🎮 [LobbyManager] Game started event received (presence channel delayed), redirecting...', data);
-                        window.location.replace(`/rooms/${this.roomCode}`);
+                        handleGameStarted(data, 'presence channel delayed');
                     });
                 }
             }, 1000);
         }
 
-        console.log('[LobbyManager] WebSocket listeners initialized for game.started (both channels)');
+        // Listener global para debugging - capturar todos los eventos del canal
+        pusher.bind_global((eventName, data) => {
+            if (eventName.includes('game.started') || eventName.includes('room.')) {
+                console.log('[LobbyManager] 🔍 Evento global detectado:', eventName, data);
+            }
+        });
+
+        console.log('[LobbyManager] ✅ WebSocket listeners initialized for game.started (both channels)');
+        
+        // Marcar el canal como suscrito después de un breve delay (fallback)
+        // En producción, a veces la suscripción puede tardar más
+        setTimeout(() => {
+            if (!this.publicChannelSubscribed) {
+                console.log('[LobbyManager] ⚠️ Canal público no confirmó suscripción, asumiendo suscrito después de timeout');
+                this.publicChannelSubscribed = true;
+            }
+        }, 2000);
+    }
+
+    /**
+     * Iniciar verificación periódica del estado del juego (fallback para producción)
+     * Se usa si el evento WebSocket no llega por algún problema de red
+     */
+    startGameStartPolling() {
+        // Solo iniciar polling si es el master y no hay intervalo activo
+        if (!this.isMaster || this.gameStartCheckInterval) {
+            return;
+        }
+
+        console.log('[LobbyManager] Iniciando polling de verificación de inicio de juego (fallback)');
+        let checkCount = 0;
+        const maxChecks = 20; // 20 checks = 10 segundos (cada 500ms)
+
+        this.gameStartCheckInterval = setInterval(() => {
+            checkCount++;
+            
+            // Verificar estado del juego desde el servidor
+            fetch(`/api/rooms/${this.roomCode}/state`)
+                .then(response => response.json())
+                .then(data => {
+                    // Si el estado es 'active' o 'playing', el juego ha iniciado
+                    if (data.status === 'active' || data.status === 'playing') {
+                        console.log('[LobbyManager] ✅ Juego iniciado detectado vía polling, redirigiendo...');
+                        if (this.gameStartCheckInterval) {
+                            clearInterval(this.gameStartCheckInterval);
+                            this.gameStartCheckInterval = null;
+                        }
+                        window.location.replace(`/rooms/${this.roomCode}`);
+                    }
+                })
+                .catch(error => {
+                    console.error('[LobbyManager] Error en polling:', error);
+                });
+
+            // Detener después de maxChecks
+            if (checkCount >= maxChecks) {
+                console.log('[LobbyManager] ⏹️ Polling detenido después de', maxChecks, 'intentos');
+                if (this.gameStartCheckInterval) {
+                    clearInterval(this.gameStartCheckInterval);
+                    this.gameStartCheckInterval = null;
+                }
+            }
+        }, 500); // Verificar cada 500ms
     }
 
     /**
