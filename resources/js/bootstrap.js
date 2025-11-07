@@ -23,17 +23,28 @@ const appKey = import.meta.env.VITE_REVERB_APP_KEY;
 const wsPath = import.meta.env.VITE_REVERB_PATH || undefined;
 
 // Validar configuración crítica
+const errors = [];
 if (!wsHost) {
-    console.error('[Echo] VITE_REVERB_HOST no está definido');
+    errors.push('VITE_REVERB_HOST no está definido');
+    console.error('[Echo] ❌ VITE_REVERB_HOST no está definido');
 }
-if (!appKey) {
-    console.error('[Echo] VITE_REVERB_APP_KEY no está definido');
+if (!appKey || appKey === 'undefined' || appKey === '') {
+    errors.push('VITE_REVERB_APP_KEY no está definido o es inválido');
+    console.error('[Echo] ❌ VITE_REVERB_APP_KEY no está definido o es inválido');
+    console.error('[Echo] Valor recibido:', appKey);
+    console.error('[Echo] ⚠️ IMPORTANTE: Agrega VITE_REVERB_APP_KEY en tu .env y ejecuta npm run build');
+}
+
+if (errors.length > 0) {
+    console.error('[Echo] ⚠️ ERRORES DE CONFIGURACIÓN DETECTADOS:');
+    errors.forEach(err => console.error('[Echo]   -', err));
+    console.error('[Echo] La conexión WebSocket fallará hasta que estos errores se corrijan.');
 }
 
 const echoConfig = {
     broadcaster: 'reverb',
-    key: appKey,
-    wsHost: wsHost,
+    key: appKey || 'undefined-key-will-fail', // Usar placeholder si no está definido para que falle claramente
+    wsHost: wsHost || 'localhost',
     wsPort: wsPort,
     wssPort: wssPort,
     wsPath: wsPath, // Path para proxy Nginx (ej: '/app')
@@ -72,8 +83,20 @@ try {
         scheme: scheme,
         forceTLS: echoConfig.forceTLS,
         enabledTransports: echoConfig.enabledTransports,
-        key: echoConfig.key ? `${echoConfig.key.substring(0, 10)}...` : 'undefined'
+        key: echoConfig.key && echoConfig.key !== 'undefined-key-will-fail' 
+            ? `${echoConfig.key.substring(0, 10)}...` 
+            : '❌ UNDEFINED - La conexión fallará'
     });
+    
+    // Advertencia si la key no está definida
+    if (!appKey || appKey === 'undefined' || appKey === '') {
+        console.error('[Echo] ⚠️⚠️⚠️ ADVERTENCIA CRÍTICA ⚠️⚠️⚠️');
+        console.error('[Echo] VITE_REVERB_APP_KEY no está definida en el bundle compilado.');
+        console.error('[Echo] Pasos para solucionar:');
+        console.error('[Echo] 1. Agrega VITE_REVERB_APP_KEY=tu-app-key en tu archivo .env');
+        console.error('[Echo] 2. Ejecuta: npm run build');
+        console.error('[Echo] 3. Recarga la página');
+    }
 
     window.Echo = new Echo(echoConfig);
     
