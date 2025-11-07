@@ -1,97 +1,129 @@
 {
-  "id": 3,
+  "id": "mentiroso",
   "name": "Mentiroso",
   "slug": "mentiroso",
-  "description": "Juego social de engaño y persuasión donde un orador defiende una frase (verdadera o falsa) y los demás deben adivinar",
-  "type": "social_deception",
   "version": "1.0.0",
+  "description": "Juego social de engaño y persuasión donde un orador defiende una frase (verdadera o falsa) y los demás deben adivinar",
   "minPlayers": 3,
   "maxPlayers": 10,
   "estimatedDuration": 15,
-  "players": {
-    "min": 3,
-    "max": 10,
-    "ideal": {
-      "min": 4,
-      "max": 8
+
+  "timing": {
+    "round_ended": {
+      "type": "countdown",
+      "message": "Siguiente ronda en",
+      "delay": 10,
+      "auto_next": true
     }
   },
+
+  "event_config": {
+    "channel": "room.{roomCode}",
+    "events": {
+      "GameStartedEvent": {
+        "name": ".game.started",
+        "handler": "handleGameStarted"
+      },
+      "RoundStartedEvent": {
+        "name": ".game.round.started",
+        "handler": "handleRoundStarted"
+      },
+      "RoundEndedEvent": {
+        "name": ".game.round.ended",
+        "handler": "handleRoundEnded"
+      },
+      "PhaseChangedEvent": {
+        "name": ".game.phase.changed",
+        "handler": "handlePhaseChanged"
+      },
+      "PhaseStartedEvent": {
+        "name": ".game.phase.started",
+        "handler": "handlePhaseStarted"
+      },
+      "PhaseEndedEvent": {
+        "name": ".game.phase.ended",
+        "handler": "handlePhaseEnded"
+      },
+      "PlayerLockedEvent": {
+        "name": ".game.player.locked",
+        "handler": "handlePlayerLocked"
+      },
+      "PlayersUnlockedEvent": {
+        "name": ".players.unlocked",
+        "handler": "handlePlayersUnlocked"
+      },
+      "StatementRevealedEvent": {
+        "name": ".mentiroso.statement.revealed",
+        "handler": "handleStatementRevealed"
+      },
+      "PlayerScoreUpdatedEvent": {
+        "name": ".player.score.updated",
+        "handler": "handlePlayerScoreUpdated"
+      }
+    }
+  },
+
   "modules": {
-    "game_core": {
-      "enabled": true
-    },
-    "room_manager": {
-      "enabled": true
-    },
-    "guest_system": {
-      "enabled": true
-    },
-    "turn_system": {
-      "enabled": true,
-      "mode": "sequential",
-      "round_per_turn": true
-    },
+    "game_core": { "enabled": true },
+    "room_manager": { "enabled": true },
+    "guest_system": { "enabled": true },
     "round_system": {
       "enabled": true,
       "total_rounds": 10,
       "inter_round_delay": 10
     },
-    "scoring_system": {
+    "turn_system": {
       "enabled": true,
-      "calculator": "MentirosoScoreCalculator"
+      "mode": "sequential",
+      "round_per_turn": true,
+      "phases": [
+        {
+          "name": "preparation",
+          "duration": 15,
+          "on_start": null,
+          "on_end": "onPreparationEnd"
+        },
+        {
+          "name": "persuasion",
+          "duration": 30,
+          "on_start": null,
+          "on_end": "onPersuasionEnd"
+        },
+        {
+          "name": "voting",
+          "duration": 15,
+          "on_start": null,
+          "on_end": "onVotingEnd"
+        }
+      ]
     },
-    "timer_system": {
-      "enabled": true,
-      "round_duration": null,
-      "preparation_duration": 15,
-      "persuasion_duration": 30,
-      "voting_duration": 10,
-      "countdown_visible": true,
-      "warning_threshold": 5
-    },
+    "scoring_system": { "enabled": true },
+    "timer_system": { "enabled": true },
+    "player_system": { "enabled": true },
     "roles_system": {
       "enabled": true,
-      "roles": ["orador", "votante"]
+      "roles": [
+        {
+          "name": "orador",
+          "count": 1,
+          "description": "El orador que defiende la frase",
+          "rotate_on_round_start": true
+        },
+        {
+          "name": "votante",
+          "count": -1,
+          "description": "Los votantes que deben adivinar",
+          "rotate_on_round_start": false
+        }
+      ]
     },
-    "real_time_sync": {
-      "enabled": true
-    }
+    "real_time_sync": { "enabled": true }
   },
   "scoring": {
     "orador_deceives_majority": 10,
     "orador_deceives_all": 15,
     "voter_correct": 5,
     "voter_incorrect": 0
-  },
-  "timing": {
-    "round_start": {
-      "duration": 15,
-      "countdown_visible": true,
-      "message": "Preparando defensa..."
-    },
-    "preparation": {
-      "duration": 2,
-      "countdown_visible": true,
-      "message": "Preparando defensa..."
-    },
-    "persuasion": {
-      "duration": 5,
-      "countdown_visible": true,
-      "warning_threshold": 5,
-      "auto_advance_on_expire": true,
-      "message": "Tiempo de persuasión"
-    },
-    "voting": {
-      "duration": 15,
-      "countdown_visible": true,
-      "auto_advance_on_expire": true,
-      "message": "Vota: ¿Verdad o mentira?"
-    },
-    "results": {
-      "auto_next": true,
-      "delay": 10,
-      "message": "Siguiente ronda"
-    }
   },
   "customizableSettings": {
     "rounds": {

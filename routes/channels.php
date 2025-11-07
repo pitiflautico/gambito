@@ -24,6 +24,39 @@ Broadcast::channel('user.{id}', function ($user, $id) {
     return (int) $user->id === (int) $id;
 });
 
+// Canal privado de player - Para eventos específicos del juego (StatementRevealedEvent, etc.)
+// Permite que solo el player específico reciba eventos privados
+Broadcast::channel('player.{id}', function ($user, $id) {
+    // Buscar el player por ID y verificar que pertenece al user actual
+    $player = Player::find($id);
+    
+    if (!$player) {
+        \Log::warning('❌ Player Channel: Player not found', [
+            'player_id' => $id,
+            'user_id' => $user->id,
+        ]);
+        return false;
+    }
+
+    // Verificar que el player pertenece al user actual (o es un guest asociado)
+    if ($player->user_id !== $user->id) {
+        \Log::warning('❌ Player Channel: User does not own this player', [
+            'player_id' => $id,
+            'player_user_id' => $player->user_id,
+            'current_user_id' => $user->id,
+        ]);
+        return false;
+    }
+
+    \Log::info('✅ Player Channel: Authorized', [
+        'player_id' => $player->id,
+        'player_name' => $player->name,
+        'user_id' => $user->id,
+    ]);
+
+    return true;
+});
+
 // Presence Channel - Trackea automáticamente quién está conectado
 // NOTA: Laravel añade automáticamente el prefijo "presence-" cuando usas Echo.join()
 // Por eso aquí solo ponemos "room.{code}" aunque en JS se usa join('room.{code}')

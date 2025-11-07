@@ -17,20 +17,7 @@ use Illuminate\Support\Facades\Log;
  */
 class MentirosoEngine extends BaseGameEngine
 {
-    /**
-     * Score calculator instance (reutilizado para evitar instanciación repetida)
-     */
-    protected MentirosoScoreCalculator $scoreCalculator;
-
-    public function __construct()
-    {
-        // Cargar configuración del juego (heredado de BaseGameEngine)
-        $gameConfig = $this->getGameConfig();
-        $scoringConfig = $gameConfig['scoring'] ?? [];
-
-        // Inicializar calculator con la configuración
-        $this->scoreCalculator = new MentirosoScoreCalculator($scoringConfig);
-    }
+    // NOTA: ScoreCalculator se instancia directamente donde se necesita (como Pictionary/Trivia)
 
     /**
      * Inicializar el juego - FASE 1 (LOBBY)
@@ -86,26 +73,33 @@ class MentirosoEngine extends BaseGameEngine
 
         $match->save();
 
-        // Cachear players en _config (1 query, 1 sola vez)
+        // CRÍTICO: Cachear información de jugadores en _config['players'] para el frontend
         $this->cachePlayersInState($match);
+
+        // NUEVA ARQUITECTURA UNIFICADA: PlayerManager con scoreCalculator
+        // PlayerManager es la fuente de verdad de scores individuales
+        $gameConfig = $this->getGameConfig();
+        $scoringConfig = $gameConfig['scoring'] ?? [];
+        $scoreCalculator = new MentirosoScoreCalculator($scoringConfig);
 
         // Inicializar módulos automáticamente desde config.json
         $this->initializeModules($match, [
             'scoring_system' => [
-                'calculator' => $this->scoreCalculator
+                'calculator' => $scoreCalculator
             ],
             'round_system' => [
                 'total_rounds' => count($selectedStatements)
             ]
         ]);
 
-        // Inicializar PlayerManager con roles
+        // Inicializar PlayerManager con roles desde config.json
         $playerIds = $match->players->pluck('id')->toArray();
-        $availableRoles = ['orador', 'votante'];
+        $rolesConfig = $gameConfig['modules']['roles_system']['roles'] ?? [];
+        $availableRoles = array_map(fn($role) => $role['name'], $rolesConfig);
 
         $playerManager = new \App\Services\Modules\PlayerSystem\PlayerManager(
             $playerIds,
-            $this->scoreCalculator,
+            $scoreCalculator, // ← Pasar calculator aquí
             [
                 'available_roles' => $availableRoles,
                 'allow_multiple_persistent_roles' => false,
@@ -154,65 +148,156 @@ class MentirosoEngine extends BaseGameEngine
     }
 
     /**
-     * Override: No timing en RoundStartedEvent porque usamos PhaseManager
-     *
-     * Mentiroso usa PhaseManager con múltiples fases por ronda (preparation, persuasion, voting)
-     * Cada fase tiene su propio timer emitido via PhaseChangedEvent.
-     * RoundStartedEvent no debe incluir timing para evitar conflictos.
-     */
-    protected function getRoundStartTiming(GameMatch $match): ?array
-    {
-        return null;  // No timing en RoundStartedEvent - usamos PhaseChangedEvent
-    }
-
-    /**
      * Hook: Ejecutado DESPUÉS de emitir RoundStartedEvent.
      *
-     * Aquí emitimos PhaseChangedEvent para la fase inicial (preparation) con timing.
-     * Esto permite que el frontend primero procese RoundStartedEvent (actualizar UI, round info)
-     * y LUEGO reciba PhaseChangedEvent para iniciar el timer de la fase.
+     * Emite PhaseChangedEvent con datos del timer para la primera fase.
+     * RoundManager ya llamó a PhaseManager->startPhase() que creó el timer,
+     * pero necesitamos emitir PhaseChangedEvent con timer data para el frontend.
      */
     protected function onRoundStarted(GameMatch $match, int $currentRound, int $totalRounds): void
     {
+        // CRÍTICO: Refrescar match para obtener el estado más reciente después de RoundStartedEvent
+        // RoundManager->emitRoundStartedEvent() llama a PhaseManager->startPhase() que crea el timer
+        $match->refresh();
+        
         $phaseManager = $this->getPhaseManager($match);
 
-        if (!$phaseManager) {
-            Log::error("[Mentiroso] PhaseManager NOT FOUND in onRoundStarted", [
-                'match_id' => $match->id
+        if ($phaseManager) {
+            // Asegurar que PhaseManager tenga el match configurado
+            $phaseManager->setMatch($match);
+            
+            // Obtener fase actual desde game_state (debe estar establecida en onRoundStarting())
+            $gameState = $match->game_state;
+            $currentPhase = $gameState['current_phase'] ?? 'preparation';
+            
+            // Si current_phase es 'main', intentar obtenerlo del PhaseManager
+            if ($currentPhase === 'main' || empty($currentPhase)) {
+                try {
+                    $currentPhaseFromManager = $phaseManager->getCurrentPhaseName();
+                    if ($currentPhaseFromManager && $currentPhaseFromManager !== 'main') {
+                        $currentPhase = $currentPhaseFromManager;
+                        // Actualizar game_state con la fase correcta
+                        $gameState['current_phase'] = $currentPhase;
+                        $match->game_state = $gameState;
+                        $match->save();
+                    }
+                } catch (\Exception $e) {
+                    Log::warning("[Mentiroso] Could not get phase name from PhaseManager", [
+                        'match_id' => $match->id,
+                        'error' => $e->getMessage()
+                    ]);
+                }
+            }
+            
+            $currentPhaseConfig = $phaseManager->getCurrentPhase();
+            $duration = $currentPhaseConfig['duration'] ?? null;
+
+            if ($duration && $currentPhase && $currentPhase !== 'main') {
+                // Obtener RoundManager para guardarlo después de crear el timer
+                $roundManager = $this->getRoundManager($match);
+                
+                // Obtener TimerService del PhaseManager
+                $timerService = $phaseManager->getTimerService();
+                
+                // CRÍTICO: El timer fue creado por PhaseManager->startPhase() en RoundManager->emitRoundStartedEvent()
+                // PERO el TimerService puede no estar guardado en game_state aún.
+                // Guardar RoundManager primero (que incluye TimerService si está conectado)
+                $this->saveRoundManager($match, $roundManager);
+                
+                // Ahora guardar TimerService explícitamente si existe
+                if ($timerService) {
+                    $this->saveTimerService($match, $timerService);
+                }
+                
+                // Refrescar match para obtener el estado más reciente
+                $match->refresh();
+                
+                // Recargar TimerService desde game_state para obtener el timer recién creado
+                $timerSystemData = $match->game_state['timer_system'] ?? null;
+                if ($timerSystemData) {
+                    try {
+                        $freshTimerService = \App\Services\Modules\TimerSystem\TimerService::fromArray(['timer_system' => $timerSystemData]);
+                        $phaseManager->setTimerService($freshTimerService);
+                        $timerService = $freshTimerService;
+                    } catch (\Exception $e) {
+                        Log::warning("[Mentiroso] Could not reload TimerService", [
+                            'match_id' => $match->id,
+                            'error' => $e->getMessage()
+                        ]);
+                    }
+                }
+                
+                // Si hay un timer activo para esta fase, usar su startedAt como server_time
+                // Esto asegura que al reconectar, el timer muestre el tiempo restante correcto
+                $serverTime = now()->timestamp; // Default: tiempo actual (nueva fase)
+                
+                if ($timerService && $timerService->hasTimer($currentPhase)) {
+                    try {
+                        $timer = $timerService->getTimer($currentPhase);
+                        // El timer guarda startedAt como DateTime, convertir a timestamp
+                        $serverTime = $timer->getStartedAt()->getTimestamp();
+                        
+                        Log::info("[Mentiroso] Using active timer's start time", [
+                            'match_id' => $match->id,
+                            'phase' => $currentPhase,
+                            'timer_started_at' => $serverTime,
+                            'current_timestamp' => now()->timestamp,
+                        ]);
+                    } catch (\Exception $e) {
+                        Log::warning("[Mentiroso] Could not get timer start time, using current time", [
+                            'match_id' => $match->id,
+                            'phase' => $currentPhase,
+                            'error' => $e->getMessage()
+                        ]);
+                    }
+                } else {
+                    // Timer no existe aún (puede ser una nueva fase), usar tiempo actual
+                    Log::info("[Mentiroso] Timer not found for phase, using current time (new phase)", [
+                        'match_id' => $match->id,
+                        'phase' => $currentPhase,
+                        'has_timer_service' => $timerService !== null,
+                    ]);
+                }
+                
+                Log::info("[Mentiroso] Emitting PhaseChangedEvent for first phase", [
+                    'match_id' => $match->id,
+                    'phase' => $currentPhase,
+                    'duration' => $duration,
+                    'server_time' => $serverTime,
+                    'phase_from_manager' => $phaseManager->getCurrentPhaseName(),
+                    'has_timer' => $timerService && $timerService->hasTimer($currentPhase),
+                ]);
+
+                // IMPORTANTE: Incluir timer_id, server_time, duration directamente en additional_data
+                // para que TimingModule lo detecte automáticamente
+                // CRÍTICO: newPhase debe ser el nombre real de la fase, no 'main'
+                // CRÍTICO: Estos campos deben estar en additional_data para que PhaseChangedEvent::broadcastWith() los exponga
+                event(new PhaseChangedEvent(
+                    $match,
+                    $currentPhase, // Nombre real de la fase: preparation, persuasion, voting
+                    '', // No previous phase (nueva ronda)
+                    [
+                        'phase' => $currentPhase,
+                        'game_state' => $this->filterGameStateForBroadcast($match->game_state, $match),
+                        // TimingModule busca estos campos directamente en el evento (nivel raíz o additional_data)
+                        'timer_id' => 'timer', // ID del elemento HTML donde mostrar el timer
+                        'server_time' => $serverTime, // Tiempo de inicio del timer activo (o tiempo actual si no existe)
+                        'duration' => $duration,
+                    ]
+                ));
+            } else {
+                Log::warning("[Mentiroso] Skipping PhaseChangedEvent - invalid phase or duration", [
+                    'match_id' => $match->id,
+                    'current_phase' => $currentPhase,
+                    'duration' => $duration,
+                    'phase_config' => $currentPhaseConfig,
+                ]);
+            }
+        } else {
+            Log::warning("[Mentiroso] PhaseManager not available in onRoundStarted", [
+                'match_id' => $match->id,
             ]);
-            return;
         }
-
-        // NOTA: RoundManager ya configuró PhaseManager (setMatch + startTurnTimer)
-        // en emitRoundStartedEvent(). Aquí solo emitimos PhaseChangedEvent para el frontend.
-
-        $currentPhase = $phaseManager->getCurrentPhaseName();
-        $timingInfo = $phaseManager->getTimingInfo();
-
-        $timing = [
-            'server_time' => now()->timestamp,
-            'duration' => $timingInfo['delay'] ?? 0
-        ];
-
-        Log::info("🚀🚀🚀 [EMIT] PhaseChangedEvent FROM onRoundStarted", [
-            'match_id' => $match->id,
-            'current_round' => $currentRound,
-            'new_phase' => $currentPhase,
-            'previous_phase' => '',
-            'duration' => $timing['duration'],
-            'location' => 'onRoundStarted'
-        ]);
-
-        event(new \App\Events\Game\PhaseChangedEvent(
-            $match,
-            $currentPhase,
-            '',  // No previous phase (nueva ronda)
-            [
-                'phase' => $currentPhase,
-                'game_state' => $this->filterGameStateForBroadcast($match->game_state, $match),
-                'timing' => $timing
-            ]
-        ));
     }
 
     /**
@@ -265,31 +350,47 @@ class MentirosoEngine extends BaseGameEngine
 
         // 2. Cargar siguiente frase
         $statement = $this->loadNextStatement($match);
+        // CRÍTICO: Guardar statement en game_state ANTES de asignar roles
+        // Esto asegura que RoundStartedEvent incluya el statement en game_state
+        $this->setCurrentStatement($match, $statement);
 
         // 3. Asignar roles (orador/votantes)
         $this->assignRoles($match);
 
-        // 4. Obtener PhaseManager del RoundManager (ya inicializado por BaseGameEngine)
+        // 4. PhaseManager se inicializa automáticamente por RoundManager
+        // Obtener fase actual y actualizar game_state ANTES de emitir RoundStartedEvent
         $roundManager = $this->getRoundManager($match);
-        $phaseManager = $roundManager->getTurnManager(); // PhaseManager
-
-        if (!$phaseManager) {
-            Log::error("[Mentiroso] PhaseManager NOT FOUND - should have been created by RoundManager", [
-                'match_id' => $match->id
-            ]);
-            return;
+        $phaseManager = $roundManager->getTurnManager();
+        
+        // Asegurar que PhaseManager tenga el match configurado antes de obtener la fase
+        if ($phaseManager) {
+            $phaseManager->setMatch($match);
+        }
+        
+        // Obtener nombre de la primera fase (preparation) explícitamente
+        // en lugar de confiar en getCurrentPhaseName() que podría no estar inicializado
+        $currentPhase = 'preparation'; // Primera fase por defecto
+        if ($phaseManager && $phaseManager instanceof \App\Services\Modules\TurnSystem\PhaseManager) {
+            $phases = $phaseManager->getPhases();
+            if (!empty($phases) && isset($phases[0]['name'])) {
+                $currentPhase = $phases[0]['name'];
+            }
         }
 
-        // NOTA: La configuración del PhaseManager (setMatch + startTurnTimer) se hace
-        // en onRoundStarted(), que se ejecuta DESPUÉS de RoundStartedEvent.
-        // Esto garantiza que el timer se crea con el match ya configurado.
-
-        // Establecer fase inicial
-        $currentPhase = $phaseManager->getCurrentPhaseName();
+        // CRÍTICO: Actualizar current_phase en game_state para que RoundStartedEvent lo incluya
+        // IMPORTANTE: Esto debe hacerse ANTES de que RoundManager emita RoundStartedEvent
         $gameState = $match->game_state;
         $gameState['current_phase'] = $currentPhase;
+        $gameState['phase'] = 'playing'; // Mantener phase general
         $match->game_state = $gameState;
         $match->save();
+        
+        Log::info("[Mentiroso] Phase set in game_state", [
+            'match_id' => $match->id,
+            'current_phase' => $currentPhase,
+            'saved' => true,
+            'has_phaseManager' => $phaseManager !== null,
+        ]);
 
         Log::info("[Mentiroso] New round started", [
             'match_id' => $match->id,
@@ -353,7 +454,12 @@ class MentirosoEngine extends BaseGameEngine
             ];
         }
 
-        $playerManager = $this->getPlayerManager($match, $this->scoreCalculator);
+        // Obtener scoreCalculator para PlayerManager
+        $gameConfig = $this->getGameConfig();
+        $scoringConfig = $gameConfig['scoring'] ?? [];
+        $scoreCalculator = new MentirosoScoreCalculator($scoringConfig);
+        
+        $playerManager = $this->getPlayerManager($match, $scoreCalculator);
 
         // Verificar que no haya votado ya
         if ($playerManager->isPlayerLocked($player->id)) {
@@ -411,7 +517,12 @@ class MentirosoEngine extends BaseGameEngine
         return \Illuminate\Support\Facades\Cache::lock($lockKey, 10)->block(8, function() use ($match, $player, $playerManager) {
             // Recargar match desde BD para obtener la versión más actualizada
             $match->refresh();
-            $playerManager = $this->getPlayerManager($match, $this->scoreCalculator);
+            // Obtener scoreCalculator para PlayerManager
+        $gameConfig = $this->getGameConfig();
+        $scoringConfig = $gameConfig['scoring'] ?? [];
+        $scoreCalculator = new MentirosoScoreCalculator($scoringConfig);
+        
+        $playerManager = $this->getPlayerManager($match, $scoreCalculator);
 
             // 🛡️ DEFENSIVE CHECK: Verificar que la ronda no haya terminado mientras esperábamos el lock
             // Si current_statement es null, significa que endCurrentRound() ya ejecutó
@@ -465,60 +576,42 @@ class MentirosoEngine extends BaseGameEngine
      * Mentiroso NECESITA sobrescribir este método porque:
      * 1. Requiere lock de concurrencia (múltiples notificaciones de timer simultáneas)
      * 2. Necesita refresh del match para obtener votos más recientes de BD
-     *
-     * NOTA: PhaseManager ahora se autogestion mediante listener
-     * (CancelPhaseManagerTimersOnRoundEnd) que escucha RoundEndedEvent
-     * y cancela sus timers automáticamente.
-     *
-     * Finalmente llama a completeRound() heredado que maneja el flujo estándar:
-     * - Llamar getRoundResults() para obtener datos específicos del juego
-     * - Emitir RoundEndedEvent (que triggerea el listener de PhaseManager)
-     * - Verificar si hay más rondas
-     * - Llamar handleNewRound() o finalize()
+     * 3. Necesita limpiar current_statement antes de completeRound()
      */
     public function endCurrentRound(GameMatch $match): void
     {
-        Log::info("🔵🔵🔵 [ENTRY] endCurrentRound", [
-            'match_id' => $match->id,
-            'location' => 'endCurrentRound'
-        ]);
+        Log::info("[Mentiroso] Ending current round", ['match_id' => $match->id]);
 
         $lockKey = "game:match:{$match->id}:end-round";
 
         \Illuminate\Support\Facades\Cache::lock($lockKey, 5)->block(3, function() use ($match) {
             // CRÍTICO: Refrescar match para obtener los votos más recientes
-            // Los votos se guardaron en processVote() pero necesitamos la última versión
             $match->refresh();
 
-            Log::info("[Mentiroso] Ending current round", ['match_id' => $match->id]);
-
-            // Obtener resultados de todos los jugadores
+            // Obtener resultados y scores desde PlayerManager
             $results = $this->getRoundResults($match);
+            
+            // Obtener scores desde PlayerManager (fuente de verdad)
+            $gameConfig = $this->getGameConfig();
+            $scoringConfig = $gameConfig['scoring'] ?? [];
+            $scoreCalculator = new MentirosoScoreCalculator($scoringConfig);
+            $playerManager = $this->getPlayerManager($match, $scoreCalculator);
+            $scores = $playerManager->getScores();
 
             // ✅ IMPORTANTE: Limpiar current_statement ANTES de completeRound()
-            // Esto permite que onRoundStarting() de la siguiente ronda cargue nueva frase
             $gameState = $match->game_state;
             $gameState['current_statement'] = null;
             $match->game_state = $gameState;
             $match->save();
 
-            Log::info("[Mentiroso] Current statement cleared for next round", [
-                'match_id' => $match->id
-            ]);
-
-            // Llamar a completeRound() que maneja el flow completo
-            $this->completeRound($match, $results);
+            // Llamar a completeRound() con scores desde PlayerManager
+            $this->completeRound($match, $results, $scores);
 
             Log::info("[Mentiroso] Round completed", [
                 'match_id' => $match->id,
                 'results' => $results
             ]);
         });
-
-        Log::info("🔴🔴🔴 [EXIT] endCurrentRound", [
-            'match_id' => $match->id,
-            'location' => 'endCurrentRound'
-        ]);
     }
 
     /**
@@ -541,7 +634,12 @@ class MentirosoEngine extends BaseGameEngine
      */
     protected function getRoundResults(GameMatch $match): array
     {
-        $playerManager = $this->getPlayerManager($match, $this->scoreCalculator);
+        // Obtener scoreCalculator para PlayerManager
+        $gameConfig = $this->getGameConfig();
+        $scoringConfig = $gameConfig['scoring'] ?? [];
+        $scoreCalculator = new MentirosoScoreCalculator($scoringConfig);
+        
+        $playerManager = $this->getPlayerManager($match, $scoreCalculator);
         $allActions = $playerManager->getAllActions();
         $currentStatement = $this->getCurrentStatement($match);
         $currentOradorId = $this->getCurrentOradorId($match);
@@ -856,7 +954,12 @@ class MentirosoEngine extends BaseGameEngine
      */
     private function assignRoles(GameMatch $match): void
     {
-        $playerManager = $this->getPlayerManager($match, $this->scoreCalculator);
+        // Obtener scoreCalculator para PlayerManager
+        $gameConfig = $this->getGameConfig();
+        $scoringConfig = $gameConfig['scoring'] ?? [];
+        $scoreCalculator = new MentirosoScoreCalculator($scoringConfig);
+        
+        $playerManager = $this->getPlayerManager($match, $scoreCalculator);
         $roundManager = $this->getRoundManager($match);
         $currentRound = $roundManager->getCurrentRound();
 
@@ -919,40 +1022,11 @@ class MentirosoEngine extends BaseGameEngine
         // PlayerManager bloqueará jugadores automáticamente
     }
 
-    /**
-     * Hook: Ejecutado DESPUÉS de que un jugador se reconecta.
-     *
-     * Política de Mentiroso: RESETEAR la ronda actual porque es mejor volver a empezar.
-     * - Descartar votos de la ronda actual
-     * - Resetear PhaseManager (volver a preparation)
-     * - Reiniciar ronda desde el principio
-     */
-    protected function afterPlayerReconnected(GameMatch $match, Player $player): void
-    {
-        Log::info("[Mentiroso] Player reconnected - resetting current round", [
-            'match_id' => $match->id,
-            'player_id' => $player->id
-        ]);
-
-        // 1. Limpiar votos y acciones de la ronda actual
-        $playerManager = $this->getPlayerManager($match, $this->scoreCalculator);
-        $playerManager->reset($match); // Desbloquea y limpia acciones
-        $this->savePlayerManager($match, $playerManager);
-
-        // 2. Cancelar PhaseManager existente
-        $phaseManager = $this->getPhaseManager($match);
-        if ($phaseManager) {
-            $phaseManager->cancelAllTimers();
-        }
-
-        // 3. Reiniciar la ronda actual (sin avanzar contador)
-        // handleNewRound con advanceRound=false mantiene la ronda actual pero reinicia todo
-        $this->handleNewRound($match, advanceRound: false);
-
-        Log::info("[Mentiroso] Round reset after reconnection", [
-            'match_id' => $match->id
-        ]);
-    }
+    // NOTA: afterPlayerReconnected() eliminado
+    // BaseGameEngine maneja la reconexión automáticamente:
+    // - Reinicia la ronda actual
+    // - Re-emite eventos necesarios (RoundStartedEvent, PhaseChangedEvent, etc.)
+    // - Restaura timers automáticamente
 
     // ========================================================================
     // MÉTODOS OBLIGATORIOS DE BaseGameEngine
@@ -1062,20 +1136,11 @@ class MentirosoEngine extends BaseGameEngine
         parent::onPlayerDisconnected($match, $player);
     }
 
-    /**
-     * Manejar reconexión de jugador
-     */
-    public function onPlayerReconnected(GameMatch $match, Player $player): void
-    {
-        Log::info("[Mentiroso] Player reconnected", [
-            'match_id' => $match->id,
-            'player_id' => $player->id
-        ]);
-
-        // Llamar al comportamiento por defecto de BaseGameEngine
-        // que reanuda el juego y emite PlayerReconnectedEvent
-        parent::onPlayerReconnected($match, $player);
-    }
+    // NOTA: onPlayerReconnected() eliminado
+    // BaseGameEngine maneja la reconexión automáticamente:
+    // - Reinicia la ronda actual
+    // - Re-emite eventos necesarios (RoundStartedEvent, PhaseChangedEvent, etc.)
+    // - Restaura timers automáticamente
 
     // getGameConfig() y getFinalScores() se heredan automáticamente de BaseGameEngine
 }

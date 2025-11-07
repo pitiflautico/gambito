@@ -527,6 +527,10 @@ abstract class BaseGameEngine implements GameEngineInterface
             // El juego decide si puede continuar sin datos del hook
         }
 
+        // CRÍTICO: Refrescar match después de onRoundStarting() para incluir cambios en game_state
+        // (ej: current_statement, current_phase, etc.)
+        $match->refresh();
+
         // 3.1. Iniciar timer de ronda automáticamente (si está configurado)
         // DELEGADO A ROUNDMANAGER: Los módulos gestionan sus propios timers
         // ELIMINADO: Round timer

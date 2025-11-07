@@ -14,6 +14,11 @@
             <div>
                 <h1 class="text-3xl font-bold">🎭 Mentiroso</h1>
                 <p class="text-gray-400">Sala: <span class="font-mono text-yellow-400">{{ $code }}</span></p>
+                <!-- Role indicator -->
+                <div id="role-indicator" class="mt-2 hidden">
+                    <span class="text-xs text-gray-500">Tu rol: </span>
+                    <span id="current-role" class="text-sm font-bold text-yellow-400"></span>
+                </div>
             </div>
             <div id="round-info" class="text-right">
                 <p class="text-sm text-gray-400">Ronda</p>
@@ -101,31 +106,6 @@
                 </div>
             </div>
 
-            <!-- Results Phase -->
-            <div id="results-phase" class="hidden">
-                <div class="bg-gray-800 rounded-lg p-6">
-                    <h2 class="text-2xl font-bold text-center mb-6">📊 Resultados de la Ronda</h2>
-
-                    <div class="bg-gray-700 rounded-lg p-4 mb-6 text-center">
-                        <p class="text-lg mb-2">La frase era:</p>
-                        <p id="results-statement" class="text-xl font-bold text-yellow-400 mb-4"></p>
-                        <div id="results-truth" class="text-2xl font-bold"></div>
-                    </div>
-
-                    <div id="results-votes" class="grid grid-cols-2 gap-4 mb-6">
-                        <div class="bg-green-600/20 rounded-lg p-4 text-center">
-                            <p class="text-sm text-gray-400 mb-1">Votaron VERDADERO</p>
-                            <p id="votes-true-count" class="text-3xl font-bold text-green-400">0</p>
-                        </div>
-                        <div class="bg-red-600/20 rounded-lg p-4 text-center">
-                            <p class="text-sm text-gray-400 mb-1">Votaron FALSO</p>
-                            <p id="votes-false-count" class="text-3xl font-bold text-red-400">0</p>
-                        </div>
-                    </div>
-
-                    <div id="results-message" class="text-center text-lg mb-4"></div>
-                </div>
-            </div>
         </div>
 
         <!-- Scoreboard -->
@@ -136,24 +116,16 @@
             </div>
         </div>
 
-        <!-- Game Finished -->
-        <div id="game-finished" class="fixed inset-0 bg-black/90 flex items-center justify-center hidden">
-            <div class="bg-gray-800 rounded-lg p-8 max-w-2xl w-full mx-4">
-                <h2 class="text-3xl font-bold text-center mb-6">🎉 ¡Juego Terminado!</h2>
-                <div id="final-scores" class="space-y-3 mb-6">
-                    <!-- Final scores will be dynamically inserted here -->
-                </div>
-                <div class="text-center">
-                    <button id="back-to-lobby" class="bg-yellow-500 hover:bg-yellow-600 text-black font-bold py-3 px-8 rounded-lg">
-                        Volver al Lobby
-                    </button>
-                </div>
-            </div>
-        </div>
     </div>
 
     {{-- Player Disconnected Popup --}}
     <x-game.player-disconnected-popup />
+
+    {{-- Round End Popup (generic) --}}
+    @include('mockup::partials.round_end_popup')
+
+    {{-- Game End Popup (generic) --}}
+    @include('mockup::partials.game_end_popup')
 
     @vite(['resources/js/app.js', 'games/mentiroso/js/MentirosoGameClient.js'])
 

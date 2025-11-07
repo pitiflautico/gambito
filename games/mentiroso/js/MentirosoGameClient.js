@@ -31,6 +31,19 @@ export class MentirosoGameClient extends BaseGameClient {
     }
 
     /**
+     * Override: Configurar listener para el canal privado del player
+     * Este método se llama automáticamente desde BaseGameClient.setupPrivateChannels()
+     */
+    onPrivatePlayerChannelReady(channel) {
+        console.log(`[Mentiroso] Private player channel ready: player.${this.playerId}`);
+
+        channel.listen('.statement.revealed', (event) => {
+            console.log('[Mentiroso] ✅ StatementRevealed received on private channel:', event);
+            this.handleStatementRevealed(event);
+        });
+    }
+
+    /**
      * Initialize DOM event listeners
      */
     initializeEventListeners() {
@@ -110,14 +123,53 @@ export class MentirosoGameClient extends BaseGameClient {
         const currentStatement = game_state?.current_statement;
         const currentPhase = game_state?.current_phase || 'preparation';
         const playersConfig = game_state?._config?.players;
-        const players = Array.isArray(playersConfig) ? playersConfig : [];
+        
+        // Convert players object to array if needed (playersConfig can be object or array)
+        let players = [];
+        if (Array.isArray(playersConfig)) {
+            players = playersConfig;
+        } else if (playersConfig && typeof playersConfig === 'object') {
+            // Convert object {playerId: {id, name, ...}} to array
+            players = Object.values(playersConfig);
+        }
+        
         const playerSystem = game_state?.player_system?.players || {};
 
         // Get my role from PlayerManager data
         this.currentRole = playerSystem[this.playerId]?.round_role || null;
 
+        // DEBUG: Log role assignment
+        console.log('[Mentiroso] Role assignment debug', {
+            playerId: this.playerId,
+            playerSystem: playerSystem,
+            myPlayerData: playerSystem[this.playerId],
+            currentRole: this.currentRole,
+        });
+
+        // Update role indicator in UI
+        this.updateRoleIndicator();
+
         // Get statement text - handle both object and string formats
-        this.currentStatement = typeof currentStatement === 'object' ? (currentStatement?.text || '') : (currentStatement || '');
+        // current_statement puede ser: null, string, o {text: string, is_true: bool}
+        if (!currentStatement) {
+            this.currentStatement = '';
+        } else if (typeof currentStatement === 'object' && currentStatement.text) {
+            this.currentStatement = currentStatement.text;
+        } else if (typeof currentStatement === 'string') {
+            this.currentStatement = currentStatement;
+        } else {
+            this.currentStatement = '';
+        }
+
+        // DEBUG: Log statement extraction
+        console.log('[Mentiroso] Statement extraction debug', {
+            currentStatement: currentStatement,
+            currentStatementType: typeof currentStatement,
+            extractedText: this.currentStatement,
+            currentPhase: currentPhase,
+            hasStatement: !!this.currentStatement,
+            isOrador: this.currentRole === 'orador',
+        });
 
         // Update round info
         this.updateElement('current-round', current_round);
@@ -128,16 +180,62 @@ export class MentirosoGameClient extends BaseGameClient {
         const oradorIndex = game_state?.current_orador_index || 0;
         const oradorId = oradorRotation[oradorIndex];
 
+        console.log('[Mentiroso] Orador debug', {
+            oradorRotation,
+            oradorIndex,
+            oradorId,
+            playersLength: players.length,
+            players,
+            playerSystem,
+            // Try to get player name from playerSystem if players array is empty
+            oradorPlayerFromSystem: playerSystem[oradorId]
+        });
+
         if (players.length > 0) {
             const oradorPlayer = players.find(p => p.id === oradorId);
             if (oradorPlayer) {
+                console.log('[Mentiroso] Found orador in players array:', oradorPlayer);
                 this.updateElement('orador-name', oradorPlayer.name);
+            } else {
+                console.warn('[Mentiroso] Orador ID not found in players array', { oradorId, players });
+            }
+        } else {
+            // Fallback: try to get player name from playerSystem or match players
+            console.warn('[Mentiroso] Players array is empty, trying fallback');
+            const oradorPlayerData = playerSystem[oradorId];
+            if (oradorPlayerData && oradorPlayerData.name) {
+                console.log('[Mentiroso] Found orador in playerSystem:', oradorPlayerData);
+                this.updateElement('orador-name', oradorPlayerData.name);
+            } else {
+                console.error('[Mentiroso] Could not find orador name', { oradorId, playerSystem });
             }
         }
 
         // Show statement (without revealing truth)
+        console.log('[Mentiroso] Updating statement displays', {
+            currentStatement: this.currentStatement,
+            hasStatement: !!this.currentStatement,
+            isOrador: this.currentRole === 'orador'
+        });
+        
         this.updateElement('statement-display', this.currentStatement);
-        this.updateElement('orador-statement', this.currentStatement);
+        
+        // Si soy el orador y tengo el statement, mostrarlo inmediatamente
+        // (el StatementRevealedEvent puede llegar después)
+        if (this.currentRole === 'orador') {
+            if (this.currentStatement) {
+                console.log('[Mentiroso] I am orador, updating orador-statement immediately', this.currentStatement);
+                this.updateElement('orador-statement', this.currentStatement);
+                // Mostrar la fase de preparación
+                const prepPhase = document.getElementById('preparation-phase');
+                if (prepPhase) {
+                    prepPhase.classList.remove('hidden');
+                }
+            } else {
+                console.warn('[Mentiroso] I am orador but statement is empty, waiting for StatementRevealedEvent');
+            }
+        }
+        
         this.updateElement('voting-statement', this.currentStatement);
 
         // Update phase
@@ -152,9 +250,19 @@ export class MentirosoGameClient extends BaseGameClient {
      * Handle private event: statement revealed to orador
      */
     handleStatementRevealed(data) {
+        console.log('[Mentiroso] StatementRevealed event received', data);
+        
         this.statementIsTrue = data.is_true;
         // Handle both object and string formats
         this.currentStatement = typeof data.statement === 'object' ? data.statement.text : data.statement;
+
+        console.log('[Mentiroso] Updating orador statement display', {
+            currentStatement: this.currentStatement,
+            isTrue: this.statementIsTrue
+        });
+
+        // Update statement display for orador
+        this.updateElement('orador-statement', this.currentStatement);
 
         // Show truth indicator (solo el orador lo ve)
         const truthIndicator = document.getElementById('truth-indicator');
@@ -166,6 +274,8 @@ export class MentirosoGameClient extends BaseGameClient {
                 truthIndicator.innerHTML = '<span class="text-red-400">✗ Es FALSO</span>';
                 truthIndicator.className = 'text-xl font-bold bg-red-600/20 rounded-lg p-3';
             }
+        } else {
+            console.warn('[Mentiroso] truth-indicator element not found');
         }
     }
 
@@ -199,14 +309,30 @@ export class MentirosoGameClient extends BaseGameClient {
         // PhaseChangedEvent broadcasts: { new_phase, previous_phase, additional_data }
         // additional_data contains: { phase, game_state, timing }
         const { new_phase, previous_phase, additional_data } = event;
-        const phase = additional_data?.phase || new_phase;
+        let phase = additional_data?.phase || new_phase;
         const game_state = additional_data?.game_state;
         const timing = additional_data?.timing;
+
+        // Si game_state está disponible, actualizar this.gameState y usar current_phase si phase es genérico
+        if (game_state) {
+            this.gameState = game_state;
+            // Si phase es 'main' o 'playing', usar current_phase del game_state
+            if (phase === 'main' || phase === 'playing') {
+                phase = game_state?.current_phase || phase;
+            }
+        }
 
         if (!phase) {
             console.error('[Mentiroso] ❌ No phase in PhaseChangedEvent - cannot proceed');
             return;
         }
+
+        console.log('[Mentiroso] handlePhaseChanged', { 
+            new_phase, 
+            phase, 
+            current_phase_from_state: game_state?.current_phase,
+            has_timing: !!timing
+        });
 
         // 🛡️ DEFENSIVE CHECK: Si estamos mostrando resultados, IGNORAR PhaseChangedEvent
         // hasta que termine el countdown (BaseGameClient llamará a handleRoundStarted cuando corresponda)
@@ -219,26 +345,39 @@ export class MentirosoGameClient extends BaseGameClient {
             return;
         }
 
+        // Update role if game_state has player_system data
+        if (game_state?.player_system?.players) {
+            const playerSystem = game_state.player_system.players;
+            this.currentRole = playerSystem[this.playerId]?.round_role || null;
+            this.updateRoleIndicator();
+        }
+
         // Update phase UI
         this.updatePhase(phase);
 
-        // Start timer if timing metadata provided
-        if (timing && timing.server_time && timing.duration) {
-            const timerElement = this.getTimerElement();
+        // NOTA: TimingModule.autoProcessEvent() ya maneja automáticamente el timer
+        // cuando el evento tiene timer_id, server_time, duration en el nivel raíz.
+        // No necesitamos iniciar el timer manualmente aquí.
+        console.log('[Mentiroso] PhaseChanged processed, TimingModule will handle timer automatically');
+    }
 
-            if (timerElement) {
-                const durationMs = timing.duration * 1000;
-
-                // Usar nuevo sistema: callback con timer_type
-                this.timing.startServerSyncedCountdown(
-                    timing.server_time,
-                    durationMs,
-                    timerElement,
-                    () => this.onTimerExpired(phase),
-                    `${phase}_timer`
-                );
+    /**
+     * Update role indicator in the UI
+     */
+    updateRoleIndicator() {
+        const roleIndicator = document.getElementById('role-indicator');
+        const currentRoleSpan = document.getElementById('current-role');
+        
+        if (roleIndicator && currentRoleSpan) {
+            if (this.currentRole) {
+                const roleNames = {
+                    'orador': '🎯 Orador',
+                    'votante': '👂 Votante'
+                };
+                currentRoleSpan.textContent = roleNames[this.currentRole] || this.currentRole;
+                roleIndicator.classList.remove('hidden');
             } else {
-                console.error('[Mentiroso] ❌ Timer element not found!');
+                roleIndicator.classList.add('hidden');
             }
         }
     }
@@ -249,29 +388,87 @@ export class MentirosoGameClient extends BaseGameClient {
     handleRoundEnded(event) {
         console.log('🏁 [FRONTEND] RoundEndedEvent RECIBIDO - Round:', event.round_number);
 
-        // Llamar primero al handler base que actualiza scores y maneja timing
+        // Usar método genérico de BaseGameClient para mostrar popup
         super.handleRoundEnded(event);
+
+        // Personalizar popup con datos específicos de Mentiroso
+        this.customizeRoundEndPopup(event);
 
         // Ocultar todas las fases de juego
         this.hideElement('waiting-phase');
         this.hideElement('preparation-phase');
         this.hideElement('persuasion-phase');
         this.hideElement('voting-phase');
-
-        // Mostrar fase de resultados con countdown
-        this.showElement('results-phase');
-        this.showElement('timer-container');
-        this.updateElement('timer-message', 'Siguiente ronda en...');
-
-        // Actualizar datos de resultados en la pantalla
-        const results = event.results || {};
-        this.updateResultsDisplay(results);
     }
+
+    /**
+     * Personalizar el popup genérico de fin de ronda con datos específicos de Mentiroso
+     */
+    customizeRoundEndPopup(event) {
+        const results = event.results || {};
+        const statement = results.statement || {};
+        
+        // Agregar información de la frase y resultados al popup
+        const popup = document.getElementById('round-end-popup');
+        if (!popup) return;
+
+        // Crear/seleccionar contenedor para información específica de Mentiroso
+        let mentirosoInfo = document.getElementById('mentiroso-round-info');
+        if (!mentirosoInfo) {
+            mentirosoInfo = document.createElement('div');
+            mentirosoInfo.id = 'mentiroso-round-info';
+            mentirosoInfo.className = 'mt-4 p-4 bg-gray-700 rounded-lg';
+            
+            const scoresList = document.getElementById('popup-scores-list');
+            if (scoresList && scoresList.parentNode) {
+                scoresList.parentNode.insertBefore(mentirosoInfo, scoresList.nextSibling);
+            }
+        }
+
+        // Mostrar frase y resultado
+        const isTrue = statement.is_true ?? false;
+        mentirosoInfo.innerHTML = `
+            <div class="text-center mb-3">
+                <p class="text-sm text-gray-400 mb-2">La frase era:</p>
+                <p class="text-lg font-bold text-yellow-400 mb-2">"${statement.text || ''}"</p>
+                <p class="text-xl font-bold ${isTrue ? 'text-green-400' : 'text-red-400'}">
+                    ${isTrue ? '✓ VERDADERO' : '✗ FALSO'}
+                </p>
+            </div>
+            <div class="grid grid-cols-2 gap-4 mt-4">
+                <div class="bg-green-600/20 rounded-lg p-3 text-center">
+                    <p class="text-xs text-gray-400 mb-1">Votaron VERDADERO</p>
+                    <p class="text-2xl font-bold text-green-400">${results.correct_votes || 0}</p>
+                </div>
+                <div class="bg-red-600/20 rounded-lg p-3 text-center">
+                    <p class="text-xs text-gray-400 mb-1">Votaron FALSO</p>
+                    <p class="text-2xl font-bold text-red-400">${results.incorrect_votes || 0}</p>
+                </div>
+            </div>
+        `;
+    }
+
+    // NOTA: updateResultsDisplay() eliminado - ahora usamos popup genérico con customizeRoundEndPopup()
 
     /**
      * Update phase UI
      */
     updatePhase(phase) {
+        console.log('[Mentiroso] updatePhase called', { phase, currentRole: this.currentRole, gameStatePhase: this.gameState?.current_phase });
+        
+        // Si phase es 'main' o 'playing', usar current_phase de game_state ANTES de procesar
+        if (phase === 'main' || phase === 'playing') {
+            const actualPhase = this.gameState?.current_phase || 'preparation';
+            console.log('[Mentiroso] Phase is main/playing, using actualPhase:', actualPhase);
+            phase = actualPhase;
+        }
+
+        // Mostrar el contenedor del timer cuando hay una fase activa
+        const timerContainer = document.getElementById('timer-container');
+        if (timerContainer && phase && phase !== 'waiting' && phase !== 'finished') {
+            timerContainer.classList.remove('hidden');
+        }
+        
         // Hide all phases
         this.hideElement('waiting-phase');
         this.hideElement('preparation-phase');
@@ -287,9 +484,12 @@ export class MentirosoGameClient extends BaseGameClient {
                 break;
 
             case 'preparation':
+                console.log('[Mentiroso] Preparation phase - currentRole:', this.currentRole);
                 if (this.currentRole === 'orador') {
+                    console.log('[Mentiroso] Showing preparation-phase for orador');
                     this.showElement('preparation-phase');
                 } else {
+                    console.log('[Mentiroso] Showing waiting-phase for non-orador');
                     this.showElement('waiting-phase');
                 }
                 this.showElement('timer-container');
@@ -385,57 +585,8 @@ export class MentirosoGameClient extends BaseGameClient {
         }
     }
 
-    /**
-     * Update results display with round data
-     */
-    updateResultsDisplay(data) {
-        // Extract statement text (handle both object and string)
-        const statement = data.statement || {};
-        const statementText = typeof statement === 'object' ? statement.text : statement;
-        const isTrue = statement.is_true !== undefined ? statement.is_true : data.is_true;
-
-        // Update statement
-        this.updateElement('results-statement', statementText || this.currentStatement);
-
-        // Update truth indicator
-        const truthElement = document.getElementById('results-truth');
-        if (truthElement) {
-            if (isTrue) {
-                truthElement.innerHTML = '<span class="text-green-400">✓ Era VERDADERO</span>';
-            } else {
-                truthElement.innerHTML = '<span class="text-red-400">✗ Era FALSO</span>';
-            }
-        }
-
-        // Count votes from votes array
-        const votes = data.votes || [];
-        const votesTrue = votes.filter(v => v.vote === true).length;
-        const votesFalse = votes.filter(v => v.vote === false).length;
-
-        this.updateElement('votes-true-count', votesTrue);
-        this.updateElement('votes-false-count', votesFalse);
-
-        // Create result message
-        const oradorDeceived = data.orador_deceived_majority || false;
-        const messageElement = document.getElementById('results-message');
-        if (messageElement) {
-            if (oradorDeceived) {
-                messageElement.textContent = '¡El orador engañó a la mayoría!';
-                messageElement.className = 'text-center text-lg mb-4 font-bold text-yellow-400';
-            } else {
-                messageElement.textContent = 'La mayoría acertó';
-                messageElement.className = 'text-center text-lg mb-4 font-bold text-blue-400';
-            }
-        }
-
-        // Update scores
-        if (data.scores) {
-            this.updateScoreboard(data.scores);
-        }
-
-        // Note: No llamamos updatePhase('results') aquí porque handleRoundEnded()
-        // ya manejó mostrar/ocultar las fases correctamente
-    }
+    // NOTA: updateResultsDisplay() eliminado
+    // Ahora usamos popup genérico con customizeRoundEndPopup() para mostrar resultados
 
     /**
      * Update scoreboard
@@ -486,31 +637,11 @@ export class MentirosoGameClient extends BaseGameClient {
     /**
      * Handle game finished
      */
-    handleGameFinished(data) {
-        // Show final scores
-        const finalScoresContainer = document.getElementById('final-scores');
-        if (finalScoresContainer && data.final_scores) {
-            const sortedScores = [...data.final_scores].sort((a, b) => b.score - a.score);
-
-            finalScoresContainer.innerHTML = sortedScores.map((player, index) => {
-                const isMe = player.player_id === this.playerId;
-                const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `${index + 1}.`;
-
-                return `
-                    <div class="flex justify-between items-center bg-gray-700 rounded-lg p-4 ${isMe ? 'ring-2 ring-yellow-400' : ''}">
-                        <div class="flex items-center gap-3">
-                            <span class="text-2xl">${medal}</span>
-                            <span class="text-xl font-semibold ${isMe ? 'text-yellow-400' : ''}">${player.name}</span>
-                            ${isMe ? '<span class="text-sm text-gray-400">(Tú)</span>' : ''}
-                        </div>
-                        <span class="text-2xl font-bold text-yellow-400">${player.score} pts</span>
-                    </div>
-                `;
-            }).join('');
-        }
-
-        // Show game finished modal
-        this.showElement('game-finished');
+    handleGameFinished(event) {
+        console.log('🏆 [Mentiroso] Game finished:', event);
+        
+        // Usar método genérico de BaseGameClient para mostrar popup
+        super.handleGameFinished(event);
     }
 
     /**
@@ -520,7 +651,8 @@ export class MentirosoGameClient extends BaseGameClient {
      * Retorna el elemento SIN proxy para que el countdown se muestre correctamente
      */
     getCountdownElement() {
-        return document.getElementById('timer');
+        // El countdown se mostrará en el popup de fin de ronda (genérico)
+        return document.getElementById('popup-timer');
     }
 
     /**
@@ -560,9 +692,16 @@ export class MentirosoGameClient extends BaseGameClient {
      * Restore game state after refresh (F5)
      */
     restoreGameState(gameState) {
+        // Store game state
+        this.gameState = gameState;
+        
         // Extract PlayerManager data to get role
         const playerSystem = gameState.player_system?.players || {};
         this.currentRole = playerSystem[this.playerId]?.round_role || null;
+        
+        // Update role indicator
+        this.updateRoleIndicator();
+        
         const currentStatement = gameState.current_statement;
         this.currentStatement = typeof currentStatement === 'object' ? currentStatement?.text : currentStatement;
 
@@ -626,47 +765,30 @@ export class MentirosoGameClient extends BaseGameClient {
             // Update phase UI
             this.updatePhase(subPhase);
 
-            // IMPORTANTE: Iniciar timer si hay PhaseManager activo
-            // Esto maneja el caso donde el jugador entra JUSTO cuando empieza la partida
-            // y se pierde el PhaseChangedEvent inicial
-            if (gameState.phase_manager && subPhase) {
-                console.log('🔄 [Mentiroso] Restoring timer for phase:', subPhase);
-
-                // Obtener timing del PhaseManager
-                const phaseManager = gameState.phase_manager;
-                const phases = phaseManager.phases || [];
-                const currentPhaseIndex = phaseManager.current_turn_index || 0;
-                const currentPhaseConfig = phases[currentPhaseIndex];
-
-                if (currentPhaseConfig && currentPhaseConfig.duration) {
-                    const timerElement = this.getTimerElement();
-
-                    if (timerElement) {
-                        // Calcular tiempo restante desde server_time
-                        const serverTime = Math.floor(Date.now() / 1000);
-                        const durationMs = currentPhaseConfig.duration * 1000;
-
-                        console.log('⏰ [Mentiroso] Starting restored timer:', {
-                            phase: currentPhaseConfig.name,
-                            duration: currentPhaseConfig.duration,
-                            durationMs
-                        });
-
-                        this.timing.startServerSyncedCountdown(
-                            serverTime,
-                            durationMs,
-                            timerElement,
-                            () => this.onTimerExpired(subPhase),
-                            `${subPhase}_timer`
-                        );
-                    }
-                }
-            }
+            // NOTA: NO restauramos el timer manualmente aquí.
+            // El backend's BaseGameEngine::onPlayerReconnected() ya reinicia la ronda
+            // y re-emite RoundStartedEvent → onRoundStarted() → PhaseChangedEvent con timer data.
+            // TimingModule.autoProcessEvent() manejará automáticamente el timer desde PhaseChangedEvent.
+            // Esto es consistente con Pictionary y otros juegos que usan PhaseChangedEvent.
 
         } else if (gameState.phase === 'finished') {
             // Game is finished
+            // Formatear evento para super.handleGameFinished()
+            const finalScores = gameState.final_scores || gameState.scores || {};
+            const scoresArray = Object.entries(finalScores).map(([playerId, score]) => {
+                const player = this.getPlayer(parseInt(playerId));
+                return {
+                    player_id: parseInt(playerId),
+                    name: player ? player.name : `Player ${playerId}`,
+                    score: score
+                };
+            });
+
             this.handleGameFinished({
-                final_scores: gameState.final_scores || gameState.scores
+                winner: gameState.winner || null,
+                ranking: scoresArray.sort((a, b) => b.score - a.score),
+                scores: finalScores,
+                game_state: gameState
             });
         }
     }

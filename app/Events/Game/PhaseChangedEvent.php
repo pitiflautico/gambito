@@ -56,10 +56,28 @@ class PhaseChangedEvent implements ShouldBroadcastNow
 
     public function broadcastWith(): array
     {
-        return [
+        $data = [
             'new_phase' => $this->newPhase,
             'previous_phase' => $this->previousPhase,
             'additional_data' => $this->additionalData,
         ];
+
+        // CRÍTICO: TimingModule usa timer_name || phase || timer_id para determinar el nombre del timer
+        // Necesitamos exponer 'phase' en el nivel raíz para que TimingModule use el nombre correcto de la fase
+        $data['phase'] = $this->newPhase;
+        
+        // Si additional_data contiene timer_id, server_time, duration, extraerlos al nivel raíz
+        // para que TimingModule los detecte automáticamente
+        if (isset($this->additionalData['timer_id'])) {
+            $data['timer_id'] = $this->additionalData['timer_id'];
+        }
+        if (isset($this->additionalData['server_time'])) {
+            $data['server_time'] = $this->additionalData['server_time'];
+        }
+        if (isset($this->additionalData['duration'])) {
+            $data['duration'] = $this->additionalData['duration'];
+        }
+
+        return $data;
     }
 }

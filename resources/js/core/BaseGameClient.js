@@ -126,6 +126,40 @@ export class BaseGameClient {
             handlers: handlers,
             timingModule: this.timing // Pasar TimingModule para procesamiento automático
         });
+
+        // Configurar canales privados por defecto (player.{playerId} y user.{userId})
+        this.setupPrivateChannels();
+    }
+
+    /**
+     * Configurar canales privados por defecto
+     * 
+     * Permite que los juegos reciban eventos privados sin configuración adicional.
+     * Los juegos pueden sobrescribir este método para agregar listeners específicos.
+     */
+    setupPrivateChannels() {
+        if (!window.Echo) {
+            console.warn('[BaseGameClient] window.Echo not available, skipping private channels');
+            return;
+        }
+
+        // Canal privado del player (para eventos como StatementRevealedEvent)
+        if (this.playerId) {
+            const playerChannel = window.Echo.private(`player.${this.playerId}`);
+            // Los juegos pueden sobrescribir este método para agregar listeners específicos
+            if (this.onPrivatePlayerChannelReady) {
+                this.onPrivatePlayerChannelReady(playerChannel);
+            }
+        }
+
+        // Canal privado del usuario (para eventos como WordRevealedEvent en Pictionary)
+        if (this.userId) {
+            const userChannel = window.Echo.private(`user.${this.userId}`);
+            // Los juegos pueden sobrescribir este método para agregar listeners específicos
+            if (this.onPrivateUserChannelReady) {
+                this.onPrivateUserChannelReady(userChannel);
+            }
+        }
     }
 
     // ========================================================================
