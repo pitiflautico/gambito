@@ -35,34 +35,40 @@ export class LobbyManager {
             return;
         }
 
-        // IMPORTANTE: GameStartedEvent se emite en PresenceChannel, no en canal público
-        // Usar el mismo Presence Channel que ya tenemos para escuchar eventos
-        if (!this.presenceManager) {
-            // Si aún no tenemos presenceManager, esperar un poco
-            setTimeout(() => this.initializeWebSocket(), 100);
-            return;
-        }
+        // IMPORTANTE: Hay DOS eventos diferentes:
+        // 1. App\Events\GameStartedEvent - Se emite desde GameMatch::start() en canal público
+        // 2. App\Events\Game\GameStartedEvent - Se emite desde PlayController en PresenceChannel
+        // 
+        // El evento del lobby es el primero, que se emite en canal público
+        // Pero también escuchamos en Presence Channel por si acaso
 
-        // Obtener el canal presence del PresenceChannelManager
-        const presenceChannel = this.presenceManager.channel;
-        
-        if (!presenceChannel) {
-            console.warn('[LobbyManager] Presence channel not available yet');
-            setTimeout(() => this.initializeWebSocket(), 100);
-            return;
-        }
-
-        // IMPORTANTE: NO escuchamos .player.joined/.player.left
-        // El Presence Channel ya maneja esto automáticamente
-        // Hacer location.reload() causa desconexiones
-
-        // Evento: Partida iniciada (se emite en PresenceChannel)
-        presenceChannel.listen('.game.started', (data) => {
-            console.log('🎮 [LobbyManager] Game started event received, redirecting...', data);
+        // Escuchar en canal público (para GameStartedEvent del lobby)
+        const publicChannel = window.Echo.channel(`room.${this.roomCode}`);
+        publicChannel.listen('.game.started', (data) => {
+            console.log('🎮 [LobbyManager] Game started event received (public channel), redirecting...', data);
             window.location.replace(`/rooms/${this.roomCode}`);
         });
 
-        console.log('[LobbyManager] WebSocket listeners initialized for game.started');
+        // También escuchar en Presence Channel (para Game\GameStartedEvent)
+        if (this.presenceManager && this.presenceManager.channel) {
+            const presenceChannel = this.presenceManager.channel;
+            presenceChannel.listen('.game.started', (data) => {
+                console.log('🎮 [LobbyManager] Game started event received (presence channel), redirecting...', data);
+                window.location.replace(`/rooms/${this.roomCode}`);
+            });
+        } else {
+            // Si aún no tenemos presenceManager, intentar más tarde
+            setTimeout(() => {
+                if (this.presenceManager && this.presenceManager.channel) {
+                    this.presenceManager.channel.listen('.game.started', (data) => {
+                        console.log('🎮 [LobbyManager] Game started event received (presence channel delayed), redirecting...', data);
+                        window.location.replace(`/rooms/${this.roomCode}`);
+                    });
+                }
+            }, 1000);
+        }
+
+        console.log('[LobbyManager] WebSocket listeners initialized for game.started (both channels)');
     }
 
     /**
