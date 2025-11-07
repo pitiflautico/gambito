@@ -22,16 +22,6 @@ const appKey = import.meta.env.VITE_REVERB_APP_KEY;
 // Path opcional para proxy Nginx (ej: '/app' cuando Nginx hace proxy en /app)
 const wsPath = import.meta.env.VITE_REVERB_PATH || undefined;
 
-// Debug: Verificar qué valores están llegando desde import.meta.env
-console.log('[Echo] Debug - Variables de entorno:', {
-    VITE_REVERB_APP_KEY: import.meta.env.VITE_REVERB_APP_KEY,
-    VITE_REVERB_HOST: import.meta.env.VITE_REVERB_HOST,
-    VITE_REVERB_PORT: import.meta.env.VITE_REVERB_PORT,
-    VITE_REVERB_SCHEME: import.meta.env.VITE_REVERB_SCHEME,
-    'Tipo de VITE_REVERB_APP_KEY': typeof import.meta.env.VITE_REVERB_APP_KEY,
-    'Valor raw': JSON.stringify(import.meta.env.VITE_REVERB_APP_KEY)
-});
-
 // Validar configuración crítica
 const errors = [];
 if (!wsHost) {
@@ -119,6 +109,13 @@ try {
         console.log('[Echo] URL de conexión:', socket.url);
     }
     
+    // Listeners para errores de canales (pueden ocurrir después de la conexión)
+    pusher.bind_global((eventName, data) => {
+        if (eventName === 'pusher:error' || eventName.includes('error')) {
+            console.error('[Echo] Error en evento global:', eventName, data);
+        }
+    });
+    
     // Capturar error inmediatamente si ya falló
     if (pusher.connection.state === 'failed' || pusher.connection.state === 'unavailable') {
         console.error('[Echo] ⚠️ Conexión ya falló al inicializar');
@@ -142,16 +139,28 @@ try {
     
     pusher.connection.bind('error', (error) => {
         console.error('[Echo] ❌ Error de conexión WebSocket:', error);
+        console.error('[Echo] Tipo de error:', error?.type);
         console.error('[Echo] Estado de conexión:', pusher.connection.state);
         console.error('[Echo] Último error:', pusher.connection.last_error);
         
         // Información adicional para debugging
-        if (error && error.error) {
-            console.error('[Echo] Detalles del error:', {
-                code: error.error.code,
-                message: error.error.message,
-                data: error.error.data
+        if (error) {
+            console.error('[Echo] Error completo:', {
+                type: error.type,
+                error: error.error,
+                data: error.data,
+                message: error.message,
+                code: error.code
             });
+            
+            // Si es PusherError, mostrar detalles
+            if (error.type === 'PusherError' && error.data) {
+                console.error('[Echo] Detalles PusherError:', {
+                    code: error.data.code,
+                    message: error.data.message,
+                    data: error.data
+                });
+            }
         }
         
         // Verificar socket
