@@ -398,6 +398,38 @@ function subscribeToPublicChannel() {
         }
     });
 
+    // También escuchar errores de suscripción
+    pusher.bind('pusher:subscription_error', (data) => {
+        if (data.channel === channelName) {
+            console.error('[Transition] ❌ Error al suscribirse al canal público:', data);
+        }
+    });
+
+    // Listener global para capturar TODOS los eventos (incluso antes de suscribirse)
+    // IMPORTANTE: bind_global captura eventos de TODOS los canales, incluso los no suscritos
+    pusher.bind_global((eventName, data) => {
+        // Log todos los eventos para debugging
+        if (eventName.includes('game.countdown') || eventName.includes('game.initialized')) {
+            console.log('[Transition] 🔍 Evento global detectado:', eventName, 'channel:', data?.channel, 'data:', data);
+        }
+        
+        // Capturar game.countdown desde cualquier canal
+        if ((eventName === '.game.countdown' || eventName === 'game.countdown' || 
+             eventName.includes('game.countdown')) && 
+            data && (data.room_code === roomCode || data.roomCode === roomCode)) {
+            console.log('[Transition] ⏰ Countdown event detected via global listener:', eventName, data);
+            handleCountdownEvent(data);
+        }
+        
+        // Capturar game.initialized también
+        if ((eventName === '.game.initialized' || eventName === 'game.initialized') &&
+            data && (data.room_code === roomCode || data.roomCode === roomCode)) {
+            console.log('[Transition] 🎮 Game initialized detected via global listener:', eventName, data);
+            showInitializing();
+            window.location.replace(`/rooms/${roomCode}`);
+        }
+    });
+
     console.log('[Transition] ✅ Canal público configurado y suscrito');
 }
 

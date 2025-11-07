@@ -34,6 +34,13 @@ class GameCountdownEvent implements ShouldBroadcast
         // Capturar timestamp del servidor con precisión de microsegundos
         $this->serverTimestamp = microtime(true);
         $this->durationMs = $countdownSeconds * 1000;
+        
+        \Log::info('⏰ [GameCountdownEvent] Evento creado', [
+            'room_code' => $room->code,
+            'room_id' => $room->id,
+            'channel' => 'room.' . $room->code,
+            'countdown_seconds' => $countdownSeconds,
+        ]);
     }
 
     /**
@@ -64,8 +71,14 @@ class GameCountdownEvent implements ShouldBroadcast
      */
     public function broadcastOn(): array
     {
-        return [
-            new Channel('room.' . $this->room->code),
-        ];
+        $channel = new Channel('room.' . $this->room->code);
+        
+        \Log::info('⏰ [GameCountdownEvent] Configurando canal de broadcast', [
+            'room_code' => $this->room->code,
+            'channel_name' => 'room.' . $this->room->code,
+            'event_name' => 'game.countdown',
+        ]);
+        
+        return [$channel];
     }
 }
