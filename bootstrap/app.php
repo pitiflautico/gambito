@@ -32,5 +32,18 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        // Manejar error 419 CSRF token expirado para invitados
+        $exceptions->render(function (\Illuminate\Session\TokenMismatchException $e, $request) {
+            // Si es la ruta de storeGuestName, redirigir con mensaje amigable
+            if ($request->routeIs('rooms.storeGuestName')) {
+                $code = $request->route('code');
+                $request->session()->regenerateToken();
+                return redirect()->route('rooms.guestName', ['code' => $code])
+                    ->withErrors(['error' => 'Tu sesión expiró. Por favor, intenta nuevamente ingresando tu nombre.'])
+                    ->withInput($request->only('player_name'));
+            }
+            
+            // Para otras rutas, usar el comportamiento por defecto
+            return null;
+        });
     })->create();
