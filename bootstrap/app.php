@@ -34,10 +34,17 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withExceptions(function (Exceptions $exceptions): void {
         // Manejar error 419 CSRF token expirado para invitados
         $exceptions->render(function (\Illuminate\Session\TokenMismatchException $e, $request) {
+            \Log::warning("CSRF token mismatch detected", [
+                'route' => $request->route()?->getName(),
+                'url' => $request->fullUrl(),
+                'method' => $request->method(),
+            ]);
+            
             // Si es la ruta de storeGuestName, redirigir con mensaje amigable
             if ($request->routeIs('rooms.storeGuestName')) {
                 $code = $request->route('code');
                 $request->session()->regenerateToken();
+                \Log::info("Regenerating CSRF token and redirecting guest-name", ['code' => $code]);
                 return redirect()->route('rooms.guestName', ['code' => $code])
                     ->withErrors(['error' => 'Tu sesión expiró. Por favor, intenta nuevamente ingresando tu nombre.'])
                     ->withInput($request->only('player_name'));

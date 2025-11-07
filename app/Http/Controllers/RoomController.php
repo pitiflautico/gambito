@@ -442,6 +442,10 @@ class RoomController extends Controller
             return redirect()->route('rooms.lobby', ['code' => $code]);
         }
 
+        // Regenerar token CSRF para asegurar que esté fresco
+        // Esto previene errores 419 cuando el usuario tarda en ingresar su nombre
+        request()->session()->regenerateToken();
+
         // Obtener nombre anterior si existe
         $previousName = null;
         if ($this->playerSessionService->hasGuestSession()) {
