@@ -140,6 +140,17 @@ try {
     
     pusher.connection.bind('disconnected', () => {
         console.warn('[Echo] ⚠️ Conexión WebSocket desconectada');
+        console.warn('[Echo] Razón de desconexión:', pusher.connection.last_error);
+        
+        // Si el error es 1006, es un cierre anormal
+        if (pusher.connection.last_error?.code === 1006) {
+            console.error('[Echo] ⚠️ Error 1006: WebSocket cerrado anormalmente');
+            console.error('[Echo] Posibles causas:');
+            console.error('[Echo] 1. Servidor Reverb cerró la conexión');
+            console.error('[Echo] 2. Problema con proxy Nginx (timeout, límite de conexiones)');
+            console.error('[Echo] 3. Problema de red o firewall');
+            console.error('[Echo] 4. Servidor Reverb sobrecargado');
+        }
     });
     
     pusher.connection.bind('error', (error) => {
