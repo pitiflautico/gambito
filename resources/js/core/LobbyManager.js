@@ -112,30 +112,27 @@ export class LobbyManager {
             }
         });
 
-        // También escuchar en Presence Channel (para Game\GameStartedEvent)
-        if (this.presenceManager && this.presenceManager.channel) {
-            const presenceChannel = this.presenceManager.channel;
-            console.log('[LobbyManager] Configurando listener en Presence Channel');
-            presenceChannel.listen('.game.started', (data) => {
-                handleGameStarted(data, 'presence channel');
-            });
-        } else {
-            // Si aún no tenemos presenceManager, intentar más tarde
-            console.log('[LobbyManager] ⏳ Presence Manager no disponible aún, intentando más tarde...');
-            setTimeout(() => {
-                if (this.presenceManager && this.presenceManager.channel) {
-                    console.log('[LobbyManager] Configurando listener en Presence Channel (delayed)');
-                    this.presenceManager.channel.listen('.game.started', (data) => {
-                        handleGameStarted(data, 'presence channel delayed');
-                    });
-                }
-            }, 1000);
-        }
+        // El listener del Presence Channel se configura en setupPresenceChannelListener()
+        // para evitar duplicación de código
 
-        // Listener global para debugging - capturar todos los eventos del canal
+        // Listener global para capturar eventos incluso si el canal no está suscrito aún
+        // Esto es especialmente importante en producción donde puede haber problemas de timing
         pusher.bind_global((eventName, data) => {
-            if (eventName.includes('game.started') || eventName.includes('room.')) {
+            // Capturar game.started desde cualquier canal (público o presence)
+            if (eventName === '.game.started' || eventName === 'game.started' || 
+                (eventName.includes('game.started') && data && data.room_code === this.roomCode)) {
                 console.log('[LobbyManager] 🔍 Evento global detectado:', eventName, data);
+                
+                // Verificar que es para esta sala
+                if (data && (data.room_code === this.roomCode || data.roomCode === this.roomCode)) {
+                    console.log('🎮 [LobbyManager] ✅ Game started event received (global listener), redirecting...', data);
+                    // Limpiar intervalo de verificación si existe
+                    if (this.gameStartCheckInterval) {
+                        clearInterval(this.gameStartCheckInterval);
+                        this.gameStartCheckInterval = null;
+                    }
+                    window.location.replace(`/rooms/${this.roomCode}`);
+                }
             }
         });
 
@@ -214,11 +211,50 @@ export class LobbyManager {
             onConnectionChange: (connected, total) => this.handleConnectionChange(connected, total),
         });
 
-        // Una vez que el Presence Channel esté inicializado, configurar listeners de eventos
-        // Esperar un poco para asegurar que el canal esté completamente conectado
-        setTimeout(() => {
-            this.initializeWebSocket();
-        }, 500);
+        // IMPORTANTE: Suscribirse al canal público INMEDIATAMENTE para no perder eventos
+        // No esperar a que el Presence Channel esté completamente conectado
+        // El evento game.started puede emitirse muy rápido después de hacer clic en "Iniciar Partida"
+        this.initializeWebSocket();
+        
+        // También configurar listener en el Presence Channel como respaldo
+        // El Presence Channel ya está conectado, así que podemos escuchar eventos ahí también
+        if (this.presenceManager && this.presenceManager.channel) {
+            this.setupPresenceChannelListener();
+        } else {
+            // Si aún no tenemos el channel, esperar un poco y reintentar
+            setTimeout(() => {
+                if (this.presenceManager && this.presenceManager.channel) {
+                    this.setupPresenceChannelListener();
+                }
+            }, 500);
+        }
+    }
+
+    /**
+     * Configurar listener en el Presence Channel como respaldo
+     */
+    setupPresenceChannelListener() {
+        if (!this.presenceManager || !this.presenceManager.channel) {
+            return;
+        }
+
+        console.log('[LobbyManager] Configurando listener en Presence Channel (backup)');
+        
+        // Función para manejar la redirección
+        const handleGameStarted = (data, source) => {
+            console.log(`🎮 [LobbyManager] ✅ Game started event received (${source}), redirecting...`, data);
+            // Limpiar intervalo de verificación si existe
+            if (this.gameStartCheckInterval) {
+                clearInterval(this.gameStartCheckInterval);
+                this.gameStartCheckInterval = null;
+            }
+            window.location.replace(`/rooms/${this.roomCode}`);
+        };
+
+        // Escuchar game.started en el Presence Channel también
+        this.presenceManager.channel.listen('.game.started', (data) => {
+            handleGameStarted(data, 'presence channel backup');
+        });
     }
 
     /**
