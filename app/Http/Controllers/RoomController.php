@@ -459,6 +459,21 @@ class RoomController extends Controller
      */
     public function storeGuestName(Request $request, string $code)
     {
+        // Manejar error de CSRF token expirado
+        if ($request->session()->token() !== $request->input('_token')) {
+            \Log::warning("CSRF token mismatch in storeGuestName", [
+                'code' => $code,
+                'session_token' => substr($request->session()->token(), 0, 10) . '...',
+                'request_token' => substr($request->input('_token'), 0, 10) . '...',
+            ]);
+            
+            // Regenerar token y redirigir con mensaje
+            $request->session()->regenerateToken();
+            return redirect()->route('rooms.guestName', ['code' => $code])
+                ->withErrors(['error' => 'Tu sesión expiró. Por favor, intenta nuevamente.'])
+                ->withInput();
+        }
+
         $validated = $request->validate([
             'player_name' => 'required|string|min:2|max:50',
         ]);
