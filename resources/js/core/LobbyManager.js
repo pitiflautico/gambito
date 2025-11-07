@@ -22,7 +22,7 @@ export class LobbyManager {
      * Inicializar Presence Channel y WebSocket
      */
     initialize() {
-        this.initializeWebSocket();
+        // Primero inicializar Presence Channel, luego WebSocket listeners
         this.initializePresenceChannel();
     }
 
@@ -35,16 +35,34 @@ export class LobbyManager {
             return;
         }
 
-        const channel = window.Echo.channel(`room.${this.roomCode}`);
+        // IMPORTANTE: GameStartedEvent se emite en PresenceChannel, no en canal público
+        // Usar el mismo Presence Channel que ya tenemos para escuchar eventos
+        if (!this.presenceManager) {
+            // Si aún no tenemos presenceManager, esperar un poco
+            setTimeout(() => this.initializeWebSocket(), 100);
+            return;
+        }
+
+        // Obtener el canal presence del PresenceChannelManager
+        const presenceChannel = this.presenceManager.channel;
+        
+        if (!presenceChannel) {
+            console.warn('[LobbyManager] Presence channel not available yet');
+            setTimeout(() => this.initializeWebSocket(), 100);
+            return;
+        }
 
         // IMPORTANTE: NO escuchamos .player.joined/.player.left
         // El Presence Channel ya maneja esto automáticamente
         // Hacer location.reload() causa desconexiones
 
-        // Evento: Partida iniciada
-        channel.listen('.game.started', (data) => {
+        // Evento: Partida iniciada (se emite en PresenceChannel)
+        presenceChannel.listen('.game.started', (data) => {
+            console.log('🎮 [LobbyManager] Game started event received, redirecting...', data);
             window.location.replace(`/rooms/${this.roomCode}`);
         });
+
+        console.log('[LobbyManager] WebSocket listeners initialized for game.started');
     }
 
     /**
@@ -63,6 +81,12 @@ export class LobbyManager {
             onAllConnected: (data) => this.handleAllConnected(data),
             onConnectionChange: (connected, total) => this.handleConnectionChange(connected, total),
         });
+
+        // Una vez que el Presence Channel esté inicializado, configurar listeners de eventos
+        // Esperar un poco para asegurar que el canal esté completamente conectado
+        setTimeout(() => {
+            this.initializeWebSocket();
+        }, 500);
     }
 
     /**
