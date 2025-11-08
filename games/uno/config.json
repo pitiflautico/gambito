@@ -1,0 +1,202 @@
+{
+  "id": "uno",
+  "name": "UNO",
+  "slug": "uno",
+  "description": "El clásico juego de cartas donde debes quedarte sin cartas diciendo ¡UNO!",
+  "version": "1.0.0",
+  "minPlayers": 2,
+  "maxPlayers": 10,
+  "estimatedDuration": "15-30 minutos",
+  "type": "cards",
+  "isPremium": false,
+  "tags": ["cards", "strategy", "classic", "social"],
+  "supports_teams": false,
+
+  "modules": {
+    "game_core": {
+      "enabled": true
+    },
+    "room_manager": {
+      "enabled": true
+    },
+    "guest_system": {
+      "enabled": true
+    },
+    "round_system": {
+      "enabled": true,
+      "total_rounds": 1,
+      "inter_round_delay": 5
+    },
+    "turn_system": {
+      "enabled": true,
+      "mode": "sequential",
+      "supports_reverse": true
+    },
+    "timer_system": {
+      "enabled": true
+    },
+    "scoring_system": {
+      "enabled": true
+    },
+    "player_system": {
+      "enabled": true
+    },
+    "roles_system": {
+      "enabled": true,
+      "roles": [
+        {
+          "name": "player",
+          "count": -1,
+          "description": "Jugador de UNO",
+          "rotate_on_round_start": false
+        }
+      ]
+    },
+    "player_state_system": {
+      "enabled": true
+    },
+    "real_time_sync": {
+      "enabled": true
+    }
+  },
+
+  "timing": {
+    "round_ended": {
+      "type": "countdown",
+      "message": "Nueva ronda en",
+      "delay": 5,
+      "auto_next": true
+    }
+  },
+
+  "event_config": {
+    "channel": "room.{roomCode}",
+    "events": {
+      "PhaseChangedEvent": {
+        "name": ".game.phase.changed",
+        "handler": "handlePhaseChanged"
+      },
+      "RoundEndedEvent": {
+        "name": ".game.round.ended",
+        "handler": "handleRoundEnded"
+      },
+      "CardPlayedEvent": {
+        "name": ".uno.card.played",
+        "handler": "handleCardPlayed"
+      },
+      "CardDrawnEvent": {
+        "name": ".uno.card.drawn",
+        "handler": "handleCardDrawn"
+      },
+      "TurnChangedEvent": {
+        "name": ".uno.turn.changed",
+        "handler": "handleTurnChanged"
+      },
+      "UnoCalledEvent": {
+        "name": ".uno.uno.called",
+        "handler": "handleUnoCalled"
+      },
+      "PlayerWonEvent": {
+        "name": ".uno.player.won",
+        "handler": "handlePlayerWon"
+      },
+      "PhaseStartedEvent": {
+        "name": ".game.phase.started",
+        "handler": "handlePhaseStarted"
+      },
+      "PhaseEndedEvent": {
+        "name": ".game.phase.ended",
+        "handler": "handlePhaseEnded"
+      },
+      "PlayerLockedEvent": {
+        "name": ".game.player.locked",
+        "handler": "handlePlayerLocked"
+      },
+      "PlayersUnlockedEvent": {
+        "name": ".players.unlocked",
+        "handler": "handlePlayersUnlocked"
+      }
+    }
+  },
+
+  "customizableSettings": {
+    "rounds": {
+      "type": "number",
+      "default": 3,
+      "min": 1,
+      "max": 10,
+      "step": 1,
+      "label": "Número de rondas",
+      "description": "Cantidad de rondas a jugar"
+    },
+    "turn_duration": {
+      "type": "number",
+      "default": 30,
+      "min": 15,
+      "max": 120,
+      "step": 5,
+      "label": "Segundos por turno",
+      "description": "Tiempo límite para jugar una carta"
+    },
+    "starting_cards": {
+      "type": "number",
+      "default": 7,
+      "min": 5,
+      "max": 10,
+      "step": 1,
+      "label": "Cartas iniciales",
+      "description": "Número de cartas con las que empieza cada jugador"
+    },
+    "uno_penalty": {
+      "type": "number",
+      "default": 2,
+      "min": 1,
+      "max": 4,
+      "step": 1,
+      "label": "Penalización por no decir UNO",
+      "description": "Cartas que debe robar quien olvida decir UNO"
+    },
+    "allow_stacking": {
+      "type": "checkbox",
+      "default": true,
+      "label": "Permitir acumular +2 y +4",
+      "description": "Los jugadores pueden defenderse con otra carta +2 o +4"
+    }
+  },
+
+  "scoring": {
+    "card_values": {
+      "0": 0,
+      "1": 1,
+      "2": 2,
+      "3": 3,
+      "4": 4,
+      "5": 5,
+      "6": 6,
+      "7": 7,
+      "8": 8,
+      "9": 9,
+      "skip": 20,
+      "reverse": 20,
+      "draw2": 20,
+      "wild": 50,
+      "wild_draw4": 50
+    }
+  },
+
+  "cards": {
+    "colors": ["red", "blue", "green", "yellow"],
+    "numbers": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+    "special_cards": ["skip", "reverse", "draw2"],
+    "wild_cards": ["wild", "wild_draw4"],
+    "deck_composition": {
+      "0": 1,
+      "1-9": 2,
+      "skip": 2,
+      "reverse": 2,
+      "draw2": 2,
+      "wild": 4,
+      "wild_draw4": 4
+    }
+  }
+}

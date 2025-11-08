@@ -1,0 +1,57 @@
+{
+  "slug": "uno",
+  "requires": {
+    "modules": {
+      "event_manager": "^1.0",
+      "round_system": "^1.0",
+      "turn_system": "^1.0",
+      "scoring_system": "^1.0",
+      "timer_system": "^1.0",
+      "player_state_system": "^1.0"
+    }
+  },
+  "provides": {
+    "events": [
+      "CardPlayedEvent",
+      "CardDrawnEvent",
+      "TurnChangedEvent",
+      "UnoCalledEvent",
+      "PlayerWonEvent",
+      "RoundEndedEvent",
+      "GameFinishedEvent"
+    ]
+  },
+  "event_config": {
+    "channel": "room.{roomCode}",
+    "events": {
+      "CardPlayedEvent": {
+        "name": ".uno.card.played",
+        "handler": "handleCardPlayed"
+      },
+      "CardDrawnEvent": {
+        "name": ".uno.card.drawn",
+        "handler": "handleCardDrawn"
+      },
+      "TurnChangedEvent": {
+        "name": ".uno.turn.changed",
+        "handler": "handleTurnChanged"
+      },
+      "UnoCalledEvent": {
+        "name": ".uno.uno.called",
+        "handler": "handleUnoCalled"
+      },
+      "PlayerWonEvent": {
+        "name": ".uno.player.won",
+        "handler": "handlePlayerWon"
+      },
+      "RoundEndedEvent": {
+        "name": ".game.round.ended",
+        "handler": "handleRoundEnded"
+      },
+      "GameFinishedEvent": {
+        "name": ".uno.game.finished",
+        "handler": "handleGameFinished"
+      }
+    }
+  }
+}
