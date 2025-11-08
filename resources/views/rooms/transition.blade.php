@@ -207,11 +207,11 @@ function checkAllConnected() {
  * Función para manejar el evento de countdown
  */
 function handleCountdownEvent(data) {
-    console.log('⏰ [Transition] Countdown event received:', data);
+        console.log('⏰ [Transition] Countdown event received:', data);
 
-    // Asegurar que TimingModule está inicializado
+        // Asegurar que TimingModule está inicializado
     // Si no está listo, inicializarlo ahora mismo
-    if (!timing) {
+        if (!timing) {
         if (typeof window.TimingModule !== 'undefined') {
             timing = new window.TimingModule();
             console.log('✅ [Transition] TimingModule initialized on-demand');
@@ -250,48 +250,48 @@ function handleCountdownEvent(data) {
             }
             return;
         }
-    }
+        }
 
-    // Ocultar estado de espera
+        // Ocultar estado de espera
     const waitingState = document.getElementById('waiting-state');
     const countdownState = document.getElementById('countdown-state');
     
     if (waitingState) waitingState.classList.add('hidden');
     if (countdownState) countdownState.classList.remove('hidden');
 
-    const countdownElement = document.getElementById('countdown-number');
-    const messageElement = document.getElementById('countdown-message');
+        const countdownElement = document.getElementById('countdown-number');
+        const messageElement = document.getElementById('countdown-message');
 
     if (!countdownElement || !messageElement) {
         console.error('❌ [Transition] Countdown elements not found');
         return;
     }
 
-    // Usar TimingModule con countdown sincronizado por timestamps
-    // Este es el método que usan Fortnite, CS:GO, etc.
-    timing.handleCountdownEvent(
-        data,
-        countdownElement,
-        () => {
-            // Callback cuando termina el countdown
-            messageElement.textContent = '¡Comenzando!';
-            console.log('⏰ [Transition] Countdown finished, initializing engine...');
+        // Usar TimingModule con countdown sincronizado por timestamps
+        // Este es el método que usan Fortnite, CS:GO, etc.
+        timing.handleCountdownEvent(
+            data,
+            countdownElement,
+            () => {
+                // Callback cuando termina el countdown
+                messageElement.textContent = '¡Comenzando!';
+                console.log('⏰ [Transition] Countdown finished, initializing engine...');
 
-            // Llamar al endpoint para inicializar el engine
+                // Llamar al endpoint para inicializar el engine
             console.log('⏰ [Transition] Llamando a /api/rooms/' + roomCode + '/initialize-engine');
-            fetch(`/api/rooms/${roomCode}/initialize-engine`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': '{{ csrf_token() }}'
-                }
-            })
+                fetch(`/api/rooms/${roomCode}/initialize-engine`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                    }
+                })
             .then(response => {
                 console.log('📡 [Transition] Response status:', response.status);
                 return response.json();
             })
-            .then(data => {
-                console.log('✅ [Transition] Engine initialization requested', data);
+                .then(data => {
+                    console.log('✅ [Transition] Engine initialization requested', data);
                 if (data.already_processing) {
                     console.log('⏸️ [Transition] Engine ya está siendo inicializado por otro cliente, esperando evento game.initialized...');
                     // Iniciar polling como fallback si el evento no llega
@@ -300,15 +300,15 @@ function handleCountdownEvent(data) {
                     // Si fue exitoso, también iniciar polling por si el evento no llega
                     startGameInitializedPolling();
                 }
-            })
-            .catch(error => {
-                console.error('❌ [Transition] Error initializing engine:', error);
+                })
+                .catch(error => {
+                    console.error('❌ [Transition] Error initializing engine:', error);
                 // Iniciar polling como fallback
                 startGameInitializedPolling();
-            });
-        },
-        'game-start'
-    );
+                });
+            },
+            'game-start'
+        );
 }
 
 /**
@@ -353,11 +353,11 @@ function setupChannelListeners() {
         
         presenceChannelInstance.listen('.game.initialized', (data) => {
             console.log('🎮 [Transition] Game initialized via Presence Channel (backup):', data);
-            showInitializing();
+        showInitializing();
             window.location.replace(`/rooms/${roomCode}`);
-        });
+    });
     }
-    
+
     console.log('✅ [Transition] Additional listeners configured');
 }
 
@@ -498,7 +498,7 @@ function subscribeToPublicChannel() {
             data && (data.room_code === roomCode || data.roomCode === roomCode)) {
             console.log('[Transition] ⏰ Countdown event detected via global listener:', eventName, data);
             handleCountdownEvent(data);
-        }
+}
         
         // Capturar game.initialized también
         if ((eventName === '.game.initialized' || eventName === 'game.initialized') &&

@@ -194,7 +194,13 @@ class PlayController extends Controller
 
             // 3. Usar Cache para trackear jugadores con DOM cargado (transparente: array local o Redis en prod)
             $cacheKey = "match:{$match->id}:dom_ready";
-            $cache = \Illuminate\Support\Facades\Cache::store(); // Usa 'array' en local, 'redis' en prod
+
+            $preferredStore = config('cache.dom_ready_store', config('cache.default'));
+            if ($preferredStore === 'array') {
+                $preferredStore = 'file';
+            }
+
+            $cache = \Illuminate\Support\Facades\Cache::store($preferredStore);
 
             // Obtener set actual de jugadores listos (o array vacío)
             $playersReadySet = $cache->get($cacheKey, []);

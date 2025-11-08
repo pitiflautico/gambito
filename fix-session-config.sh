@@ -28,3 +28,4 @@ echo ""
 echo "✅ Configuración de sesiones verificada"
 echo "💡 Reinicia PHP-FPM si es necesario: sudo systemctl restart php8.2-fpm"
 
+

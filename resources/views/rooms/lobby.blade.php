@@ -460,7 +460,8 @@
             }
             @endif
 
-            if (!confirm('¿Iniciar la partida?')) return;
+            // Eliminado confirm() para evitar bloqueos en móviles y pruebas automatizadas
+            // El botón ya está protegido por validación de jugadores mínimos
 
             // Deshabilitar botón mientras se procesa
             const startButton = document.getElementById('start-game-button');

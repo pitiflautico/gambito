@@ -131,7 +131,7 @@ export class LobbyManager {
                         clearInterval(this.gameStartCheckInterval);
                         this.gameStartCheckInterval = null;
                     }
-                    window.location.replace(`/rooms/${this.roomCode}`);
+                window.location.replace(`/rooms/${this.roomCode}`);
                 }
             }
         });
@@ -140,7 +140,7 @@ export class LobbyManager {
         
         // Marcar el canal como suscrito después de un breve delay (fallback)
         // En producción, a veces la suscripción puede tardar más
-        setTimeout(() => {
+            setTimeout(() => {
             if (!this.publicChannelSubscribed) {
                 console.log('[LobbyManager] ⚠️ Canal público no confirmó suscripción, asumiendo suscrito después de timeout');
                 this.publicChannelSubscribed = true;
@@ -222,11 +222,11 @@ export class LobbyManager {
             this.setupPresenceChannelListener();
         } else {
             // Si aún no tenemos el channel, esperar un poco y reintentar
-            setTimeout(() => {
+        setTimeout(() => {
                 if (this.presenceManager && this.presenceManager.channel) {
                     this.setupPresenceChannelListener();
                 }
-            }, 500);
+        }, 500);
         }
     }
 

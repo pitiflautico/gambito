@@ -42,16 +42,26 @@ export default class PresenceMonitor {
                 return;
             }
 
+            console.log(`[PresenceMonitor] Connecting to presence channel: room.${this.roomCode}`);
             this.presenceChannel = window.Echo.join(`room.${this.roomCode}`);
 
             // Usuarios actualmente conectados
             // Este callback se ejecuta cuando el channel está COMPLETAMENTE conectado
             this.presenceChannel.here((users) => {
                 this.connectedUsers = users;
-                // Silencioso - channel conectado
-
+                console.log(`[PresenceMonitor] ✅ Presence channel connected, ${users.length} users here`);
                 // Resolver la promesa - el channel está listo
                 resolve();
+            });
+
+            // Manejar errores de conexión
+            this.presenceChannel.error((error) => {
+                console.error('[PresenceMonitor] ❌ Error connecting to presence channel:', error);
+                // Resolver de todas formas después de un delay para no bloquear
+                setTimeout(() => {
+                    console.warn('[PresenceMonitor] Resolving promise despite error to avoid blocking');
+                    resolve();
+                }, 2000);
             });
 
             // Usuario se unió
@@ -176,3 +186,5 @@ export default class PresenceMonitor {
 
 // Exportar para uso global
 window.PresenceMonitor = PresenceMonitor;
+
+

@@ -48,8 +48,17 @@ export class BaseGameClient {
 
         // IMPORTANTE: Esperar a que el presence channel esté conectado ANTES de emitir DomLoaded
         // Esto garantiza que el cliente recibirá todos los eventos del juego
-        this.presenceMonitor.start().then(() => {
-            // Channel conectado - ahora sí emitir DomLoaded
+        // Agregar timeout de seguridad: si el channel no se conecta en 5 segundos, emitir DomLoaded de todas formas
+        Promise.race([
+            this.presenceMonitor.start(),
+            new Promise(resolve => setTimeout(resolve, 5000))
+        ]).then(() => {
+            // Channel conectado (o timeout) - ahora sí emitir DomLoaded
+            console.log('[BaseGameClient] Emitting DomLoaded after presence channel ready (or timeout)');
+            this.emitDomLoaded();
+        }).catch((error) => {
+            console.error('[BaseGameClient] Error waiting for presence channel:', error);
+            // Emitir DomLoaded de todas formas para no bloquear el juego
             this.emitDomLoaded();
         });
 
@@ -70,6 +79,7 @@ export class BaseGameClient {
      */
     async emitDomLoaded() {
         try {
+            console.log(`[BaseGameClient] 📱 Emitting DomLoaded for room ${this.roomCode}`);
             const response = await fetch(`/api/rooms/${this.roomCode}/dom-loaded`, {
                 method: 'POST',
                 headers: {
@@ -83,8 +93,9 @@ export class BaseGameClient {
 
             const result = await response.json();
 
-            // Silencioso - no mostrar logs para evitar ruido en consola
-            if (!result.success) {
+            if (result.success) {
+                console.log(`[BaseGameClient] ✅ DomLoaded registered: ${result.players_ready}/${result.total_players} players ready`);
+            } else {
                 console.error('❌ [DomLoaded] Error:', result);
             }
         } catch (error) {
