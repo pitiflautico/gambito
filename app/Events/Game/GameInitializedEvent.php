@@ -22,7 +22,15 @@ class GameInitializedEvent implements ShouldBroadcast
     public function __construct(
         public GameMatch $match,
         public array $initialState = []
-    ) {}
+    ) {
+        \Log::info('🎮 [GameInitializedEvent] Evento creado', [
+            'room_code' => $match->room->code,
+            'room_id' => $match->room->id,
+            'match_id' => $match->id,
+            'channel' => 'room.' . $match->room->code,
+            'phase' => $initialState['phase'] ?? 'unknown',
+        ]);
+    }
 
     /**
      * Nombre del evento en el cliente
@@ -51,8 +59,12 @@ class GameInitializedEvent implements ShouldBroadcast
      */
     public function broadcastOn(): array
     {
-        return [
-            new Channel('room.' . $this->match->room->code),
-        ];
+        $channel = new Channel('room.' . $this->match->room->code);
+        \Log::info('🎮 [GameInitializedEvent] Configurando canal de broadcast', [
+            'room_code' => $this->match->room->code,
+            'channel_name' => 'room.' . $this->match->room->code,
+            'event_name' => 'game.initialized',
+        ]);
+        return [$channel];
     }
 }

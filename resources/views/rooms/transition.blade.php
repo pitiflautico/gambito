@@ -278,6 +278,7 @@ function handleCountdownEvent(data) {
             console.log('⏰ [Transition] Countdown finished, initializing engine...');
 
             // Llamar al endpoint para inicializar el engine
+            console.log('⏰ [Transition] Llamando a /api/rooms/' + roomCode + '/initialize-engine');
             fetch(`/api/rooms/${roomCode}/initialize-engine`, {
                 method: 'POST',
                 headers: {
@@ -285,9 +286,15 @@ function handleCountdownEvent(data) {
                     'X-CSRF-TOKEN': '{{ csrf_token() }}'
                 }
             })
-            .then(response => response.json())
+            .then(response => {
+                console.log('📡 [Transition] Response status:', response.status);
+                return response.json();
+            })
             .then(data => {
                 console.log('✅ [Transition] Engine initialization requested', data);
+                if (data.already_processing) {
+                    console.log('⏸️ [Transition] Engine ya está siendo inicializado por otro cliente, esperando evento game.initialized...');
+                }
             })
             .catch(error => {
                 console.error('❌ [Transition] Error initializing engine:', error);
@@ -393,8 +400,12 @@ function subscribeToPublicChannel() {
 
     publicChannel.listen('.game.initialized', (data) => {
         console.log('🎮 [Transition] Game initialized (public channel):', data);
+        console.log('🎮 [Transition] Redirigiendo a /rooms/' + roomCode);
         showInitializing();
-        window.location.replace(`/rooms/${roomCode}`);
+        // Usar setTimeout para asegurar que el log se vea antes de redirigir
+        setTimeout(() => {
+            window.location.replace(`/rooms/${roomCode}`);
+        }, 100);
     });
 
     // ⭐ Confirmar suscripción y marcar el canal como listo
@@ -436,8 +447,12 @@ function subscribeToPublicChannel() {
         if ((eventName === '.game.initialized' || eventName === 'game.initialized') &&
             data && (data.room_code === roomCode || data.roomCode === roomCode)) {
             console.log('[Transition] 🎮 Game initialized detected via global listener:', eventName, data);
+            console.log('[Transition] 🎮 Redirigiendo a /rooms/' + roomCode);
             showInitializing();
-            window.location.replace(`/rooms/${roomCode}`);
+            // Usar setTimeout para asegurar que el log se vea antes de redirigir
+            setTimeout(() => {
+                window.location.replace(`/rooms/${roomCode}`);
+            }, 100);
         }
     });
 
