@@ -294,10 +294,17 @@ function handleCountdownEvent(data) {
                 console.log('✅ [Transition] Engine initialization requested', data);
                 if (data.already_processing) {
                     console.log('⏸️ [Transition] Engine ya está siendo inicializado por otro cliente, esperando evento game.initialized...');
+                    // Iniciar polling como fallback si el evento no llega
+                    startGameInitializedPolling();
+                } else if (data.success) {
+                    // Si fue exitoso, también iniciar polling por si el evento no llega
+                    startGameInitializedPolling();
                 }
             })
             .catch(error => {
                 console.error('❌ [Transition] Error initializing engine:', error);
+                // Iniciar polling como fallback
+                startGameInitializedPolling();
             });
         },
         'game-start'
@@ -358,8 +365,58 @@ function setupChannelListeners() {
  * Mostrar estado de inicialización
  */
 function showInitializing() {
-    document.getElementById('countdown-state').classList.add('hidden');
-    document.getElementById('initializing-state').classList.remove('hidden');
+    const countdownState = document.getElementById('countdown-state');
+    const initializingState = document.getElementById('initializing-state');
+    if (countdownState) countdownState.classList.add('hidden');
+    if (initializingState) initializingState.classList.remove('hidden');
+}
+
+/**
+ * Polling como fallback si el evento game.initialized no llega
+ */
+let gameInitializedPollingInterval = null;
+
+function startGameInitializedPolling() {
+    if (gameInitializedPollingInterval) {
+        return; // Ya está corriendo
+    }
+    
+    console.log('🔄 [Transition] Iniciando polling como fallback para game.initialized...');
+    let attempts = 0;
+    const maxAttempts = 20; // 20 segundos
+    
+    gameInitializedPollingInterval = setInterval(() => {
+        attempts++;
+        
+        fetch(`/api/rooms/${roomCode}/state`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success && data.status === 'playing') {
+                    console.log('✅ [Transition] Sala en estado playing detectado por polling, redirigiendo...');
+                    clearInterval(gameInitializedPollingInterval);
+                    gameInitializedPollingInterval = null;
+                    showInitializing();
+                    setTimeout(() => {
+                        window.location.replace(`/rooms/${roomCode}`);
+                    }, 100);
+                } else if (attempts >= maxAttempts) {
+                    console.log('⏰ [Transition] Polling timeout, redirigiendo de todas formas...');
+                    clearInterval(gameInitializedPollingInterval);
+                    gameInitializedPollingInterval = null;
+                    showInitializing();
+                    setTimeout(() => {
+                        window.location.replace(`/rooms/${roomCode}`);
+                    }, 100);
+                }
+            })
+            .catch(error => {
+                console.error('❌ [Transition] Error en polling:', error);
+                if (attempts >= maxAttempts) {
+                    clearInterval(gameInitializedPollingInterval);
+                    gameInitializedPollingInterval = null;
+                }
+            });
+    }, 1000);
 }
 
 /**
