@@ -745,10 +745,26 @@ class RoomController extends Controller
         }
 
         try {
+            \Log::info("⏰ [RoomController] All players ready - Preparing countdown", [
+                'room_code' => $code,
+                'players' => $room->match->players()->count(),
+            ]);
+
+            // IMPORTANTE: Delay de 1.5 segundos antes de emitir el evento
+            // Esto da tiempo a TODOS los clientes a suscribirse completamente
+            // al canal público antes de que se emita el evento game.countdown
+            //
+            // ¿Por qué? Race condition:
+            // - Dispositivo A detecta "2/2 jugadores" y llama a /ready
+            // - Servidor emite game.countdown INMEDIATAMENTE
+            // - Dispositivo B puede que AÚN NO esté suscrito al canal público
+            // - Resultado: A recibe el evento, B NO
+            sleep(1);
+
             // 1. Emitir evento de countdown
             event(new \App\Events\Game\GameCountdownEvent($room, 3));
 
-            \Log::info("✅ [RoomController] All players ready - Countdown started", [
+            \Log::info("✅ [RoomController] Countdown started after delay", [
                 'room_code' => $code,
                 'players' => $room->match->players()->count(),
             ]);

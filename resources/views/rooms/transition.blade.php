@@ -73,6 +73,7 @@ let connectedUsers = [];
 let allConnectedNotified = false;
 let timing = null;
 let presenceChannelInstance = null; // Guardar referencia del Presence Channel
+let publicChannelReady = false; // ⭐ Bandera para saber si el canal público está completamente suscrito
 
 console.log('🎮 [Transition] Initializing...', {
     roomCode,
@@ -172,10 +173,13 @@ function checkAllConnected() {
     const connected = connectedUsers.length;
     const total = totalPlayers;
 
-    console.log(`📊 [Transition] Players status: ${connected}/${total}`);
+    console.log(`📊 [Transition] Players status: ${connected}/${total}, Public channel ready: ${publicChannelReady}`);
 
-    if (connected >= total && !allConnectedNotified) {
-        console.log('✅ [Transition] All players connected! Notifying server...');
+    // ⭐ IMPORTANTE: Solo notificar al servidor si:
+    // 1. Todos los jugadores están conectados (Presence Channel)
+    // 2. El canal público está completamente suscrito (para recibir game.countdown)
+    if (connected >= total && publicChannelReady && !allConnectedNotified) {
+        console.log('✅ [Transition] All players connected AND public channel ready! Notifying server...');
         allConnectedNotified = true;
 
         // Notificar al servidor que todos están listos
@@ -194,6 +198,8 @@ function checkAllConnected() {
             console.error('❌ [Transition] Error notifying server:', error);
             allConnectedNotified = false; // Permitir reintentar
         });
+    } else if (connected >= total && !publicChannelReady) {
+        console.log('⏳ [Transition] All players connected, but waiting for public channel subscription...');
     }
 }
 
@@ -375,10 +381,10 @@ function subscribeToPublicChannel() {
 
     const channelName = `room.${roomCode}`;
     console.log('[Transition] 🔌 Suscribiéndose al canal público INMEDIATAMENTE:', channelName);
-    
+
     // Suscribirse al canal público ANTES de cualquier otra cosa
     const publicChannel = window.Echo.channel(channelName);
-    
+
     // Configurar listeners inmediatamente
     publicChannel.listen('.game.countdown', (data) => {
         console.log('⏰ [Transition] Countdown event received (public channel):', data);
@@ -391,17 +397,22 @@ function subscribeToPublicChannel() {
         window.location.replace(`/rooms/${roomCode}`);
     });
 
-    // Confirmar suscripción
-    pusher.bind('pusher:subscription_succeeded', (data) => {
-        if (data.channel === channelName) {
-            console.log('[Transition] ✅ Canal público suscrito correctamente:', channelName);
-        }
+    // ⭐ Confirmar suscripción y marcar el canal como listo
+    publicChannel.on('pusher:subscription_succeeded', () => {
+        console.log('[Transition] ✅ Canal público suscrito correctamente:', channelName);
+        publicChannelReady = true;
+
+        // Verificar si todos los jugadores ya están conectados
+        // (puede que el Presence Channel detectó 2/2 mientras esperábamos la suscripción)
+        checkAllConnected();
     });
 
     // También escuchar errores de suscripción
     pusher.bind('pusher:subscription_error', (data) => {
         if (data.channel === channelName) {
             console.error('[Transition] ❌ Error al suscribirse al canal público:', data);
+            // Reintentar suscripción después de 1 segundo
+            setTimeout(subscribeToPublicChannel, 1000);
         }
     });
 
