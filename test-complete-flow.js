@@ -195,6 +195,24 @@ await wait(2000);
     roomCode = roomCodeMatch ? roomCodeMatch[1] : null;
     
     if (!roomCode) {
+        roomCode = await page.evaluate(() => {
+            const lobbyLink = Array.from(document.querySelectorAll('a'))
+                .map(a => a.getAttribute('href') || '')
+                .find(href => href.includes('/rooms/') && href.includes('/lobby'));
+            if (lobbyLink) {
+                const linkMatch = lobbyLink.match(/\/rooms\/([A-Z0-9]+)/);
+                if (linkMatch) {
+                    return linkMatch[1];
+                }
+            }
+
+            const text = document.body.innerText || '';
+            const textMatch = text.match(/(Sala|Código de la Sala)\s*[: ]\s*([A-Z0-9]{6})/);
+            return textMatch ? textMatch[2] : null;
+        });
+    }
+
+    if (!roomCode) {
         const bodyText = await page.evaluate(() => document.body.innerText.slice(0, 500));
         console.log('   ⚠️  No se pudo detectar room code. Fragmento de la página:', bodyText);
         throw new Error('No se pudo obtener el código de la sala');
