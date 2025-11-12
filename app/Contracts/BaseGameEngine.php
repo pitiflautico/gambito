@@ -13,6 +13,7 @@ use App\Services\Modules\ScoringSystem\ScoreCalculatorInterface;
 use App\Services\Modules\ScoringSystem\ScoreManager;
 use App\Services\Modules\TimerSystem\TimerService;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 /**
  * Clase base abstracta para todos los Engines de juegos.
@@ -69,6 +70,11 @@ abstract class BaseGameEngine implements GameEngineInterface
      * @var array|null
      */
     protected ?array $gameStateSnapshot = null;
+
+    /**
+     * Cache local de la ruta base del juego.
+     */
+    protected ?string $gameBasePath = null;
 
     // ========================================================================
     // MÉTODOS ABSTRACTOS: Cada juego debe implementar su lógica específica
@@ -2222,16 +2228,35 @@ abstract class BaseGameEngine implements GameEngineInterface
     protected function getGameConfig(): array
     {
         static $configs = [];
-        $slug = $this->getGameSlug();
+        $cacheKey = static::class;
 
-        if (!isset($configs[$slug])) {
-            $configPath = base_path("games/{$slug}/config.json");
-            $configs[$slug] = file_exists($configPath)
-                ? json_decode(file_get_contents($configPath), true)
-                : [];
+        if (!isset($configs[$cacheKey])) {
+            $paths = [];
+
+            // 1) Ruta real del engine (case-sensitive friendly)
+            $paths[] = $this->gameResourcePath('config.json');
+
+            // 2) Rutas legacy basadas en slug (para compatibilidad hacia atrás)
+            $slug = $this->getGameSlug();
+            $paths[] = base_path("games/{$slug}/config.json");
+
+            $studly = Str::studly($slug);
+            if ($studly !== $slug) {
+                $paths[] = base_path("games/{$studly}/config.json");
+            }
+
+            $config = [];
+            foreach ($paths as $path) {
+                if (is_file($path)) {
+                    $config = json_decode(file_get_contents($path), true) ?? [];
+                    break;
+                }
+            }
+
+            $configs[$cacheKey] = $config;
         }
 
-        return $configs[$slug];
+        return $configs[$cacheKey];
     }
 
     /**
@@ -2344,6 +2369,26 @@ abstract class BaseGameEngine implements GameEngineInterface
     {
         $className = class_basename($this);
         return strtolower(str_replace('Engine', '', $className));
+    }
+
+    /**
+     * Ruta absoluta de la carpeta del juego (case-sensitive).
+     */
+    protected function getGameBasePath(): string
+    {
+        if ($this->gameBasePath === null) {
+            $this->gameBasePath = dirname((new \ReflectionClass($this))->getFileName());
+        }
+
+        return $this->gameBasePath;
+    }
+
+    /**
+     * Obtener ruta absoluta a un recurso dentro del juego.
+     */
+    protected function gameResourcePath(string $relativePath): string
+    {
+        return $this->getGameBasePath() . '/' . ltrim($relativePath, '/');
     }
 
     // ========================================================================

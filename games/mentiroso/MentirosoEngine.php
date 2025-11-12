@@ -29,7 +29,7 @@ class MentirosoEngine extends BaseGameEngine
         Log::info("[Mentiroso] Initializing - FASE 1", ['match_id' => $match->id]);
 
         // Cargar frases desde statements.json
-        $statementsPath = base_path('games/mentiroso/statements.json');
+        $statementsPath = $this->gameResourcePath('statements.json');
         $statementsData = json_decode(file_get_contents($statementsPath), true);
 
         // Cargar config.json para obtener configuraciones

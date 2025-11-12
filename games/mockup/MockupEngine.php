@@ -477,7 +477,7 @@ class MockupEngine extends BaseGameEngine
      */
     protected function getGameConfig(): array
     {
-        $configPath = base_path('games/mockup/config.json');
+        $configPath = $this->gameResourcePath('config.json');
 
         if (!file_exists($configPath)) {
             return $this->getDefaultConfig();

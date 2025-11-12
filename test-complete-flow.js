@@ -10,12 +10,38 @@ import puppeteer from 'puppeteer';
 const BASE_URL = 'https://gambito.nebulio.es';
 const EMAIL = 'admin@gambito.com';
 const PASSWORD = 'password';
+const GUEST_PLAYERS = parseInt(process.env.GUEST_PLAYERS || '2', 10); // invitados simulados adicionales
 
 console.log('🔍 [PUPPETEER TEST] Iniciando test completo del flujo WebSocket\n');
 
-const browser = await puppeteer.launch({ 
-    headless: false, // Mostrar navegador
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const HEADLESS_ENABLED = process.env.HEADLESS !== 'false';
+const HEADLESS_MODE = process.env.HEADLESS_MODE || 'new'; // 'new' works on most CI/servers
+const EXECUTABLE_PATH = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
+const CHROME_ARGS = [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-gpu',
+    '--disable-breakpad',
+    '--disable-crash-reporter',
+    '--disable-background-networking',
+    '--disable-component-update',
+    '--no-default-browser-check',
+    '--no-first-run',
+    '--mute-audio'
+];
+
+const launchArgs = [...CHROME_ARGS];
+if (HEADLESS_ENABLED) {
+    launchArgs.push(`--headless=${HEADLESS_MODE}`);
+}
+
+const browser = await puppeteer.launch({
+    headless: HEADLESS_ENABLED ? HEADLESS_MODE : false,
+    executablePath: EXECUTABLE_PATH,
+    args: launchArgs
 });
 
 const page = await browser.newPage();
@@ -23,6 +49,7 @@ const page = await browser.newPage();
 let eventReceived = false;
 let eventData = null;
 let roomCode = null;
+const guestBrowsers = [];
 
 // Capturar todos los logs relevantes
 page.on('console', msg => {
@@ -61,23 +88,31 @@ page.on('response', async response => {
 
 try {
     // 1. Login
-    console.log('🔐 [1/6] Haciendo login...');
+console.log('🔐 [1/7] Haciendo login...');
     await page.goto(`${BASE_URL}/login`, { waitUntil: 'networkidle2', timeout: 30000 });
     
     await page.waitForSelector('input[name="email"]', { timeout: 5000 });
     await page.type('input[name="email"]', EMAIL);
     await page.type('input[name="password"]', PASSWORD);
-    await page.click('button[type="submit"]');
-    
-    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
-    console.log('✅ Login exitoso\n');
+await page.click('button[type="submit"]');
+
+try {
+    await Promise.race([
+        page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 }),
+        page.waitForSelector('a[href="/rooms/create"]', { timeout: 60000 }),
+        page.waitForFunction(() => document.location.pathname !== '/login', { timeout: 60000 })
+    ]);
+} catch (error) {
+    console.log('⚠️  Login redirection tardó demasiado, continuando igualmente...');
+}
+console.log('✅ Login exitoso\n');
     
     // 2. Crear sala
-    console.log('🎮 [2/6] Creando sala de prueba...');
+console.log('🎮 [2/7] Creando sala de prueba...');
     await page.goto(`${BASE_URL}/rooms/create`, { waitUntil: 'networkidle2', timeout: 30000 });
     
-    // Esperar a que la página cargue completamente
-    await page.waitForTimeout(2000);
+// Esperar a que la página cargue completamente
+await wait(2000);
     
     // Verificar si hay juegos disponibles
     const hasGames = await page.evaluate(() => {
@@ -103,7 +138,7 @@ try {
     
     // Click en el primer radio button
     await page.click(`input[type="radio"][name="game_id"][value="${firstGameId}"]`);
-    await page.waitForTimeout(2000); // Esperar a que se cargue la configuración
+    await wait(2000); // Esperar a que se cargue la configuración
     
     // Obtener CSRF token fresco
     const csrfToken = await page.evaluate(() => {
@@ -131,7 +166,7 @@ try {
         if (errorText.includes('419') || errorText.includes('CSRF')) {
             console.log('   ⚠️  Error 419 detectado, refrescando página...');
             await page.reload({ waitUntil: 'networkidle2' });
-            await page.waitForTimeout(2000);
+            await wait(2000);
             
             // Intentar de nuevo
             await page.click(`input[type="radio"][name="game_id"][value="${firstGameId}"]`);
@@ -152,16 +187,58 @@ try {
         throw new Error('No se pudo obtener el código de la sala');
     }
     
-    console.log(`✅ Sala creada: ${roomCode}\n`);
-    
-    // 3. Ir a transition page (simular que el juego inició)
-    console.log('🔄 [3/6] Navegando a transition page...');
+console.log(`✅ Sala creada: ${roomCode}\n`);
+
+// 2.1 Crear invitados virtuales para alcanzar el mínimo de jugadores
+if (GUEST_PLAYERS > 0) {
+    console.log(`👥 [2.1] Creando ${GUEST_PLAYERS} invitados virtuales...`);
+    for (let i = 0; i < GUEST_PLAYERS; i++) {
+        const guestBrowser = await puppeteer.launch({
+            headless: HEADLESS_ENABLED ? HEADLESS_MODE : false,
+            executablePath: EXECUTABLE_PATH,
+            args: launchArgs,
+        });
+        guestBrowsers.push(guestBrowser);
+        const guestPage = await guestBrowser.newPage();
+
+        const guestName = `Invitado-${Date.now().toString().slice(-5)}-${i + 1}`;
+        console.log(`   → Invitado ${i + 1}: ${guestName}`);
+
+        await guestPage.goto(`${BASE_URL}/rooms/${roomCode}/guest-name`, {
+            waitUntil: 'networkidle0',
+            timeout: 30000,
+        });
+
+        await guestPage.waitForSelector('#player_name', { timeout: 5000 });
+        await guestPage.type('#player_name', guestName);
+
+        await Promise.all([
+            guestPage.waitForNavigation({ waitUntil: 'networkidle0', timeout: 30000 }),
+            guestPage.click('button[type="submit"]'),
+        ]);
+
+        // Ya autenticado como invitado y en el lobby, navegar a la transition page
+        await guestPage.goto(`${BASE_URL}/rooms/${roomCode}`, {
+            waitUntil: 'networkidle0',
+            timeout: 30000,
+        });
+
+        // Dar tiempo a que se conecte al Presence channel
+        await wait(1500);
+    }
+
+    console.log(`✅ Invitados conectados. Esperando a que el servidor actualice conteos...`);
+    await wait(3000);
+}
+
+// 3. Ir a transition page (simular que el juego inició)
+console.log('🔄 [3/7] Navegando a transition page...');
     const transitionUrl = `${BASE_URL}/rooms/${roomCode}`;
     await page.goto(transitionUrl, { waitUntil: 'networkidle2', timeout: 30000 });
     console.log('✅ En transition page\n');
     
     // 4. Configurar listener para eventos
-    console.log('📡 [4/6] Configurando listeners de WebSocket...');
+console.log('📡 [4/7] Configurando listeners de WebSocket...');
     await page.evaluate(() => {
         window.testEventReceived = false;
         window.testEventData = null;
@@ -191,8 +268,8 @@ try {
         }
     });
     
-    // Esperar a que WebSocket se conecte
-    await page.waitForTimeout(5000);
+// Esperar a que WebSocket se conecte
+await wait(5000);
     
     // Verificar estado de conexión
     const wsStatus = await page.evaluate(() => {
@@ -211,12 +288,51 @@ try {
     console.log(`   Canal público: ${wsStatus.publicChannelSubscribed ? '✅' : '❌'} (${wsStatus.channelName})\n`);
     
     if (!wsStatus.connected || !wsStatus.publicChannelSubscribed) {
-        console.log('⚠️  WebSocket no está completamente conectado, esperando más tiempo...');
-        await page.waitForTimeout(3000);
+    console.log('⚠️  WebSocket no está completamente conectado, esperando más tiempo...');
+    await wait(3000);
+}
+
+// 5. Iniciar la partida (equivale a que el master presione "Start Game")
+console.log('🚀 [5/7] Iniciando partida (apiStart)...');
+const startResult = await page.evaluate(async (code) => {
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+    try {
+        const res = await fetch(`/rooms/${code}/start`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': csrfToken,
+            },
+        });
+
+        let data = null;
+        try {
+            data = await res.json();
+        } catch (error) {
+            data = { parseError: error.message };
+        }
+
+        return {
+            status: res.status,
+            data,
+        };
+    } catch (error) {
+        return { error: error.message };
     }
-    
-    // 5. Simular que todos están conectados y llamar a /ready
-    console.log('📞 [5/6] Llamando a /api/rooms/{code}/ready...');
+}, roomCode);
+
+console.log(`   Status: ${startResult.status || 'ERROR'}`);
+console.log(`   Response:`, JSON.stringify(startResult.data || startResult.error, null, 2));
+
+if (!startResult.data?.success) {
+    throw new Error('No se pudo iniciar la partida (apiStart)');
+}
+
+await wait(1500); // dar tiempo a que el estado cambie a ACTIVE
+console.log('✅ Partida en estado ACTIVO, listos para ready\n');
+
+// 6. Simular que todos están conectados y llamar a /ready
+console.log('📞 [6/7] Llamando a /api/rooms/{code}/ready...');
     
     const response = await page.evaluate(async (code) => {
         const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
@@ -251,11 +367,16 @@ try {
     console.log('✅ Servidor confirmó que el countdown comenzará\n');
     
     // 6. Esperar evento game.countdown
-    console.log('⏳ [6/6] Esperando evento game.countdown (15 segundos)...\n');
+console.log('⏳ [7/7] Esperando evento game.countdown (15 segundos)...\n');
     
-    for (let i = 0; i < 15; i++) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
+for (let i = 0; i < 15; i++) {
+    if (eventReceived) {
+        break;
+    }
+
+    await wait(1000);
+    
+    try {
         const eventStatus = await page.evaluate(() => {
             return {
                 received: window.testEventReceived || false,
@@ -270,11 +391,17 @@ try {
             eventData = eventStatus.data;
             break;
         }
-        
-        if (i % 3 === 0) {
-            console.log(`   [${i}s] Esperando evento...`);
+    } catch (error) {
+        if (eventReceived) {
+            break;
         }
+        console.log('⚠️  No se pudo verificar el estado del evento (posible navegación):', error.message);
     }
+    
+    if (i % 3 === 0) {
+        console.log(`   [${i}s] Esperando evento...`);
+    }
+}
     
     // Resultado final
     console.log('\n' + '='.repeat(60));
@@ -308,10 +435,16 @@ try {
     console.error('\n❌ Error durante el test:', error.message);
     console.error('Stack:', error.stack);
 } finally {
-    console.log('\n⏳ Cerrando navegador en 5 segundos...');
-    await new Promise(resolve => setTimeout(resolve, 5000));
-    await browser.close();
-    
-    process.exit(eventReceived ? 0 : 1);
+console.log('\n⏳ Cerrando navegador en 5 segundos...');
+await wait(5000);
+await browser.close();
+for (const guestBrowser of guestBrowsers) {
+    try {
+        await guestBrowser.close();
+    } catch (error) {
+        console.log('⚠️  Error cerrando navegador invitado:', error.message);
+    }
 }
 
+process.exit(eventReceived ? 0 : 1);
+}

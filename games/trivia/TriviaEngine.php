@@ -450,7 +450,7 @@ class TriviaEngine extends BaseGameEngine
 
     protected function getGameConfig(): array
     {
-        $configPath = base_path('games/trivia/config.json');
+        $configPath = $this->gameResourcePath('config.json');
         if (!file_exists($configPath)) {
             return $this->getDefaultConfig();
         }
@@ -480,7 +480,7 @@ class TriviaEngine extends BaseGameEngine
      */
     private function selectQuestion(GameMatch $match, string $selectionMode, string $category): array
     {
-        $path = base_path('games/trivia/assets/questions.json');
+        $path = $this->gameResourcePath('assets/questions.json');
         if (!file_exists($path)) {
             return [
                 '¿Capital de Francia?',
@@ -586,5 +586,4 @@ class TriviaEngine extends BaseGameEngine
         return max(0, $basePoints + $bonus);
     }
 }
-
 

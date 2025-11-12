@@ -43,7 +43,7 @@ class PictionaryEngine extends BaseGameEngine
         Log::info("[Pictionary] Initializing - FASE 1", ['match_id' => $match->id]);
 
         // Cargar palabras desde words.json
-        $wordsPath = base_path('games/pictionary/words.json');
+        $wordsPath = $this->gameResourcePath('words.json');
         $wordsData = json_decode(file_get_contents($wordsPath), true);
 
         // Cargar config.json para obtener configuraciones
